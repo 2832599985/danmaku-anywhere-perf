@@ -6,13 +6,13 @@ import { useEventCallback } from '@mui/material'
 import { useMutation } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Logger } from '@/common/Logger'
 import { useToast } from '@/common/components/Toast/toastStore'
 import type { DanmakuFetchDto, MacCMSFetchData } from '@/common/danmaku/dto'
 import { DanmakuSourceType } from '@/common/danmaku/enums'
 import { useFetchDanmaku } from '@/common/danmaku/queries/useFetchDanmaku'
 import { useFetchGenericDanmaku } from '@/common/danmaku/queries/useFetchGenericDanmaku'
 import { episodeToString, isProvider } from '@/common/danmaku/utils'
+import { Logger } from '@/common/Logger'
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
 import { playerRpcClient } from '@/common/rpcClient/background/client'
 import { PerfTimer } from '@/common/utils/perf'
@@ -50,6 +50,7 @@ const useMountDanmaku = () => {
               return acc
             }, [])
 
+      perfRef.current?.mark('mount_comments_ready')
       const res = await playerRpcClient.player['relay:command:mount']({
         frameId: mustGetActiveFrame().frameId,
         data: comments,
@@ -127,27 +128,19 @@ export const useLoadDanmaku = () => {
 
   const loadMutation = useMutation({
     mutationFn: async (data: DanmakuFetchDto) => {
-      return fetchMutation.mutateAsync(data, {
-        onSuccess: (cache) => {
-          mountDanmaku([cache])
-        },
-        onError: (err) => {
-          toast.error(err.message)
-        },
-      })
+      const cache = await fetchMutation.mutateAsync(data)
+      // IMPORTANT: await mount so the UI stays disabled until the heavy mount RPC finishes.
+      // This avoids users accidentally triggering multiple concurrent downloads/mounts, which can cause jank.
+      await mountDanmaku([cache])
+      return cache
     },
   })
 
   const loadGenericMutation = useMutation({
     mutationFn: async (data: MacCMSFetchData) => {
-      return fetchGenericMutation.mutateAsync(data, {
-        onSuccess: (cache) => {
-          mountDanmaku([cache])
-        },
-        onError: (err) => {
-          toast.error(err.message)
-        },
-      })
+      const cache = await fetchGenericMutation.mutateAsync(data)
+      await mountDanmaku([cache])
+      return cache
     },
   })
 

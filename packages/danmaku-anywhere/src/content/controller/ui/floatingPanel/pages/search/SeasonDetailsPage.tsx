@@ -28,6 +28,8 @@ export const SeasonDetailsPage = ({
   onGoBack,
   provider,
 }: SeasonDetailsPageProps) => {
+  const { loadMutation, loadGenericMutation } = useLoadDanmaku()
+
   return (
     <TabLayout>
       <TabToolbar showBackButton onGoBack={onGoBack} title={season.title} />
@@ -38,8 +40,6 @@ export const SeasonDetailsPage = ({
           <EpisodeSearchList
             season={season}
             renderEpisode={(data) => {
-              const { loadMutation } = useLoadDanmaku()
-
               const handleFetchDanmaku = async (
                 meta: WithSeason<EpisodeMeta>
               ) => {
@@ -52,17 +52,25 @@ export const SeasonDetailsPage = ({
                 })
               }
 
+              const isLoadingThisEpisode =
+                loadMutation.isPending &&
+                loadMutation.variables?.type === 'by-meta' &&
+                loadMutation.variables.meta.indexedId ===
+                  data.episode.indexedId &&
+                loadMutation.variables.meta.provider ===
+                  data.episode.provider &&
+                loadMutation.variables.meta.seasonId === data.episode.seasonId
+
               return (
                 <BaseEpisodeListItem
                   episode={data.danmaku ?? data.episode}
-                  isLoading={loadMutation.isPending || data.isLoading}
+                  isLoading={isLoadingThisEpisode || data.isLoading}
                   onClick={handleFetchDanmaku}
+                  disabled={loadMutation.isPending}
                 />
               )
             }}
             renderCustomEpisode={(data) => {
-              const { loadGenericMutation } = useLoadDanmaku()
-
               assertProviderConfigImpl(provider, DanmakuSourceType.MacCMS)
 
               return (
@@ -75,6 +83,7 @@ export const SeasonDetailsPage = ({
                     })
                   }
                   isLoading={loadGenericMutation.isPending}
+                  disabled={loadGenericMutation.isPending}
                   danmaku={loadGenericMutation.data}
                 />
               )
