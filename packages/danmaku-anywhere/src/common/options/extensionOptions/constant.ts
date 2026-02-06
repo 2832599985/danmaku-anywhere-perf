@@ -32,6 +32,7 @@ export const defaultExtensionOptions: ExtensionOptions = {
   // danmakuSources removed - now managed in separate provider config storage
   playerOptions: {
     showSkipButton: true,
+    autoSkipOp: false,
     showDanmakuTimeline: true,
   },
   theme: {

@@ -102,6 +102,20 @@ const playerSettings: SettingConfig<ExtensionOptions>[] = [
     }),
   },
   {
+    id: 'toggle.player.autoSkipOp',
+    label: () =>
+      i18n.t('optionsPage.player.autoSkipOp', 'Auto skip opening (OP)'),
+    category: 'player',
+    type: 'toggle',
+    getValue: (options) => options.playerOptions.autoSkipOp,
+    createUpdate: (options, newValue) => ({
+      playerOptions: {
+        ...options.playerOptions,
+        autoSkipOp: newValue,
+      },
+    }),
+  },
+  {
     id: 'toggle.player.showDanmakuTimeline',
     label: () =>
       i18n.t('optionsPage.player.showDanmakuTimeline', 'Show danmaku density'),

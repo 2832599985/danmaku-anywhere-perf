@@ -427,7 +427,8 @@
     },
     "player": {
       "showDanmakuTimeline": "Show danmaku density",
-      "showSkipButton": "Show skip button (OP/ED)"
+      "showSkipButton": "Show skip button (OP/ED)",
+      "autoSkipOp": "Auto skip opening (OP)"
     },
     "restrictInitiatorDomain": "Limit DNR initiator domains to this extension",
     "retentionPolicy": {

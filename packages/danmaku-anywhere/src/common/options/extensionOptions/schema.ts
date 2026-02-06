@@ -50,6 +50,7 @@ export const danmakuSourcesSchema = z.object({
 
 export const playerOptionsSchema = z.object({
   showSkipButton: z.boolean(),
+  autoSkipOp: z.boolean(),
   showDanmakuTimeline: z.boolean(),
 })
 
