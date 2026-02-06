@@ -39,7 +39,10 @@ export const TitleMappingDetails = ({ map }: TitleMappingDetailsProps) => {
         map.withMapping(providerConfigId, newValue.id)
       )
     } else {
-      await mutations.add.mutateAsync(map.withoutProvider(providerConfigId))
+      await mutations.removeProvider.mutateAsync({
+        key: map.key,
+        providerConfigId,
+      })
     }
   }
 

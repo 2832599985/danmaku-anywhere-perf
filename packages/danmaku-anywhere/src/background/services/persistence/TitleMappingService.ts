@@ -37,6 +37,28 @@ export class TitleMappingService {
     await this.db.seasonMap.where({ key }).delete()
   }
 
+  async removeProvider(key: string, providerConfigId: string) {
+    const snapshot = await this.db.seasonMap.get({ key })
+    if (!snapshot) {
+      return
+    }
+
+    const existing = SeasonMap.fromSnapshot(snapshot)
+    const updated = existing.withoutProvider(providerConfigId)
+
+    this.logger.debug('Removing title mapping provider:', {
+      key,
+      providerConfigId,
+    })
+
+    if (updated.isEmpty()) {
+      await this.remove(key)
+      return
+    }
+
+    await this.db.seasonMap.put(updated.toSnapshot(), key)
+  }
+
   async get(key: string) {
     const snapshot = await this.db.seasonMap.get({ key })
     return snapshot ? SeasonMap.fromSnapshot(snapshot) : undefined
