@@ -3,7 +3,7 @@ import type { ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDialog } from '@/common/components/Dialog/dialogStore'
 import { useDeleteEpisode } from '@/common/danmaku/queries/useDeleteEpisode'
-import { useFetchDanmaku } from '@/common/danmaku/queries/useFetchDanmaku'
+import { useFetchDanmakuLite } from '@/common/danmaku/queries/useFetchDanmakuLite'
 import { isNotCustom } from '@/common/danmaku/utils'
 import { useExportDanmaku } from '@/popup/hooks/useExportDanmaku'
 import { useExportXml } from '@/popup/hooks/useExportXml'
@@ -20,7 +20,7 @@ export const EpisodeContextMenuContainer = ({
   itemId,
 }: EpisodeContextMenuContainerProps): ReactElement => {
   const { t } = useTranslation()
-  const { mutateAsync: load, isPending } = useFetchDanmaku()
+  const { mutateAsync: load, isPending } = useFetchDanmakuLite()
   const exportDanmaku = useExportXml()
   const exportBackup = useExportDanmaku()
   const deleteDanmakuMutation = useDeleteEpisode()

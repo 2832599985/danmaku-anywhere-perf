@@ -6,15 +6,13 @@ import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { getTrackingService } from '@/common/telemetry/getTrackingService'
 
 /**
- * Fetches danmaku from cache or server
- * If not found in cache, fetches from server and saves to cache
+ * Fetches danmaku from cache or server and saves to cache.
  *
- * The background service extracts the providerInstanceId from the episode metadata
- * to determine which provider config to use.
- *
- * This is a mutation because it updates the cache
+ * Compared to `useFetchDanmaku`, this only returns lite metadata (no `comments`),
+ * which avoids freezing/janky UI when large comment arrays are transferred across
+ * the extension messaging channel (common in popup pages).
  */
-export const useFetchDanmaku = () => {
+export const useFetchDanmakuLite = () => {
   const queryClient = useQueryClient()
   const toast = useToast.use.toast()
 
@@ -22,18 +20,15 @@ export const useFetchDanmaku = () => {
     mutationKey: episodeQueryKeys.all(),
     mutationFn: async (data: DanmakuFetchDto) => {
       getTrackingService().track('fetchDanmaku', data)
-      const res = await chromeRpcClient.episodeFetch(data)
+      const res = await chromeRpcClient.episodeFetchLite(data)
       return res.data
     },
     onSuccess: (episode, input) => {
-      // Refresh season list caches (e.g. local episode count) without invalidating every "season.*" query.
-      // Invalidating all season queries can cause UI jank in search pages that depend on `seasonQueryKeys.episodes()`.
       void queryClient.invalidateQueries({
         queryKey: seasonQueryKeys.all(),
         exact: true,
       })
 
-      // Refresh only the caches that are affected by this episode download/update.
       const byMetaFilter = {
         provider: input.meta.provider,
         indexedId: input.meta.indexedId,

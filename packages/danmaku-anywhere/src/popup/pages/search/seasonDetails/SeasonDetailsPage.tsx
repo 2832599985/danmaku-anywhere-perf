@@ -11,7 +11,7 @@ import { MacCmsEpisodeListItem } from '@/common/components/EpisodeList/MacCmsEpi
 import { ErrorMessage } from '@/common/components/ErrorMessage'
 import { TabLayout } from '@/common/components/layout/TabLayout'
 import { TabToolbar } from '@/common/components/layout/TabToolbar'
-import { useFetchDanmaku } from '@/common/danmaku/queries/useFetchDanmaku'
+import { useFetchDanmakuLite } from '@/common/danmaku/queries/useFetchDanmakuLite'
 import { useFetchGenericDanmaku } from '@/common/danmaku/queries/useFetchGenericDanmaku'
 import { assertProviderConfigImpl } from '@/common/options/providerConfig/utils'
 import { useGoBack } from '@/popup/hooks/useGoBack'
@@ -35,7 +35,7 @@ export const SeasonDetailsPage = () => {
             season={season}
             renderEpisode={(data) => {
               // Calling hooks inside a render prop, but since the list never changes this shouldn't violate the rule of hooks
-              const { mutateAsync: load, isPending } = useFetchDanmaku()
+              const { mutateAsync: load, isPending } = useFetchDanmakuLite()
 
               const handleFetchDanmaku = async (
                 meta: WithSeason<EpisodeMeta>

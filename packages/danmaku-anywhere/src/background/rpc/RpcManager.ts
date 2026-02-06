@@ -157,6 +157,13 @@ export class RpcManager {
           void invalidateContentScriptData(sender.tab?.id)
           return result
         },
+        episodeFetchLite: async (data, sender) => {
+          const result = await this.providerService.getDanmaku(data)
+          void invalidateContentScriptData(sender.tab?.id)
+
+          const { comments: _comments, ...lite } = result
+          return lite
+        },
         episodePreloadNext: async (data, sender) => {
           return await this.providerService.preloadNextEpisode(data)
         },

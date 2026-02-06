@@ -91,6 +91,9 @@ export type BackgroundMethods = {
   episodeFilterLite: RPCDef<EpisodeQueryFilter, WithSeason<EpisodeLite>[]>
   episodeFilter: RPCDef<EpisodeQueryFilter, WithSeason<Episode>[]>
   episodeFetch: RPCDef<DanmakuFetchDto, WithSeason<Episode>>
+  // Fetches danmaku and saves to cache, but only returns lite metadata (no comments).
+  // This avoids transferring large comment arrays over the extension messaging channel.
+  episodeFetchLite: RPCDef<DanmakuFetchDto, WithSeason<EpisodeLite>>
   episodePreloadNext: RPCDef<DanmakuFetchDto, void>
   episodeDelete: RPCDef<EpisodeQueryFilter, void>
   episodeFilterCustom: RPCDef<CustomEpisodeQueryFilter, CustomEpisode[]>
