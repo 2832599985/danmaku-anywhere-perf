@@ -248,6 +248,21 @@ export class ExtensionOptionsService implements IStoreService {
           })
         },
       })
+      .version(23, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions) {
+              draft.playerOptions = {
+                showSkipButton: true,
+                autoSkipOp: false,
+                showDanmakuTimeline: true,
+              }
+              return
+            }
+            draft.playerOptions.autoSkipOp = false
+          })
+        },
+      })
   }
 
   async get() {
