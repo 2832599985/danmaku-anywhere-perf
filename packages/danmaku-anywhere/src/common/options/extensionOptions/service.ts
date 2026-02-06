@@ -234,7 +234,6 @@ export class ExtensionOptionsService implements IStoreService {
               Logger.error(error)
             }
 
-            // biome-ignore lint/correctness/noUnusedVariables: drop deprecated fields
             const { danmakuSources, ...rest } = data
             return rest
           }
