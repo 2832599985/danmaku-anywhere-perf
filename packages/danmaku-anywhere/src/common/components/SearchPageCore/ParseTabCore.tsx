@@ -18,6 +18,7 @@ import {
   localizedDanmakuSourceType,
 } from '@/common/danmaku/enums'
 import { useFetchDanmaku } from '@/common/danmaku/queries/useFetchDanmaku'
+import { useFetchDanmakuLite } from '@/common/danmaku/queries/useFetchDanmakuLite'
 import { seasonQueryKeys } from '@/common/queries/queryKeys'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { getTrackingService } from '@/common/telemetry/getTrackingService'
@@ -89,25 +90,33 @@ export const ParseTabCore = ({ onImportSuccess }: ParseTabCoreProps) => {
     select: (res) => res.data,
   })
 
-  const mutation = useFetchDanmaku()
+  // In popup pages we only need to import into extension storage; returning huge `comments`
+  // to the UI can freeze/jank. Only use the full response when the caller needs to mount
+  // the comments to a player immediately (onImportSuccess is provided in controller UI).
+  const fullMutation = useFetchDanmaku()
+  const liteMutation = useFetchDanmakuLite()
+  const isImporting = onImportSuccess
+    ? fullMutation.isPending
+    : liteMutation.isPending
 
   const handleFetchDanmaku = () => {
     if (!query.data) return
 
-    mutation.mutate(
-      {
-        type: 'by-meta',
-        meta: query.data,
-        options: {
-          forceUpdate: true,
-        },
+    const input = {
+      type: 'by-meta' as const,
+      meta: query.data,
+      options: {
+        forceUpdate: true,
       },
-      {
+    }
+
+    if (onImportSuccess) {
+      fullMutation.mutate(input, {
         onSuccess: (data) => {
           toast.success(
             t('searchPage.parse.alert.importSuccess', 'Import successful')
           )
-          onImportSuccess?.(data)
+          onImportSuccess(data)
         },
         onError: () => {
           toast.error(
@@ -120,8 +129,28 @@ export const ParseTabCore = ({ onImportSuccess }: ParseTabCoreProps) => {
             )
           )
         },
-      }
-    )
+      })
+      return
+    }
+
+    liteMutation.mutate(input, {
+      onSuccess: () => {
+        toast.success(
+          t('searchPage.parse.alert.importSuccess', 'Import successful')
+        )
+      },
+      onError: () => {
+        toast.error(
+          t(
+            'danmaku.alert.fetchError',
+            'Failed to fetch danmaku: {{message}}',
+            {
+              message: query.data.title,
+            }
+          )
+        )
+      },
+    })
   }
 
   useEffect(() => {
@@ -178,7 +207,7 @@ export const ParseTabCore = ({ onImportSuccess }: ParseTabCoreProps) => {
             type="submit"
             loading={query.isLoading}
             variant="contained"
-            disabled={!isValid || mutation.isPending}
+            disabled={!isValid || isImporting}
           >
             {t('searchPage.parse.parse', 'Parse')}
           </Button>
@@ -204,7 +233,7 @@ export const ParseTabCore = ({ onImportSuccess }: ParseTabCoreProps) => {
                 mt: 2,
               }}
               onClick={handleFetchDanmaku}
-              loading={mutation.isPending}
+              loading={isImporting}
               variant="contained"
             >
               {t('searchPage.parse.import', 'Import Danmaku')}
