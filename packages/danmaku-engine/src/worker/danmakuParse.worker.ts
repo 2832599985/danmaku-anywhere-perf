@@ -21,10 +21,15 @@ const parseComments = (
   let index = 0
   while (index < comments.length) {
     const end = Math.min(index + safeChunkSize, comments.length)
-    const parsed: ParsedComment[] = []
+    const parsed: Array<ParsedComment | undefined> = []
 
     for (let i = index; i < end; i += 1) {
-      parsed.push(transformComment(comments[i], 0))
+      try {
+        parsed.push(transformComment(comments[i], 0))
+      } catch {
+        // Keep holes instead of crashing the whole worker.
+        parsed.push(undefined)
+      }
     }
 
     const chunkMessage: ParseChunkMessage = {

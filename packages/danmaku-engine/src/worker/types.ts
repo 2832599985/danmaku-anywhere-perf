@@ -12,7 +12,7 @@ export type ParseChunkMessage = {
   type: 'chunk'
   taskId: number
   startIndex: number
-  parsed: ParsedComment[]
+  parsed: Array<ParsedComment | undefined>
 }
 
 export type ParseDoneMessage = {

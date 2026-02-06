@@ -9,6 +9,6 @@
     "allowJs": false
   },
   "include": ["./src", "./src/**/*.json"],
-  "exclude": ["**/*.test.ts"],
+  "exclude": ["**/*.test.ts", "**/*.bench.ts", "**/*.bench.tsx"],
   "references": []
 }

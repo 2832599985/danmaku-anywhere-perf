@@ -17,6 +17,7 @@ import { DanmakuLayoutService } from '@/content/player/danmakuLayout/DanmakuLayo
 import { RectObserver } from '@/content/player/danmakuManager/RectObserver'
 import { DanmakuDebugOverlayService } from '@/content/player/debugOverlay/DanmakuDebugOverlay.service'
 import { VideoNodeObserverService } from '@/content/player/videoObserver/VideoNodeObserver.service'
+import { createRemotePreparseTransport } from './remotePreparseTransport'
 
 @injectable('Singleton')
 export class DanmakuManagerService {
@@ -64,6 +65,9 @@ export class DanmakuManagerService {
       wrapper: layoutManager.wrapper,
       container: layoutManager.container,
     }
+
+    // If the page CSP blocks creating extension URL workers, we can stream preparse from background.
+    this.renderer.setRemotePreparseTransport(createRemotePreparseTransport())
 
     this.debugOverlayService.attach(this.renderer)
 

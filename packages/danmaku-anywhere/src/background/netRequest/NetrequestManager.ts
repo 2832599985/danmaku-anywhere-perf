@@ -36,30 +36,51 @@ enum ResourceType {
 
 const selfDomain = getSelfDomain()
 
-const rules: chrome.declarativeNetRequest.Rule[] = [
-  {
-    id: 3, // keep old id
-    action: {
-      type: RuleActionType.MODIFY_HEADERS,
-      requestHeaders: [
+const proxyEnv = import.meta.env as unknown as {
+  VITE_PROXY_URL?: unknown
+  VITE_PROXY_ORIGIN?: unknown
+}
+
+const proxyUrl =
+  typeof proxyEnv.VITE_PROXY_URL === 'string' &&
+  proxyEnv.VITE_PROXY_URL.trim().length > 0
+    ? proxyEnv.VITE_PROXY_URL.trim()
+    : null
+
+const proxyOrigin =
+  typeof proxyEnv.VITE_PROXY_ORIGIN === 'string' &&
+  proxyEnv.VITE_PROXY_ORIGIN.trim().length > 0
+    ? proxyEnv.VITE_PROXY_ORIGIN.trim()
+    : null
+
+// VITE_PROXY_URL/VITE_PROXY_ORIGIN are optional. When unset, do not install proxy header rules.
+const rules: chrome.declarativeNetRequest.Rule[] =
+  proxyUrl && proxyOrigin
+    ? [
         {
-          header: 'Origin',
-          operation: HeaderOperation.SET,
-          value: import.meta.env.VITE_PROXY_ORIGIN,
+          id: 3, // keep old id
+          action: {
+            type: RuleActionType.MODIFY_HEADERS,
+            requestHeaders: [
+              {
+                header: 'Origin',
+                operation: HeaderOperation.SET,
+                value: proxyOrigin,
+              },
+              {
+                header: 'Referer',
+                operation: HeaderOperation.SET,
+                value: selfDomain,
+              },
+            ],
+          },
+          condition: {
+            urlFilter: `|${proxyUrl}`,
+            resourceTypes: [ResourceType.XMLHTTPREQUEST],
+          },
         },
-        {
-          header: 'Referer',
-          operation: HeaderOperation.SET,
-          value: selfDomain,
-        },
-      ],
-    },
-    condition: {
-      urlFilter: `|${import.meta.env.VITE_PROXY_URL}`,
-      resourceTypes: [ResourceType.XMLHTTPREQUEST],
-    },
-  },
-]
+      ]
+    : []
 
 @injectable('Singleton')
 export class NetRequestManager {

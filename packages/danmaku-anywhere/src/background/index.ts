@@ -13,8 +13,16 @@ import { setLogService } from './backgroundLogger'
 import { container } from './ioc'
 import { LogService } from './services/Logging/Log.service'
 
+// VITE_PROXY_URL is optional. If it's unset, keep the provider's default API root.
+const proxyUrl = (import.meta.env as unknown as { VITE_PROXY_URL?: unknown })
+  .VITE_PROXY_URL
+const baseUrl =
+  typeof proxyUrl === 'string' && proxyUrl.trim().length > 0
+    ? proxyUrl.trim()
+    : undefined
+
 configureApiStore({
-  baseUrl: import.meta.env.VITE_PROXY_URL,
+  ...(baseUrl ? { baseUrl } : {}),
   daVersion: EXTENSION_VERSION,
 })
 

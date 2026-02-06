@@ -60,6 +60,42 @@ export type PerfReporter = (
   meta?: Record<string, unknown>
 ) => void
 
+export type RemotePreparseRequest = {
+  taskId: number
+  comments: CommentEntity[]
+  chunkSize: number
+}
+
+export type RemotePreparseChunk = {
+  type: 'chunk'
+  taskId: number
+  startIndex: number
+  parsed: Array<ParsedComment | undefined>
+}
+
+export type RemotePreparseDone = {
+  type: 'done'
+  taskId: number
+  totalMs: number
+}
+
+export type RemotePreparseHandlers = {
+  onChunk: (msg: RemotePreparseChunk) => void
+  onDone: (msg: RemotePreparseDone) => void
+  onError: (error: unknown) => void
+}
+
+export type RemotePreparseJob = {
+  cancel: () => void
+}
+
+export type RemotePreparseTransport = {
+  start: (
+    req: RemotePreparseRequest,
+    handlers: RemotePreparseHandlers
+  ) => RemotePreparseJob
+}
+
 export class DanmakuRenderer {
   manager?: Manager<ParsedComment>
   container?: HTMLElement
@@ -72,6 +108,9 @@ export class DanmakuRenderer {
   private idleHandle: number | null = null
   private visibilityHandle: number | null = null
   private worker?: Worker
+  private workerDisabledReason: string | null = null
+  private remotePreparseTransport?: RemotePreparseTransport
+  private remoteJob?: RemotePreparseJob
 
   constructor(
     public render: (node: HTMLElement, renderProps: DanmakuRenderProps) => void
@@ -79,6 +118,10 @@ export class DanmakuRenderer {
 
   setPerfReporter(reporter?: PerfReporter) {
     this.perfReporter = reporter
+  }
+
+  setRemotePreparseTransport(transport?: RemotePreparseTransport) {
+    this.remotePreparseTransport = transport
   }
 
   create(
@@ -102,8 +145,7 @@ export class DanmakuRenderer {
     let isSorted = true
     let lastTime = Number.NEGATIVE_INFINITY
 
-    for (let i = 0; i < comments.length; i += 1) {
-      const comment = comments[i]
+    for (const comment of comments) {
       const time = parseCommentEntityTime(comment.p)
       if (!Number.isFinite(time)) {
         continue
@@ -307,7 +349,10 @@ export class DanmakuRenderer {
 
     const workerStarted = this.startWorkerParse(timedComments, taskId)
     if (!workerStarted) {
-      this.scheduleIdlePreparse(timedComments, taskId)
+      const remoteStarted = this.startRemoteParse(timedComments, taskId)
+      if (!remoteStarted) {
+        this.scheduleIdlePreparse(timedComments, taskId)
+      }
     }
   }
 
@@ -321,17 +366,34 @@ export class DanmakuRenderer {
     if (typeof Worker === 'undefined') {
       return false
     }
+    if (this.workerDisabledReason) {
+      return false
+    }
 
     this.terminateWorker()
-    const worker = new Worker(
-      new URL('./worker/danmakuParse.worker.ts', import.meta.url),
-      { type: 'module' }
-    )
+    let worker: Worker
+    try {
+      // Content scripts can be subject to the page's CSP. Some sites disallow creating
+      // workers from extension URLs (chrome-extension://...), which throws here.
+      worker = new Worker(
+        new URL('./worker/danmakuParse.worker.ts', import.meta.url),
+        { type: 'module' }
+      )
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : 'Worker construction failed'
+      this.workerDisabledReason = message
+      this.perfReporter?.('worker_unavailable', 0, { reason: message })
+      return false
+    }
+
     this.worker = worker
     const rawComments = timedComments.map((item) => item.raw)
     this.perfReporter?.('worker_start', 0, { count: rawComments.length })
 
-    worker.onmessage = (event: MessageEvent<ParseChunkMessage | ParseDoneMessage>) => {
+    worker.onmessage = (
+      event: MessageEvent<ParseChunkMessage | ParseDoneMessage>
+    ) => {
       const msg = event.data
       if (msg.taskId !== taskId) return
       if (msg.type === 'chunk') {
@@ -345,8 +407,13 @@ export class DanmakuRenderer {
     }
 
     worker.onerror = () => {
+      // Avoid retrying on subsequent mounts for sites that consistently block workers via CSP.
+      this.workerDisabledReason = 'worker error event'
       this.terminateWorker()
-      this.scheduleIdlePreparse(timedComments, taskId)
+      const remoteStarted = this.startRemoteParse(timedComments, taskId)
+      if (!remoteStarted) {
+        this.scheduleIdlePreparse(timedComments, taskId)
+      }
     }
 
     const request: ParseRequestMessage = {
@@ -359,10 +426,65 @@ export class DanmakuRenderer {
     return true
   }
 
-  private scheduleIdlePreparse(
+  private startRemoteParse(
     timedComments: TimedComment[],
     taskId: number
-  ) {
+  ): boolean {
+    if (!this.remotePreparseTransport) {
+      return false
+    }
+    if (timedComments.length < WORKER_THRESHOLD) {
+      return false
+    }
+
+    this.terminateRemote()
+
+    const rawComments = timedComments.map((item) => item.raw)
+    this.perfReporter?.('remote_parse_start', 0, { count: rawComments.length })
+
+    let job: RemotePreparseJob
+    try {
+      job = this.remotePreparseTransport.start(
+        {
+          taskId,
+          comments: rawComments,
+          chunkSize: WORKER_CHUNK_SIZE,
+        },
+        {
+          onChunk: (msg) => {
+            if (msg.taskId !== taskId) return
+            if (taskId !== this.preparseTaskId) return
+            applyParsedChunk(timedComments, msg.startIndex, msg.parsed)
+          },
+          onDone: (msg) => {
+            if (msg.taskId !== taskId) return
+            if (taskId !== this.preparseTaskId) return
+            this.perfReporter?.('remote_parse_done_ms', msg.totalMs, {
+              count: rawComments.length,
+            })
+            this.terminateRemote()
+          },
+          onError: (error) => {
+            if (taskId !== this.preparseTaskId) return
+            const message =
+              error instanceof Error ? error.message : String(error)
+            this.perfReporter?.('remote_parse_error', 0, { reason: message })
+            this.terminateRemote()
+            this.scheduleIdlePreparse(timedComments, taskId)
+          },
+        }
+      )
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      this.perfReporter?.('remote_parse_unavailable', 0, { reason: message })
+      return false
+    }
+
+    this.remoteJob = job
+    return true
+  }
+
+  private scheduleIdlePreparse(timedComments: TimedComment[], taskId: number) {
     const total = timedComments.length
     let index = 0
     let totalMs = 0
@@ -427,11 +549,18 @@ export class DanmakuRenderer {
       this.visibilityHandle = null
     }
     this.terminateWorker()
+    this.terminateRemote()
   }
 
   private terminateWorker() {
     if (!this.worker) return
     this.worker.terminate()
     this.worker = undefined
+  }
+
+  private terminateRemote() {
+    if (!this.remoteJob) return
+    this.remoteJob.cancel()
+    this.remoteJob = undefined
   }
 }

@@ -23,7 +23,7 @@ interface CreateRpcServerOptions<TContext extends RpcContext> {
   logger?: ILogger
   context?: TContext
   // Filter based on input, return false to ignore message
-  filter?: (method: string, input: any) => boolean
+  filter?: (method: string, input: unknown) => boolean
 }
 
 export const createRpcServer = <
@@ -105,7 +105,10 @@ export const createRpcServer = <
           }
         } catch (e: unknown) {
           const errorJson = serializeError(e)
-          logger.error('Error in RPC handler:', errorJson)
+          // Chrome's extension error UI stringifies non-Error values as "[object Object]".
+          // Log a readable message first, then keep structured detail for console/devtools.
+          logger.error('Error in RPC handler:', errorJson.message)
+          logger.debug('Error detail:', errorJson)
           return {
             state: 'errored',
             error: errorJson.message,
