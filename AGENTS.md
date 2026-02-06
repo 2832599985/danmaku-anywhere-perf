@@ -31,16 +31,19 @@ corepack pnpm -r --filter @mr-quin/danmaku-anywhere... install
 corepack pnpm -r --filter @mr-quin/danmaku-anywhere... build
 ```
 
-## 打包扩展（Windows）
-
-本仓库的 `pnpm -C packages/danmaku-anywhere package` 依赖 `zip` 命令；在 Windows 上可能不存在。
-
-优先用系统自带 `tar.exe` 直接生成 zip（不依赖额外安装）：
+## 测试（packages/danmaku-anywhere）
 
 ```powershell
-cd "d:\_Code\Html Css Javascript\danmaku-anywhere\danmaku-anywhere\packages\danmaku-anywhere"
-$version = (Get-Content .\package.json -Raw | ConvertFrom-Json).version
-New-Item -ItemType Directory -Force .\package | Out-Null
-tar.exe -a -c -f (".\\package\\danmaku-anywhere-$version-chrome.zip") -C .\build .
+corepack pnpm -C packages/danmaku-anywhere test
 ```
+
+## 打包扩展（Chrome/Edge）
+
+构建后执行：
+
+```powershell
+corepack pnpm -C packages/danmaku-anywhere package
+```
+
+产物在：`packages/danmaku-anywhere/package/`
 
