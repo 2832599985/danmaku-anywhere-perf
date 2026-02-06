@@ -92,10 +92,12 @@ const playerRpcServer = createRpcServer<PlayerRelayCommands>(
         managerService.getWrapper(),
         pipContainer
       )
-      const restoreVideo = moveElement(
-        managerService.video!,
-        pipWindow.document.body
-      )
+      const video = managerService.video
+      if (!video) {
+        Logger.warn('Failed to enter PiP: video element not found')
+        return
+      }
+      const restoreVideo = moveElement(video, pipWindow.document.body)
 
       delayResize()
 
@@ -155,8 +157,14 @@ danmakuOptionsService.get().then((options) => {
 
 const extensionOptionsService = uiContainer.get(ExtensionOptionsService)
 
-extensionOptionsService.get().then((options) => {
-  if (options.playerOptions.showSkipButton) {
+const applyPlayerOptions = (
+  options: Awaited<ReturnType<typeof extensionOptionsService.get>>
+) => {
+  videoSkipService.setPlayerOptions(options.playerOptions)
+  if (
+    options.playerOptions.showSkipButton ||
+    options.playerOptions.autoSkipOp
+  ) {
     videoSkipService.enable()
   } else {
     videoSkipService.disable()
@@ -166,20 +174,11 @@ extensionOptionsService.get().then((options) => {
   } else {
     danmakuDensityService.disable()
   }
-})
+}
 
-extensionOptionsService.onChange((options) => {
-  if (options.playerOptions.showSkipButton) {
-    videoSkipService.enable()
-  } else {
-    videoSkipService.disable()
-  }
-  if (options.playerOptions.showDanmakuTimeline) {
-    danmakuDensityService.enable()
-  } else {
-    danmakuDensityService.disable()
-  }
-})
+extensionOptionsService.get().then(applyPlayerOptions)
+
+extensionOptionsService.onChange(applyPlayerOptions)
 
 /**
  * Window events
