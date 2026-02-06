@@ -30,3 +30,5 @@ build
 patch-*
 bench-*.txt
 bench-compare.md
+bench-*.json
+_tmp_bench_*.json
