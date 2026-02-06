@@ -9,6 +9,7 @@ import { getTrackingService } from '@/common/telemetry/getTrackingService'
 import { PerfTimer } from '@/common/utils/perf'
 import { SkipButton } from '@/content/player/components/SkipButton/SkipButton'
 import { DanmakuLayoutService } from '@/content/player/danmakuLayout/DanmakuLayout.service'
+import { shouldAutoSkipOp } from '@/content/player/videoSkip/autoSkipOp'
 import type { SkipTarget } from '@/content/player/videoSkip/SkipTarget'
 import { VideoEventService } from '../videoEvent/VideoEvent.service'
 import { parseCommentsForJumpTargets } from './videoSkipParser'
@@ -158,16 +159,10 @@ export class VideoSkipService {
     this.currentVideo = video
     const currentTime = video.currentTime
 
-    if (this.autoSkipOpEnabled && !this.hasAutoSkippedOp) {
+    if (this.autoSkipOpEnabled) {
       for (const target of this.jumpTargets) {
-        if (target.isClosed()) continue
-        if (!target.isInRange(currentTime)) continue
-
-        // Heuristic to reduce false positives: treat only early, reasonably-sized ranges as OP.
-        if (target.startTime > 120) continue
-        const duration = target.endTime - target.startTime
-        if (duration < 30 || duration > 180) continue
-        if (currentTime >= target.endTime) continue
+        if (!shouldAutoSkipOp(target, currentTime, this.hasAutoSkippedOp))
+          continue
 
         this.logger.debug('Auto skipping OP', target)
         this.jumpToTime(target.endTime)
