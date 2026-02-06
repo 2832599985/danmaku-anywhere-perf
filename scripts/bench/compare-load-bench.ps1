@@ -19,6 +19,12 @@ function EnsureWorktree([string]$repoRoot, [string]$baselineCommit, [string]$bas
   git -C $repoRoot worktree add --detach $baselineDir $baselineCommit | Out-Null
 }
 
+function GetGitFile([string]$repoRoot, [string]$commit, [string]$relPath) {
+  # External command output comes back as string[] (per line). Join to preserve newlines.
+  $lines = git -C $repoRoot show "$commit`:$relPath"
+  return ($lines -join "`n")
+}
+
 function EnsureConverterDeps([string]$worktreeRoot) {
   $vitest = Join-Path $worktreeRoot "packages\danmaku-converter\node_modules\.bin\vitest.cmd"
   if (Test-Path $vitest) {
@@ -32,6 +38,9 @@ function RunBench([string]$worktreeRoot, [string]$commitShort, [string]$outPath)
   $cmd = "corepack pnpm exec -- vitest bench src/canonical/comment/loadDanmaku.bench.ts --no-color"
   # Use cmd.exe to preserve piping behavior consistently.
   cmd /c "cd /d `"$pkgDir`" && $cmd" | Tee-Object -FilePath $outPath | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "bench failed in $pkgDir (exit=$LASTEXITCODE). See $outPath"
+  }
 }
 
 function ParseBenchMeans([string]$path) {
@@ -89,8 +98,8 @@ EnsureWorktree $repoRoot $BaselineCommit $baselineDir
 # Copy current HEAD versions of bench + vitest config into baseline worktree (do not commit baseline).
 $benchRel = "packages/danmaku-converter/src/canonical/comment/loadDanmaku.bench.ts"
 $vitestRel = "packages/danmaku-converter/vitest.config.ts"
-$benchContent = (git -C $repoRoot show "$headCommit`:$benchRel")
-$vitestContent = (git -C $repoRoot show "$headCommit`:$vitestRel")
+$benchContent = GetGitFile $repoRoot $headCommit $benchRel
+$vitestContent = GetGitFile $repoRoot $headCommit $vitestRel
 
 $benchDst = Join-Path $baselineDir $benchRel
 $vitestDst = Join-Path $baselineDir $vitestRel
@@ -120,4 +129,3 @@ Write-Host "Wrote:"
 Write-Host "  $outBaseline"
 Write-Host "  $outHead"
 Write-Host "  $compareOut"
-
