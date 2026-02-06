@@ -2,8 +2,8 @@ import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
 import { inject, injectable } from 'inversify'
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import { uiContainer } from '@/common/ioc/uiIoc'
+import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
 import { getTrackingService } from '@/common/telemetry/getTrackingService'
 import { PerfTimer } from '@/common/utils/perf'
@@ -20,6 +20,9 @@ export class VideoSkipService {
   private logger: ILogger
 
   private enabled = false
+  private showSkipButtonEnabled = true
+  private autoSkipOpEnabled = false
+  private hasAutoSkippedOp = false
   private comments: CommentEntity[] = []
   private jumpTargets: SkipTarget[] = []
   private activeButton: ActiveButtonEntry | null = null
@@ -85,8 +88,22 @@ export class VideoSkipService {
     }
   }
 
+  setPlayerOptions(opts: { showSkipButton: boolean; autoSkipOp: boolean }) {
+    this.showSkipButtonEnabled = opts.showSkipButton
+    this.autoSkipOpEnabled = opts.autoSkipOp
+
+    // If the user disables the button while it's shown, remove it immediately.
+    if (!this.showSkipButtonEnabled) {
+      this.removeSkipButton()
+    }
+
+    // Ensure settings changes take effect quickly.
+    this.lastChecked = 0
+  }
+
   setComments(comments: CommentEntity[]) {
     this.comments = comments
+    this.hasAutoSkippedOp = false
     if (!this.enabled) {
       return
     }
@@ -96,6 +113,7 @@ export class VideoSkipService {
   clear() {
     this.comments = []
     this.jumpTargets = []
+    this.hasAutoSkippedOp = false
     if (this.parseTimer !== null) {
       window.clearTimeout(this.parseTimer)
       this.parseTimer = null
@@ -139,6 +157,30 @@ export class VideoSkipService {
     const video = event.target as HTMLVideoElement
     this.currentVideo = video
     const currentTime = video.currentTime
+
+    if (this.autoSkipOpEnabled && !this.hasAutoSkippedOp) {
+      for (const target of this.jumpTargets) {
+        if (target.isClosed()) continue
+        if (!target.isInRange(currentTime)) continue
+
+        // Heuristic to reduce false positives: treat only early, reasonably-sized ranges as OP.
+        if (target.startTime > 120) continue
+        const duration = target.endTime - target.startTime
+        if (duration < 30 || duration > 180) continue
+        if (currentTime >= target.endTime) continue
+
+        this.logger.debug('Auto skipping OP', target)
+        this.jumpToTime(target.endTime)
+        target.close()
+        this.hasAutoSkippedOp = true
+        this.removeSkipButton()
+        return
+      }
+    }
+
+    if (!this.showSkipButtonEnabled) {
+      return
+    }
 
     for (const target of this.jumpTargets) {
       if (
