@@ -32,3 +32,8 @@ bench-*.txt
 bench-compare.md
 bench-*.json
 _tmp_bench_*.json
+
+# Local bench artifacts (do not commit)
+bench-artifacts/
+bench-load-danmaku-report.md
+
