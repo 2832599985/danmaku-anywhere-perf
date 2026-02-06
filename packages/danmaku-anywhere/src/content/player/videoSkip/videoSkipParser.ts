@@ -1,4 +1,7 @@
-import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
+import {
+  type CommentEntity,
+  parseCommentEntityTime,
+} from '@danmaku-anywhere/danmaku-converter'
 import { matchTimeStamp } from '@/content/player/videoSkip/matchTimeStamp'
 import { SkipTarget } from '@/content/player/videoSkip/SkipTarget'
 
@@ -6,8 +9,10 @@ function parseTimestampsFromComment(comment: CommentEntity): SkipTarget | null {
   const timestampInfo = matchTimeStamp(comment.m)
 
   if (timestampInfo) {
-    const [timeStr] = comment.p.split(',')
-    const commentTime = Number.parseFloat(timeStr)
+    const commentTime = parseCommentEntityTime(comment.p)
+    if (!Number.isFinite(commentTime)) {
+      return null
+    }
 
     return new SkipTarget({
       startTime: commentTime,

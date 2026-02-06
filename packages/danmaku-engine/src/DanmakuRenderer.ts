@@ -1,10 +1,51 @@
-import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
+import {
+  type CommentEntity,
+  parseCommentEntityTime,
+} from '@danmaku-anywhere/danmaku-converter'
 import { create, type Manager } from '@mr-quin/danmu'
-import { mapIter, sampleByTime } from './iterator'
 import { type DanmakuOptions, DEFAULT_DANMAKU_OPTIONS } from './options'
-import { applyFilter, type ParsedComment, transformComment } from './parser'
+import {
+  applyFilter,
+  type ParsedComment,
+  type TimedComment,
+  transformComment,
+} from './parser'
 import { bindVideo } from './plugins/bindVideo'
 import { deepEqual } from './utils'
+import { applyParsedChunk } from './worker/applyParsedChunk'
+import type {
+  ParseChunkMessage,
+  ParseDoneMessage,
+  ParseRequestMessage,
+} from './worker/types'
+
+const WORKER_THRESHOLD = 5000
+const WORKER_CHUNK_SIZE = 1000
+const IDLE_CHUNK_SIZE = 300
+const IDLE_MIN_TIME_REMAINING = 4
+const IDLE_POLYFILL_BUDGET_MS = 12
+
+const requestIdle = (cb: IdleRequestCallback): number => {
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    return window.requestIdleCallback(cb)
+  }
+  // Polyfill: give a small but non-zero budget so we don't degenerate into
+  // "one item per tick" parsing on browsers without requestIdleCallback.
+  return setTimeout(() => {
+    cb({
+      didTimeout: true,
+      timeRemaining: () => IDLE_POLYFILL_BUDGET_MS,
+    })
+  }, 0) as unknown as number
+}
+
+const cancelIdle = (id: number) => {
+  if (typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+    window.cancelIdleCallback(id)
+    return
+  }
+  clearTimeout(id as unknown as number)
+}
 
 export type DanmakuRenderProps = {
   text: string
@@ -13,6 +54,12 @@ export type DanmakuRenderProps = {
   color: string
 }
 
+export type PerfReporter = (
+  label: string,
+  durationMs: number,
+  meta?: Record<string, unknown>
+) => void
+
 export class DanmakuRenderer {
   manager?: Manager<ParsedComment>
   container?: HTMLElement
@@ -20,10 +67,19 @@ export class DanmakuRenderer {
   comments: CommentEntity[] = []
   config: DanmakuOptions = DEFAULT_DANMAKU_OPTIONS
   created = false
+  private perfReporter?: PerfReporter
+  private preparseTaskId = 0
+  private idleHandle: number | null = null
+  private visibilityHandle: number | null = null
+  private worker?: Worker
 
   constructor(
     public render: (node: HTMLElement, renderProps: DanmakuRenderProps) => void
   ) {}
+
+  setPerfReporter(reporter?: PerfReporter) {
+    this.perfReporter = reporter
+  }
 
   create(
     container: HTMLElement,
@@ -32,26 +88,50 @@ export class DanmakuRenderer {
     config?: Partial<DanmakuOptions>
   ): void {
     if (this.created) this.destroy()
+    this.cancelPreparse()
 
     this.container = container
     this.media = media
     this.comments = comments
     this.config = this.mergeConfig(config)
 
-    const commentGenerator = mapIter(comments, (comment) =>
-      transformComment(comment, 0)
-    )
+    const mountStart = performance.now()
 
-    const sampledGenerator = sampleByTime(
-      Array.from(commentGenerator)
-        .toSorted((a, b) => a.time - b.time)
-        .values(),
-      Number.POSITIVE_INFINITY,
-      (item) => item.time
-    )
+    const timeParseStart = performance.now()
+    const timedComments: TimedComment[] = []
+    let isSorted = true
+    let lastTime = Number.NEGATIVE_INFINITY
 
-    const parsedComments = Array.from(sampledGenerator)
+    for (let i = 0; i < comments.length; i += 1) {
+      const comment = comments[i]
+      const time = parseCommentEntityTime(comment.p)
+      if (!Number.isFinite(time)) {
+        continue
+      }
+      if (time < lastTime) {
+        isSorted = false
+      }
+      lastTime = time
+      timedComments.push({ time, raw: comment })
+    }
+    const timeParseMs = performance.now() - timeParseStart
+    this.perfReporter?.('time_parse_ms', timeParseMs, {
+      total: comments.length,
+      valid: timedComments.length,
+    })
 
+    let sortMs = 0
+    if (!isSorted) {
+      const sortStart = performance.now()
+      timedComments.sort((a, b) => a.time - b.time)
+      sortMs = performance.now() - sortStart
+    }
+    this.perfReporter?.('sort_ms', sortMs, {
+      sorted: !isSorted,
+      count: timedComments.length,
+    })
+
+    const managerStart = performance.now()
     const manager = create<ParsedComment>({
       trackHeight: this.config.trackHeight,
       rate: this.config.speed / 2,
@@ -65,7 +145,7 @@ export class DanmakuRenderer {
         stash: this.config.maxOnScreen * 2,
       },
       plugin: {
-        init: bindVideo(this.media, parsedComments, () => this.config),
+        init: bindVideo(this.media, timedComments, () => this.config),
         $createNode: (danmaku, node) => {
           // font size and family are set here because it needs to be set BEFORE
           // size is calculated
@@ -116,6 +196,17 @@ export class DanmakuRenderer {
       void manager.hide()
     }
 
+    const managerMs = performance.now() - managerStart
+    this.perfReporter?.('manager_create_ms', managerMs, {
+      count: timedComments.length,
+    })
+
+    const mountTotalMs = performance.now() - mountStart
+    this.perfReporter?.('mount_total_ms', mountTotalMs, {
+      count: timedComments.length,
+    })
+
+    this.startPreparse(timedComments)
     this.created = true
   }
 
@@ -175,6 +266,7 @@ export class DanmakuRenderer {
   }
 
   destroy(): void {
+    this.cancelPreparse()
     this.manager?.stopPlaying()
     this.manager?.unmount()
     this.manager = undefined
@@ -205,5 +297,141 @@ export class DanmakuRenderer {
       this.manager.freeze()
       this.manager.unfreeze()
     }
+  }
+
+  private startPreparse(timedComments: TimedComment[]) {
+    if (timedComments.length === 0) return
+
+    this.preparseTaskId += 1
+    const taskId = this.preparseTaskId
+
+    const workerStarted = this.startWorkerParse(timedComments, taskId)
+    if (!workerStarted) {
+      this.scheduleIdlePreparse(timedComments, taskId)
+    }
+  }
+
+  private startWorkerParse(
+    timedComments: TimedComment[],
+    taskId: number
+  ): boolean {
+    if (timedComments.length < WORKER_THRESHOLD) {
+      return false
+    }
+    if (typeof Worker === 'undefined') {
+      return false
+    }
+
+    this.terminateWorker()
+    const worker = new Worker(
+      new URL('./worker/danmakuParse.worker.ts', import.meta.url),
+      { type: 'module' }
+    )
+    this.worker = worker
+    const rawComments = timedComments.map((item) => item.raw)
+    this.perfReporter?.('worker_start', 0, { count: rawComments.length })
+
+    worker.onmessage = (event: MessageEvent<ParseChunkMessage | ParseDoneMessage>) => {
+      const msg = event.data
+      if (msg.taskId !== taskId) return
+      if (msg.type === 'chunk') {
+        applyParsedChunk(timedComments, msg.startIndex, msg.parsed)
+      } else if (msg.type === 'done') {
+        this.perfReporter?.('worker_done_ms', msg.totalMs, {
+          count: rawComments.length,
+        })
+        this.terminateWorker()
+      }
+    }
+
+    worker.onerror = () => {
+      this.terminateWorker()
+      this.scheduleIdlePreparse(timedComments, taskId)
+    }
+
+    const request: ParseRequestMessage = {
+      type: 'parse',
+      taskId,
+      comments: rawComments,
+      chunkSize: WORKER_CHUNK_SIZE,
+    }
+    worker.postMessage(request)
+    return true
+  }
+
+  private scheduleIdlePreparse(
+    timedComments: TimedComment[],
+    taskId: number
+  ) {
+    const total = timedComments.length
+    let index = 0
+    let totalMs = 0
+
+    const step = (deadline: IdleDeadline) => {
+      if (taskId !== this.preparseTaskId) return
+      if (
+        typeof document !== 'undefined' &&
+        document.visibilityState !== 'visible'
+      ) {
+        if (this.visibilityHandle !== null) {
+          clearTimeout(this.visibilityHandle)
+        }
+        this.visibilityHandle = setTimeout(() => {
+          this.visibilityHandle = null
+          this.idleHandle = requestIdle(step)
+        }, 1000) as unknown as number
+        return
+      }
+
+      const start = performance.now()
+      let processed = 0
+
+      while (index < total) {
+        const entry = timedComments[index]
+        if (!entry.parsed) {
+          entry.parsed = transformComment(entry.raw, 0)
+          processed += 1
+        }
+        index += 1
+
+        if (processed >= IDLE_CHUNK_SIZE) {
+          break
+        }
+        if (deadline.timeRemaining() < IDLE_MIN_TIME_REMAINING) {
+          break
+        }
+      }
+
+      totalMs += performance.now() - start
+
+      if (index < total) {
+        this.idleHandle = requestIdle(step)
+      } else {
+        this.perfReporter?.('idle_preparse_total_ms', totalMs, {
+          count: total,
+        })
+      }
+    }
+
+    this.idleHandle = requestIdle(step)
+  }
+
+  private cancelPreparse() {
+    this.preparseTaskId += 1
+    if (this.idleHandle !== null) {
+      cancelIdle(this.idleHandle)
+      this.idleHandle = null
+    }
+    if (this.visibilityHandle !== null) {
+      clearTimeout(this.visibilityHandle)
+      this.visibilityHandle = null
+    }
+    this.terminateWorker()
+  }
+
+  private terminateWorker() {
+    if (!this.worker) return
+    this.worker.terminate()
+    this.worker = undefined
   }
 }

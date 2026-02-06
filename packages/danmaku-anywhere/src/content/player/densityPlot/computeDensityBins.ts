@@ -1,4 +1,7 @@
-import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
+import {
+  type CommentEntity,
+  parseCommentEntityTime,
+} from '@danmaku-anywhere/danmaku-converter'
 import type { DensityPoint } from '@/content/player/densityPlot/types'
 
 export function computeDensityBins(
@@ -14,8 +17,7 @@ export function computeDensityBins(
   const counts = new Array<number>(binCount).fill(0)
 
   for (const c of comments) {
-    const [timeStr] = c.p.split(',')
-    const t = Number.parseFloat(timeStr)
+    const t = parseCommentEntityTime(c.p)
     if (!Number.isFinite(t) || t < 0 || t > duration) {
       continue
     }

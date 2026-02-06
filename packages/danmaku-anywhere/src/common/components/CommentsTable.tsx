@@ -1,5 +1,5 @@
 import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
-import { parseCommentEntityP } from '@danmaku-anywhere/danmaku-converter'
+import { parseCommentEntityTime } from '@danmaku-anywhere/danmaku-converter'
 import { ContentCopy, FilterList, Sync } from '@mui/icons-material'
 import {
   Box,
@@ -35,6 +35,9 @@ interface CommentListProps {
 }
 
 const formatTime = (seconds: number) => {
+  if (!Number.isFinite(seconds)) {
+    return '--:--'
+  }
   const minutes = Math.floor(seconds / 60)
   const remainingSeconds = Math.floor(seconds % 60)
 
@@ -87,10 +90,14 @@ export const CommentsTable = ({
       })
       .with('time', () => {
         return filteredComments.toSorted((a, b) => {
-          const aTime = parseCommentEntityP(a.p).time
-          const bTime = parseCommentEntityP(b.p).time
+          const aTime = parseCommentEntityTime(a.p)
+          const bTime = parseCommentEntityTime(b.p)
+          const invalidValue =
+            order === 'asc' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY
+          const aValue = Number.isFinite(aTime) ? aTime : invalidValue
+          const bValue = Number.isFinite(bTime) ? bTime : invalidValue
 
-          return order === 'asc' ? aTime - bTime : bTime - aTime
+          return order === 'asc' ? aValue - bValue : bValue - aValue
         })
       })
       .exhaustive()
@@ -175,7 +182,8 @@ export const CommentsTable = ({
             )}
             {virtualizer.getVirtualItems().map((virtualItem) => {
               const comment = sortedComments[virtualItem.index]
-              const { time } = parseCommentEntityP(comment.p)
+              const time = parseCommentEntityTime(comment.p)
+              const timeValid = Number.isFinite(time)
               const isHovering = hoverRow === virtualItem.index
 
               return (
@@ -201,16 +209,21 @@ export const CommentsTable = ({
                     }}
                     sx={{
                       color:
-                        isTimeClickable && isHovering
+                        isTimeClickable && timeValid && isHovering
                           ? 'primary.main'
                           : 'text.primary',
                     }}
-                    onClick={() => onTimeClick?.(time)}
+                    onClick={() => {
+                      if (!timeValid) return
+                      onTimeClick?.(time)
+                    }}
                   >
                     <span
                       style={{
                         cursor:
-                          isTimeClickable && isHovering ? 'pointer' : 'unset',
+                          isTimeClickable && timeValid && isHovering
+                            ? 'pointer'
+                            : 'unset',
                       }}
                     >
                       {formatTime(time)}

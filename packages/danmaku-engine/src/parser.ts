@@ -22,6 +22,12 @@ export interface ParsedComment {
   color: string
 }
 
+export interface TimedComment {
+  time: number
+  raw: CommentEntity
+  parsed?: ParsedComment
+}
+
 export interface DanmakuOption {
   /**
    * The stage to display comments will be appended to container.
@@ -46,6 +52,8 @@ export interface DanmakuOption {
   speed?: number
 }
 
+const EMPTY_STYLE: Record<string, string> = {}
+
 export const transformComment = (
   comment: CommentEntity,
   offset: number
@@ -58,22 +66,23 @@ export const transformComment = (
     text: m,
     mode,
     time: offsetTime,
-    style: {},
+    style: EMPTY_STYLE,
     color,
   }
 
   if (s) {
     try {
+      const style: Record<string, string> = {}
       const { start, end, stroke } = parseCommentGradient(s)
-      parsed.style.background = `linear-gradient(to right, ${start}, ${end})`
-      parsed.style.backgroundClip = 'text'
-      parsed.style.webkitBackgroundClip = 'text'
+      style.background = `linear-gradient(to right, ${start}, ${end})`
+      style.backgroundClip = 'text'
+      style.webkitBackgroundClip = 'text'
       if (stroke) {
-        parsed.style.webkitTextStroke = '2px transparent'
+        style.webkitTextStroke = '2px transparent'
       } else {
-        parsed.style.webkitTextFillColor = 'transparent'
+        style.webkitTextFillColor = 'transparent'
       }
-      delete parsed.style.textShadow
+      parsed.style = style
     } catch {
       // ignore errors
     }

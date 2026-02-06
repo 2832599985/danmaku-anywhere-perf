@@ -1,9 +1,12 @@
 import type { Manager } from '@mr-quin/danmu'
 import type { DanmakuOptions } from '../options'
-import type { ParsedComment } from '../parser'
+import { type ParsedComment, type TimedComment, transformComment } from '../parser'
 import { useFixedDanmaku } from './fixedDanmaku'
 
-const binarySearch = (comments: ParsedComment[], time: number): number => {
+const binarySearch = <T extends { time: number }>(
+  comments: T[],
+  time: number
+): number => {
   let low = 0
   let high = comments.length - 1
   let ans = comments.length
@@ -28,7 +31,7 @@ const DURATION_S = DURATION_MS / 1000
 export const bindVideo =
   (
     video: HTMLMediaElement,
-    comments: ParsedComment[],
+    comments: Array<ParsedComment | TimedComment>,
     getConfig: () => DanmakuOptions
   ) =>
   (manager: Manager<ParsedComment>) => {
@@ -48,15 +51,34 @@ export const bindVideo =
 
     updateCursor()
 
-    const emitDanmaku = (comment: ParsedComment, progress = 0) => {
-      switch (comment.mode) {
+    const toParsedComment = (
+      comment: ParsedComment | TimedComment
+    ): ParsedComment => {
+      if ('raw' in comment) {
+        if (comment.parsed) {
+          return comment.parsed
+        }
+        const parsed = transformComment(comment.raw, 0)
+        comment.parsed = parsed
+        return parsed
+      }
+      return comment
+    }
+
+    const emitDanmaku = (
+      comment: ParsedComment | TimedComment,
+      progress = 0
+    ) => {
+      const parsed = toParsedComment(comment)
+
+      switch (parsed.mode) {
         case 'rtl': {
           // since comments are time-sensitive, use unshift to prioritize the latest comment
-          manager.unshift(comment, { progress })
+          manager.unshift(parsed, { progress })
           break
         }
         case 'ltr': {
-          manager.unshift(comment, {
+          manager.unshift(parsed, {
             direction: 'right',
             progress,
           })
@@ -70,17 +92,17 @@ export const bindVideo =
 
           // check the render mode for the comment
           const config = getConfig()
-          const fixedCommentMode = config.specialComments[comment.mode]
+          const fixedCommentMode = config.specialComments[parsed.mode]
           if (fixedCommentMode === 'normal') {
-            if (config.allowOverlap || !isFull(comment.mode)) {
-              manager.pushFlexibleDanmaku(comment, {
+            if (config.allowOverlap || !isFull(parsed.mode)) {
+              manager.pushFlexibleDanmaku(parsed, {
                 duration: DURATION_MS,
                 direction: 'none',
-                ...getDanmakuOptions(comment.mode),
+                ...getDanmakuOptions(parsed.mode),
               })
             }
           } else if (fixedCommentMode === 'scroll') {
-            manager.unshift({ ...comment, mode: 'rtl' }, { progress })
+            manager.unshift({ ...parsed, mode: 'rtl' }, { progress })
           }
 
           break

@@ -144,9 +144,12 @@ const useStoreBase = create<StoreState>()(
         set((state) => {
           state.danmaku.isMounted = true
           state.danmaku.episodes = episodes
-          state.danmaku.comments = episodes.flatMap((episode) => {
-            return episode.comments
-          })
+          state.danmaku.comments =
+            episodes.length === 1
+              ? episodes[0].comments
+              : episodes.flatMap((episode) => {
+                  return episode.comments
+                })
         })
       },
       unmount: () => {

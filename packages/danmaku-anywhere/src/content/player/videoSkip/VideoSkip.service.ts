@@ -3,7 +3,10 @@ import { inject, injectable } from 'inversify'
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
+import { uiContainer } from '@/common/ioc/uiIoc'
+import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
 import { getTrackingService } from '@/common/telemetry/getTrackingService'
+import { PerfTimer } from '@/common/utils/perf'
 import { SkipButton } from '@/content/player/components/SkipButton/SkipButton'
 import { DanmakuLayoutService } from '@/content/player/danmakuLayout/DanmakuLayout.service'
 import type { SkipTarget } from '@/content/player/videoSkip/SkipTarget'
@@ -16,11 +19,16 @@ type ActiveButtonEntry = { node: HTMLElement; root: Root }
 export class VideoSkipService {
   private logger: ILogger
 
+  private enabled = false
+  private comments: CommentEntity[] = []
   private jumpTargets: SkipTarget[] = []
   private activeButton: ActiveButtonEntry | null = null
   private currentVideo: HTMLVideoElement | null = null
 
   private lastChecked = 0
+  private parseTimer: number | null = null
+  private perfEnabled = false
+  private perfTimer: PerfTimer
 
   private readonly boundHandleTimeUpdate: (event: Event) => void
   private readonly boundHandleSeek: () => void
@@ -33,30 +41,65 @@ export class VideoSkipService {
     @inject(LoggerSymbol) logger: ILogger
   ) {
     this.logger = logger.sub('[VideoSkipService]')
+    this.perfTimer = new PerfTimer(this.logger, 'videoSkip', false)
     this.boundHandleTimeUpdate = this.handleTimeUpdate.bind(this)
     this.boundHandleSeek = this.handleSeek.bind(this)
+
+    const extensionOptionsService = uiContainer.get(ExtensionOptionsService)
+    extensionOptionsService
+      .get()
+      .then((options) => {
+        this.perfEnabled = options.debug
+        this.perfTimer.setEnabled(options.debug)
+      })
+      .catch((e) => this.logger.error(e))
+    extensionOptionsService.onChange((options) => {
+      this.perfEnabled = options.debug
+      this.perfTimer.setEnabled(options.debug)
+    })
   }
 
   enable() {
+    if (this.enabled) {
+      return
+    }
+    this.enabled = true
     this.logger.debug('Enabling')
     this.setupEventListeners()
+    if (this.comments.length > 0) {
+      this.scheduleParse()
+    }
   }
 
   disable() {
+    if (!this.enabled) {
+      return
+    }
+    this.enabled = false
     this.logger.debug('Disabling')
     this.cleanup()
+    this.jumpTargets = []
+    if (this.parseTimer !== null) {
+      window.clearTimeout(this.parseTimer)
+      this.parseTimer = null
+    }
   }
 
   setComments(comments: CommentEntity[]) {
-    this.jumpTargets = parseCommentsForJumpTargets(comments)
-    this.logger.debug(
-      `Parsed ${this.jumpTargets.length} jump targets from ${comments.length} comments`,
-      this.jumpTargets
-    )
+    this.comments = comments
+    if (!this.enabled) {
+      return
+    }
+    this.scheduleParse()
   }
 
   clear() {
+    this.comments = []
     this.jumpTargets = []
+    if (this.parseTimer !== null) {
+      window.clearTimeout(this.parseTimer)
+      this.parseTimer = null
+    }
     if (this.activeButton) {
       this.activeButton.root.unmount()
       this.activeButton = null
@@ -122,6 +165,28 @@ export class VideoSkipService {
     this.jumpTargets.forEach((target: SkipTarget) => {
       target.hide()
     })
+  }
+
+  private scheduleParse() {
+    if (this.parseTimer !== null) {
+      window.clearTimeout(this.parseTimer)
+    }
+    this.parseTimer = window.setTimeout(() => {
+      this.parseTimer = null
+      const start = performance.now()
+      this.jumpTargets = parseCommentsForJumpTargets(this.comments)
+      const elapsed = performance.now() - start
+      this.logger.debug(
+        `Parsed ${this.jumpTargets.length} jump targets from ${this.comments.length} comments`,
+        this.jumpTargets
+      )
+      if (this.perfEnabled) {
+        this.perfTimer.measure('skip_parse_ms', elapsed, {
+          comments: this.comments.length,
+          targets: this.jumpTargets.length,
+        })
+      }
+    }, 0)
   }
 
   private showSkipButton(target: SkipTarget) {

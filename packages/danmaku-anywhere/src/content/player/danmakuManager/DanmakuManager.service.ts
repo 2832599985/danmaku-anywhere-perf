@@ -1,5 +1,8 @@
 import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
-import { DanmakuRenderer } from '@danmaku-anywhere/danmaku-engine'
+import {
+  DanmakuRenderer,
+  type PerfReporter,
+} from '@danmaku-anywhere/danmaku-engine'
 import { inject, injectable } from 'inversify'
 import { createElement } from 'react'
 import ReactDOM from 'react-dom/client'
@@ -7,6 +10,7 @@ import { uiContainer } from '@/common/ioc/uiIoc'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import type { DanmakuOptions } from '@/common/options/danmakuOptions/constant'
 import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
+import { PerfTimer } from '@/common/utils/perf'
 import { injectCss } from '@/content/common/injectCss'
 import { DanmakuComponent } from '@/content/player/components/DanmakuComponent'
 import { DanmakuLayoutService } from '@/content/player/danmakuLayout/DanmakuLayout.service'
@@ -38,6 +42,8 @@ export class DanmakuManagerService {
   // Styles
   private rect = new DOMRectReadOnly()
   private injectedCss: HTMLElement[] = []
+  private perfEnabled = false
+  private perfTimer: PerfTimer
 
   // Observers
   private rectObs?: RectObserver
@@ -52,6 +58,7 @@ export class DanmakuManagerService {
     @inject(LoggerSymbol) logger: ILogger
   ) {
     this.logger = logger.sub('[DanmakuManagerService]')
+    this.perfTimer = new PerfTimer(this.logger, 'player.mount', false)
 
     this.nodes = {
       wrapper: layoutManager.wrapper,
@@ -66,11 +73,22 @@ export class DanmakuManagerService {
       .get()
       .then((options) => {
         this.debugOverlayService.setDebugEnabled(options.debug)
+        this.setPerfEnabled(options.debug)
       })
       .catch((e) => this.logger.error(e))
     extensionOptionsService.onChange((options) => {
       this.debugOverlayService.setDebugEnabled(options.debug)
+      this.setPerfEnabled(options.debug)
     })
+  }
+
+  private setPerfEnabled(enabled: boolean) {
+    this.perfEnabled = enabled
+    this.perfTimer.setEnabled(enabled)
+    const reporter: PerfReporter | undefined = enabled
+      ? this.perfTimer.measure.bind(this.perfTimer)
+      : undefined
+    this.renderer.setPerfReporter(reporter)
   }
 
   start(videoSelector: string) {
@@ -144,14 +162,28 @@ export class DanmakuManagerService {
 
       this.attachContainer()
 
+      if (this.perfEnabled) {
+        this.perfTimer.mark('mount_enter')
+      }
       this.renderer.create(this.nodes.container, this.video, this.comments)
       this.isMounted = true
+      if (this.perfEnabled) {
+        this.perfTimer.mark('renderer_create_done')
+        this.perfTimer.summary('mount')
+      }
     } else {
       // recreate danmaku if it's already mounted
       // this fixes an issue where danmaku can get "stuck" on the screen
       if (this.renderer.created) this.renderer.destroy()
 
+      if (this.perfEnabled) {
+        this.perfTimer.mark('mount_enter')
+      }
       this.renderer.create(this.nodes.container, this.video, this.comments)
+      if (this.perfEnabled) {
+        this.perfTimer.mark('renderer_create_done')
+        this.perfTimer.summary('mount')
+      }
     }
   }
 

@@ -16,17 +16,38 @@ export const parseCommentGradient = (s: string) => {
 }
 
 // convert string to object
-export const parseCommentEntityP = (p: string): CommentOptions => {
-  const [time, mode, color, uid = ''] = p.split(',')
+export const parseCommentEntityTime = (p: string): number => {
+  const comma = p.indexOf(',')
+  if (comma === -1) return Number.NaN
+  return Number.parseFloat(p.slice(0, comma))
+}
 
-  if (!CommentMode[Number.parseInt(mode)]) {
-    throw new Error(`Invalid mode: ${mode}`)
+export const parseCommentEntityP = (p: string): CommentOptions => {
+  const first = p.indexOf(',')
+  if (first === -1) {
+    throw new Error(`Invalid comment options: ${p}`)
+  }
+  const second = p.indexOf(',', first + 1)
+  if (second === -1) {
+    throw new Error(`Invalid comment options: ${p}`)
+  }
+  const third = p.indexOf(',', second + 1)
+
+  const timeStr = p.slice(0, first)
+  const modeStr = p.slice(first + 1, second)
+  const colorStr =
+    third === -1 ? p.slice(second + 1) : p.slice(second + 1, third)
+  const uid = third === -1 ? '' : p.slice(third + 1)
+
+  const mode = Number.parseInt(modeStr, 10)
+  if (!CommentMode[mode]) {
+    throw new Error(`Invalid mode: ${modeStr}`)
   }
 
   return {
-    time: Number.parseFloat(time),
-    mode: CommentMode[Number.parseInt(mode)] as keyof typeof CommentMode,
-    color: rgb888ToHex(Number.parseInt(color)),
+    time: Number.parseFloat(timeStr),
+    mode: CommentMode[mode] as keyof typeof CommentMode,
+    color: rgb888ToHex(Number.parseInt(colorStr, 10)),
     uid, // uid may include string
   }
 }

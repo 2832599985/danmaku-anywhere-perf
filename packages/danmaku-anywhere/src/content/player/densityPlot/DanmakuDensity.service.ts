@@ -2,6 +2,9 @@ import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
 import { debounce } from '@mui/material'
 import { inject, injectable } from 'inversify'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
+import { uiContainer } from '@/common/ioc/uiIoc'
+import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
+import { PerfTimer } from '@/common/utils/perf'
 import { DanmakuLayoutService } from '@/content/player/danmakuLayout/DanmakuLayout.service'
 import { computeDensityBins } from '@/content/player/densityPlot/computeDensityBins'
 import { DanmakuDensityChart } from '@/content/player/densityPlot/DanmakuDensityChart'
@@ -20,6 +23,9 @@ export class DanmakuDensityService {
   private data: DensityPoint[] = []
   private binSizeSec = 10
   private chartHeight = 28
+  private computeTimer: number | null = null
+  private perfEnabled = false
+  private perfTimer: PerfTimer
 
   private showChartTimeout: ReturnType<typeof setTimeout> | null = null
   private resizeObserver: ResizeObserver | null = null
@@ -37,6 +43,7 @@ export class DanmakuDensityService {
     @inject(LoggerSymbol) logger: ILogger
   ) {
     this.logger = logger.sub('[DanmakuDensityService]')
+    this.perfTimer = new PerfTimer(this.logger, 'densityPlot', false)
     this.boundHandleTimeUpdate = this.handleTimeUpdate.bind(this)
     this.boundHandleSeeked = this.handleSeeked.bind(this)
     this.boundHandleMouseMove = this.handleMouseMove.bind(this)
@@ -48,6 +55,19 @@ export class DanmakuDensityService {
         played: 'rgba(255, 255, 255, 0.45)',
       },
     })
+
+    const extensionOptionsService = uiContainer.get(ExtensionOptionsService)
+    extensionOptionsService
+      .get()
+      .then((options) => {
+        this.perfEnabled = options.debug
+        this.perfTimer.setEnabled(options.debug)
+      })
+      .catch((e) => this.logger.error(e))
+    extensionOptionsService.onChange((options) => {
+      this.perfEnabled = options.debug
+      this.perfTimer.setEnabled(options.debug)
+    })
   }
 
   enable() {
@@ -57,7 +77,7 @@ export class DanmakuDensityService {
     this.enabled = true
     this.logger.debug('Enabling density plot')
     this.chart.setup()
-    this.tryComputeAndRender()
+    this.scheduleCompute()
     this.setupEventListeners()
   }
 
@@ -67,12 +87,19 @@ export class DanmakuDensityService {
     }
     this.enabled = false
     this.logger.debug('Disabling density plot')
+    if (this.computeTimer !== null) {
+      window.clearTimeout(this.computeTimer)
+      this.computeTimer = null
+    }
     this.cleanup()
   }
 
   setComments(comments: CommentEntity[]) {
     this.comments = comments
-    this.tryComputeAndRender()
+    if (!this.enabled) {
+      return
+    }
+    this.scheduleCompute()
   }
 
   clear() {
@@ -121,7 +148,25 @@ export class DanmakuDensityService {
   }
 
   private computeBins(duration: number) {
+    const start = performance.now()
     this.data = computeDensityBins(this.comments, duration, this.binSizeSec)
+    const elapsed = performance.now() - start
+    if (this.perfEnabled) {
+      this.perfTimer.measure('density_compute_ms', elapsed, {
+        comments: this.comments.length,
+        bins: this.data.length,
+      })
+    }
+  }
+
+  private scheduleCompute() {
+    if (this.computeTimer !== null) {
+      window.clearTimeout(this.computeTimer)
+    }
+    this.computeTimer = window.setTimeout(() => {
+      this.computeTimer = null
+      this.tryComputeAndRender()
+    }, 0)
   }
 
   private tryComputeAndRender() {

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import type { CommentEntity, CommentMode } from './types.js'
-import { commentOptionsToString, parseCommentEntityP } from './utils.js'
+import {
+  commentOptionsToString,
+  parseCommentEntityP,
+  parseCommentEntityTime,
+} from './utils.js'
 
 const commentEntity: CommentEntity = {
   cid: 1737712333,
@@ -27,5 +31,17 @@ describe('comment entity conversion', () => {
     const p = commentOptionsToString(commentOptions)
 
     expect(p).toEqual(commentEntity.p)
+  })
+
+  it('should parse time from comment entity p', () => {
+    expect(parseCommentEntityTime(commentEntity.p)).toBe(658.73)
+  })
+
+  it('should return NaN when no comma exists', () => {
+    expect(Number.isNaN(parseCommentEntityTime('invalid'))).toBe(true)
+  })
+
+  it('should return NaN when time is not a number', () => {
+    expect(Number.isNaN(parseCommentEntityTime('foo,1,16777215'))).toBe(true)
   })
 })

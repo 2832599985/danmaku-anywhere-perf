@@ -4,35 +4,58 @@ import type {
 } from '@danmaku-anywhere/danmaku-converter'
 import { useEventCallback } from '@mui/material'
 import { useMutation } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Logger } from '@/common/Logger'
 import { useToast } from '@/common/components/Toast/toastStore'
 import type { DanmakuFetchDto, MacCMSFetchData } from '@/common/danmaku/dto'
 import { DanmakuSourceType } from '@/common/danmaku/enums'
 import { useFetchDanmaku } from '@/common/danmaku/queries/useFetchDanmaku'
 import { useFetchGenericDanmaku } from '@/common/danmaku/queries/useFetchGenericDanmaku'
 import { episodeToString, isProvider } from '@/common/danmaku/utils'
+import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
 import { playerRpcClient } from '@/common/rpcClient/background/client'
+import { PerfTimer } from '@/common/utils/perf'
 import { concatArr } from '@/common/utils/utils'
 import { useStore } from '@/content/controller/store/store'
 
 const useMountDanmaku = () => {
   const { toast } = useToast()
+  const { data: options } = useExtensionOptions()
+  const perfRef = useRef<PerfTimer>()
+
+  if (!perfRef.current) {
+    perfRef.current = new PerfTimer(
+      Logger.sub('[useLoadDanmaku]'),
+      'mount',
+      options?.debug ?? false
+    )
+  }
+
+  useEffect(() => {
+    perfRef.current?.setEnabled(options?.debug ?? false)
+  }, [options?.debug])
 
   const { mustGetActiveFrame, updateFrame } = useStore.use.frame()
   const { mount } = useStore.use.danmaku()
 
   return useMutation({
     mutationFn: async (episodes: GenericEpisode[]) => {
-      const comments: CommentEntity[] = []
-
-      episodes.forEach((episode) => {
-        concatArr(comments, episode.comments)
-      })
+      perfRef.current?.mark('mount_start')
+      const comments: CommentEntity[] =
+        episodes.length === 1
+          ? episodes[0].comments
+          : episodes.reduce<CommentEntity[]>((acc, episode) => {
+              concatArr(acc, episode.comments)
+              return acc
+            }, [])
 
       const res = await playerRpcClient.player['relay:command:mount']({
         frameId: mustGetActiveFrame().frameId,
         data: comments,
       })
+      perfRef.current?.mark('mount_rpc_done')
+      perfRef.current?.summary('mount')
 
       if (!res.data) {
         throw new Error('Failed to mount danmaku')
