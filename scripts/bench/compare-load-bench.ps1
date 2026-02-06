@@ -33,35 +33,49 @@ function EnsureConverterDeps([string]$worktreeRoot) {
   corepack pnpm -C $worktreeRoot -r -F "./packages/danmaku-converter" install | Out-Null
 }
 
-function RunBench([string]$worktreeRoot, [string]$commitShort, [string]$outPath) {
+function RunBench([string]$worktreeRoot, [string]$commitShort, [string]$outJsonPath) {
   $pkgDir = Join-Path $worktreeRoot "packages\danmaku-converter"
-  $cmd = "corepack pnpm exec -- vitest bench src/canonical/comment/loadDanmaku.bench.ts --no-color"
-  # Use cmd.exe to preserve piping behavior consistently.
-  cmd /c "cd /d `"$pkgDir`" && $cmd" | Tee-Object -FilePath $outPath | Out-Null
+  $cmd = "corepack pnpm exec -- vitest bench src/canonical/comment/loadDanmaku.bench.ts --outputJson `"$outJsonPath`" --no-color"
+  cmd /c "cd /d `"$pkgDir`" && $cmd" | Out-Null
   if ($LASTEXITCODE -ne 0) {
-    throw "bench failed in $pkgDir (exit=$LASTEXITCODE). See $outPath"
+    throw "bench failed in $pkgDir (exit=$LASTEXITCODE)."
+  }
+  if (-not (Test-Path $outJsonPath)) {
+    throw "bench did not produce json report: $outJsonPath"
   }
 }
 
-function ParseBenchMeans([string]$path) {
+function ParseBenchJsonMeans([string]$jsonPath) {
+  $raw = Get-Content -Raw $jsonPath
+  $obj = $raw | ConvertFrom-Json
+
   $map = @{}
-  foreach ($line in Get-Content $path) {
-    # vitest bench lines look like:
-    #   · name .... hz min max mean ...
-    if ($line -match '^\s*·\s+(?<name>.+?)\s+(?<hz>[0-9,]+(?:\.[0-9]+)?)\s+(?<min>[0-9.]+)\s+(?<max>[0-9.]+)\s+(?<mean>[0-9.]+)\s') {
-      $map[$matches['name'].Trim()] = [double]$matches['mean']
+  foreach ($file in $obj.files) {
+    foreach ($group in $file.groups) {
+      foreach ($bench in $group.benchmarks) {
+        $map[$bench.name] = [double]$bench.mean
+      }
     }
   }
   return $map
 }
 
-function WriteCompareMarkdown([hashtable]$baseline, [hashtable]$head, [string]$outPath) {
+function AppendTable(
+  [System.Collections.Generic.List[string]]$lines,
+  [hashtable]$baseline,
+  [hashtable]$head,
+  [string]$title,
+  [string]$regexFilter
+) {
   $keys = New-Object System.Collections.Generic.SortedSet[string]
-  foreach ($k in $baseline.Keys) { [void]$keys.Add($k) }
-  foreach ($k in $head.Keys) { [void]$keys.Add($k) }
+  foreach ($k in $baseline.Keys) {
+    if ($k -match $regexFilter) { [void]$keys.Add($k) }
+  }
+  foreach ($k in $head.Keys) {
+    if ($k -match $regexFilter) { [void]$keys.Add($k) }
+  }
 
-  $lines = New-Object System.Collections.Generic.List[string]
-  $lines.Add("# Load Bench Compare")
+  $lines.Add("## $title")
   $lines.Add("")
   $lines.Add("| metric | baseline mean (ms) | head mean (ms) | speedup (x) | delta (ms) |")
   $lines.Add("|---|---:|---:|---:|---:|")
@@ -76,6 +90,19 @@ function WriteCompareMarkdown([hashtable]$baseline, [hashtable]$head, [string]$o
     $delta = $b - $h
     $lines.Add(("| {0} | {1:N4} | {2:N4} | {3:N3} | {4:N4} |" -f $k, $b, $h, $speedup, $delta))
   }
+  $lines.Add("")
+}
+
+function WriteCompareMarkdown([hashtable]$baseline, [hashtable]$head, [string]$outPath) {
+  $keys = New-Object System.Collections.Generic.SortedSet[string]
+  foreach ($k in $baseline.Keys) { [void]$keys.Add($k) }
+  foreach ($k in $head.Keys) { [void]$keys.Add($k) }
+
+  $lines = New-Object System.Collections.Generic.List[string]
+  $lines.Add("# Load Bench Compare")
+  $lines.Add("")
+  AppendTable $lines $baseline $head "Focus: Mount Pipelines" '^mount (new|old) pipeline '
+  AppendTable $lines $baseline $head "All Metrics" '.*'
 
   WriteUtf8NoBom $outPath ($lines -join "`n")
 }
@@ -112,14 +139,14 @@ if (-not $SkipInstall) {
   EnsureConverterDeps $repoRoot
 }
 
-$outBaseline = Join-Path $baselineDir "bench-baseline-$baselineShort.txt"
-$outHead = Join-Path $repoRoot "bench-head-$headShort.txt"
+$outBaseline = Join-Path $baselineDir "bench-baseline-$baselineShort.json"
+$outHead = Join-Path $repoRoot "bench-head-$headShort.json"
 
 RunBench $baselineDir $baselineShort $outBaseline
 RunBench $repoRoot $headShort $outHead
 
-$baselineMeans = ParseBenchMeans $outBaseline
-$headMeans = ParseBenchMeans $outHead
+$baselineMeans = ParseBenchJsonMeans $outBaseline
+$headMeans = ParseBenchJsonMeans $outHead
 
 $compareOut = Join-Path $repoRoot "bench-compare.md"
 WriteCompareMarkdown $baselineMeans $headMeans $compareOut
