@@ -102,15 +102,16 @@ describe('DanDanPlay API', () => {
         }) as any
 
       const baseA = { cid: 1, p: '10.00,1,16777215,[BiliBili]u', m: 'a' }
+      const baseA2 = { cid: 888, p: '10.00,1,16777215,[BiliBili]u', m: 'a' }
       const baseB = { cid: 2, p: '11.00,1,16777215,[BiliBili]v', m: 'b' }
-      const extA = { cid: 1, p: '10.00,1,16777215,[BiliBili]u', m: 'a' }
+      const extA = { cid: 999, p: '10.00,1,16777215,[BiliBili]u', m: 'a' }
       const extC = { cid: 3, p: '12.00,1,16777215,[BiliBili]w', m: 'c' }
 
       vi.spyOn(globalThis, 'fetch')
         .mockResolvedValueOnce(
           makeRes({
             count: 3,
-            comments: [baseA, baseA, baseB], // include a duplicate in base
+            comments: [baseA, baseA2, baseB], // include a duplicate payload (different cid) in base
           })
         )
         .mockResolvedValueOnce(

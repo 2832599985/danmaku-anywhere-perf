@@ -251,8 +251,9 @@ export const commentGetCommentManualWithRelated = async (
   // De-dupe by a stable key. Some servers may return overlapping comments across
   // base/related sources or duplicated related URLs.
   const keyOf = (comment: CommentData) => {
-    const cid = comment.cid ?? ''
-    return `${cid}\u0000${comment.p}\u0000${comment.m}`
+    // `cid` is optional and may differ across endpoints for the same payload.
+    // Using only `p`+`m` yields better de-dupe across base/related sources.
+    return `${comment.p}\u0000${comment.m}`
   }
 
   const seen = new Set<string>()
