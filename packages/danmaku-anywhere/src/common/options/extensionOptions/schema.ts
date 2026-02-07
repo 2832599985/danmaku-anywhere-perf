@@ -52,6 +52,8 @@ export const playerOptionsSchema = z.object({
   showSkipButton: z.boolean(),
   autoSkipOp: z.boolean(),
   showDanmakuTimeline: z.boolean(),
+  enableFixedSkip: z.boolean(),
+  fixedSkipSeconds: z.number().int().positive().default(90),
 })
 
 export const retentionPolicySchema = z.object({

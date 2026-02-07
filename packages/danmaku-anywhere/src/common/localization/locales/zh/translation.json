@@ -418,7 +418,10 @@
     "player": {
       "showDanmakuTimeline": "显示弹幕密度",
       "showSkipButton": "显示跳过按钮（OP/ED）",
-      "autoSkipOp": "自动跳过片头（OP）"
+      "autoSkipOp": "自动跳过片头（OP）",
+      "enableFixedSkip": "显示固定时间跳过按钮",
+      "fixedSkipSeconds": "跳过秒数",
+      "fixedSkip": "跳过 {{seconds}} 秒"
     },
     "restrictInitiatorDomain": "限制DNR至发起自扩展的请求",
     "retentionPolicy": {

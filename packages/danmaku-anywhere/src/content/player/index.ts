@@ -12,11 +12,13 @@ import { getTrackingService } from '@/common/telemetry/getTrackingService'
 import { createPopoverRoot } from '@/content/common/host/createPopoverRoot'
 import { injectCss } from '@/content/common/injectCss'
 import danmakuComponentCss from '@/content/player/components/DanmakuComponent.css?inline'
+import fixedSkipButtonCss from '@/content/player/components/FixedSkipButton/FixedSkipButton.css?inline'
 import skipButtonCss from '@/content/player/components/SkipButton/SkipButton.css?inline'
 import { PLAYER_ROOT_ID } from '@/content/player/constants/rootId'
 import { DanmakuManagerService } from '@/content/player/danmakuManager/DanmakuManager.service'
 import { DanmakuDensityService } from '@/content/player/densityPlot/DanmakuDensity.service'
 import densityPlotCss from '@/content/player/densityPlot/DanmakuDensityChart.css?inline'
+import { FixedSkipService } from '@/content/player/fixedSkip/FixedSkip.service'
 import { createPipWindow, moveElement } from '@/content/player/pipUtils'
 import { VideoEventService } from '@/content/player/videoEvent/VideoEvent.service'
 import { VideoNodeObserverService } from '@/content/player/videoObserver/VideoNodeObserver.service'
@@ -32,14 +34,35 @@ const videoNodeObserverService = uiContainer.get(VideoNodeObserverService)
 const managerService = uiContainer.get(DanmakuManagerService)
 const videoEventService = uiContainer.get(VideoEventService)
 const videoSkipService = uiContainer.get(VideoSkipService)
+const fixedSkipService = uiContainer.get(FixedSkipService)
 const danmakuDensityService = uiContainer.get(DanmakuDensityService)
 
 const { shadowRoot, root } = createPopoverRoot({
   id: PLAYER_ROOT_ID,
 })
 
+// Create a dedicated container for the skip button that allows pointer events
+// The wrapper has pointer-events: none which blocks clicks in fullscreen mode
+const skipButtonContainer = document.createElement('div')
+skipButtonContainer.id = 'danmaku-anywhere-skip-button-container'
+skipButtonContainer.style.position = 'absolute'
+skipButtonContainer.style.top = '0'
+skipButtonContainer.style.left = '0'
+skipButtonContainer.style.width = '100%'
+skipButtonContainer.style.height = '100%'
+skipButtonContainer.style.pointerEvents = 'none'
+skipButtonContainer.style.zIndex = '10001'
+shadowRoot.appendChild(skipButtonContainer)
+
+videoSkipService.setSkipButtonContainer(skipButtonContainer)
+fixedSkipService.setSkipButtonContainer(skipButtonContainer)
 managerService.setParent(shadowRoot)
-injectCss(shadowRoot, [skipButtonCss, densityPlotCss, danmakuComponentCss])
+injectCss(shadowRoot, [
+  skipButtonCss,
+  fixedSkipButtonCss,
+  densityPlotCss,
+  danmakuComponentCss,
+])
 
 let pipWindow: Window | undefined
 
@@ -173,6 +196,14 @@ const applyPlayerOptions = (
     danmakuDensityService.enable()
   } else {
     danmakuDensityService.disable()
+  }
+  fixedSkipService.setOptions({
+    fixedSkipSeconds: options.playerOptions.fixedSkipSeconds,
+  })
+  if (options.playerOptions.enableFixedSkip) {
+    fixedSkipService.enable()
+  } else {
+    fixedSkipService.disable()
   }
 }
 

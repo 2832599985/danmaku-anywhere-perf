@@ -36,6 +36,7 @@ export class VideoSkipService {
 
   private readonly boundHandleTimeUpdate: (event: Event) => void
   private readonly boundHandleSeek: () => void
+  private skipButtonContainer: HTMLElement | null = null
 
   constructor(
     @inject(VideoEventService)
@@ -100,6 +101,10 @@ export class VideoSkipService {
 
     // Ensure settings changes take effect quickly.
     this.lastChecked = 0
+  }
+
+  setSkipButtonContainer(container: HTMLElement) {
+    this.skipButtonContainer = container
   }
 
   setComments(comments: CommentEntity[]) {
@@ -227,12 +232,14 @@ export class VideoSkipService {
   }
 
   private showSkipButton(target: SkipTarget) {
-    if (!this.layoutManager.wrapper) return
+    // Use dedicated container if available, fallback to wrapper for backwards compatibility
+    const container = this.skipButtonContainer ?? this.layoutManager.wrapper
+    if (!container) return
 
     this.logger.debug('Creating skip buttons', target)
 
     const mountNode = document.createElement('div')
-    this.layoutManager.wrapper.appendChild(mountNode)
+    container.appendChild(mountNode)
 
     const root = createRoot(mountNode)
     root.render(

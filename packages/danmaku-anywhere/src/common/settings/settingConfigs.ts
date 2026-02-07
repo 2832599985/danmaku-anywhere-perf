@@ -129,6 +129,23 @@ const playerSettings: SettingConfig<ExtensionOptions>[] = [
       },
     }),
   },
+  {
+    id: 'toggle.player.enableFixedSkip',
+    label: () =>
+      i18n.t(
+        'optionsPage.player.enableFixedSkip',
+        'Show fixed time skip button'
+      ),
+    category: 'player',
+    type: 'toggle',
+    getValue: (options) => options.playerOptions.enableFixedSkip,
+    createUpdate: (options, newValue) => ({
+      playerOptions: {
+        ...options.playerOptions,
+        enableFixedSkip: newValue,
+      },
+    }),
+  },
 ]
 
 export const UPLOAD_DEBUG_DATA_BUTTON: ButtonSettingConfig = {

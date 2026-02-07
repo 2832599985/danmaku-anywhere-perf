@@ -34,6 +34,8 @@ export const defaultExtensionOptions: ExtensionOptions = {
     showSkipButton: true,
     autoSkipOp: false,
     showDanmakuTimeline: true,
+    enableFixedSkip: false,
+    fixedSkipSeconds: 90,
   },
   theme: {
     colorMode: ColorMode.System,

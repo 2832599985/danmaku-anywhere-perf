@@ -1,0 +1,7 @@
+.da-fixed-skip-button-wrapper {
+  position: absolute;
+  bottom: 40px;
+  right: 20px;
+  z-index: 10000;
+  pointer-events: auto;
+}

@@ -4,6 +4,7 @@ import { settingConfigs } from '@/common/settings/settingConfigs'
 import { OptionsPageToolBar } from '@/popup/component/OptionsPageToolbar'
 import { OptionsPageLayout } from '@/popup/layout/OptionsPageLayout'
 import { DeclarativeToggleSetting } from '@/popup/pages/options/components/DeclarativeToggleSetting'
+import { FixedSkipSecondsInput } from '@/popup/pages/options/pages/player/components/FixedSkipSecondsInput'
 
 export const PlayerOptions = () => {
   const { t } = useTranslation()
@@ -23,6 +24,7 @@ export const PlayerOptions = () => {
           isLoading={isLoading}
         />
       ))}
+      {data.playerOptions.enableFixedSkip && <FixedSkipSecondsInput />}
     </OptionsPageLayout>
   )
 }
