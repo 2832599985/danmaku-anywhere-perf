@@ -8,7 +8,7 @@ export const FixedSkipSecondsInput = () => {
   const { t } = useTranslation()
   const { data, partialUpdate } = useExtensionOptions()
   const [value, setValue] = useState(
-    String(data.playerOptions.fixedSkipSeconds)
+    String(data.playerOptions.fixedSkipSeconds ?? 90)
   )
 
   const handleBlur = async () => {

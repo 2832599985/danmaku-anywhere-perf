@@ -256,10 +256,22 @@ export class ExtensionOptionsService implements IStoreService {
                 showSkipButton: true,
                 autoSkipOp: false,
                 showDanmakuTimeline: true,
+                enableFixedSkip: false,
+                fixedSkipSeconds: 90,
               }
               return
             }
             draft.playerOptions.autoSkipOp = false
+          })
+        },
+      })
+      .version(24, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            if (draft.playerOptions) {
+              draft.playerOptions.enableFixedSkip ??= false
+              draft.playerOptions.fixedSkipSeconds ??= 90
+            }
           })
         },
       })
