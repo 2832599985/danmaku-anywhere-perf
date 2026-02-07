@@ -39,7 +39,8 @@ export class FixedSkipService {
       'timeupdate',
       this.boundHandleTimeUpdate
     )
-    this.renderButton()
+    // Don't render immediately - wait for video to be detected
+    // The button will be rendered on first timeupdate event
   }
 
   disable() {
@@ -68,6 +69,10 @@ export class FixedSkipService {
 
   private handleTimeUpdate(event: Event) {
     this.currentVideo = event.target as HTMLVideoElement
+    // Render button only when we have a video and button isn't already shown
+    if (this.currentVideo && !this.activeButton) {
+      this.renderButton()
+    }
   }
 
   private renderButton() {
@@ -85,6 +90,7 @@ export class FixedSkipService {
         seconds: this.fixedSkipSeconds,
         onClick: () => {
           this.skipForward()
+          this.hideButtonTemporarily()
         },
       })
     )
@@ -98,6 +104,16 @@ export class FixedSkipService {
       this.logger.debug(`Skipping forward ${this.fixedSkipSeconds}s`)
       video.currentTime += this.fixedSkipSeconds
     }
+  }
+
+  private hideButtonTemporarily() {
+    this.removeButton()
+    // Re-show button after 3 seconds so user can skip again if needed
+    setTimeout(() => {
+      if (this.enabled) {
+        this.renderButton()
+      }
+    }, 3000)
   }
 
   private removeButton() {
