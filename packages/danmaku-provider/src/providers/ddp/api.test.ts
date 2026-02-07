@@ -3,6 +3,7 @@ import { ResponseParseException } from '../../exceptions/ResponseParseException'
 import { mockFetchResponse } from '../utils/testUtils'
 import {
   commentGetComment,
+  commentGetCommentManualWithRelated,
   getBangumiAnime,
   searchSearchAnime,
   searchSearchEpisodes,
@@ -83,6 +84,59 @@ describe('DanDanPlay API', () => {
         // but if parsing fails, it returns ResponseParseException.
         expect(result.error).toBeInstanceOf(ResponseParseException)
       }
+    })
+  })
+
+  describe('commentGetCommentManualWithRelated', () => {
+    it('should de-dupe overlapping comments across base and related sources', async () => {
+      const makeRes = (data: unknown) =>
+        ({
+          json: vi.fn().mockResolvedValue(data),
+          text: vi.fn().mockResolvedValue(data),
+          arrayBuffer: vi.fn().mockResolvedValue(data),
+          status: 200,
+          headers: new Map(),
+          clone() {
+            return this
+          },
+        }) as any
+
+      const baseA = { cid: 1, p: '10.00,1,16777215,[BiliBili]u', m: 'a' }
+      const baseB = { cid: 2, p: '11.00,1,16777215,[BiliBili]v', m: 'b' }
+      const extA = { cid: 1, p: '10.00,1,16777215,[BiliBili]u', m: 'a' }
+      const extC = { cid: 3, p: '12.00,1,16777215,[BiliBili]w', m: 'c' }
+
+      vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(
+          makeRes({
+            count: 3,
+            comments: [baseA, baseA, baseB], // include a duplicate in base
+          })
+        )
+        .mockResolvedValueOnce(
+          makeRes({
+            errorCode: 0,
+            errorMessage: '',
+            success: true,
+            relateds: [{ url: 'https://example.com/ext', shift: 0 }],
+          })
+        )
+        .mockResolvedValueOnce(
+          makeRes({
+            count: 2,
+            comments: [extA, extC], // extA overlaps with baseA
+          })
+        )
+
+      const result = await commentGetCommentManualWithRelated(1, {
+        withRelated: true,
+      })
+
+      expect(result.success).toBe(true)
+      if (!result.success) return
+
+      const cids = result.data.map((c) => c.cid).sort()
+      expect(cids).toEqual([1, 2, 3])
     })
   })
 

@@ -247,7 +247,24 @@ export const commentGetCommentManualWithRelated = async (
   )
 
   if (!commentsResult.success) return commentsResult
-  const comments = commentsResult.data
+
+  // De-dupe by a stable key. Some servers may return overlapping comments across
+  // base/related sources or duplicated related URLs.
+  const keyOf = (comment: CommentData) => {
+    const cid = comment.cid ?? ''
+    return `${cid}\u0000${comment.p}\u0000${comment.m}`
+  }
+
+  const seen = new Set<string>()
+  const baseComments: CommentData[] = []
+  for (const comment of commentsResult.data) {
+    const key = keyOf(comment)
+    if (seen.has(key)) continue
+    seen.add(key)
+    baseComments.push(comment)
+  }
+
+  const comments = baseComments
 
   if (params.withRelated) {
     try {
@@ -272,6 +289,11 @@ export const commentGetCommentManualWithRelated = async (
                 comment.p = commentOptionsToString(options)
               }
 
+              const key = keyOf(comment)
+              if (seen.has(key)) {
+                return
+              }
+              seen.add(key)
               comments.push(comment)
             })
           }
