@@ -48,19 +48,28 @@ export const createRemotePreparseTransport = (): RemotePreparseTransport => {
 
       const total = req.comments.length
       const chunkSize = Math.max(1, req.chunkSize)
+      const safeStart = Number.isFinite(req.startIndex)
+        ? Math.min(Math.max(Math.trunc(req.startIndex), 0), total)
+        : 0
 
       send({ type: 'begin', taskId: req.taskId, chunkSize, total })
 
-      for (let startIndex = 0; startIndex < total; startIndex += chunkSize) {
-        const end = Math.min(startIndex + chunkSize, total)
-        const slice: CommentEntity[] = req.comments.slice(startIndex, end)
-        send({
-          type: 'comments',
-          taskId: req.taskId,
-          startIndex,
-          comments: slice,
-        })
+      const sendRange = (from: number, to: number) => {
+        for (let startIndex = from; startIndex < to; startIndex += chunkSize) {
+          const end = Math.min(startIndex + chunkSize, to)
+          const slice: CommentEntity[] = req.comments.slice(startIndex, end)
+          send({
+            type: 'comments',
+            taskId: req.taskId,
+            startIndex,
+            comments: slice,
+          })
+        }
       }
+
+      // Prioritize parsing near the current playback cursor first.
+      sendRange(safeStart, total)
+      sendRange(0, safeStart)
 
       send({ type: 'end', taskId: req.taskId })
 

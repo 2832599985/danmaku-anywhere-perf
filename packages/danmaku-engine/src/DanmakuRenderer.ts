@@ -64,6 +64,7 @@ export type RemotePreparseRequest = {
   taskId: number
   comments: CommentEntity[]
   chunkSize: number
+  startIndex: number
 }
 
 export type RemotePreparseChunk = {
@@ -341,24 +342,69 @@ export class DanmakuRenderer {
     }
   }
 
+  private getPreparseStartIndex(timedComments: TimedComment[]): number {
+    // Match the bindVideo cursor logic: include a small "catch-up" window so we
+    // prioritize parsing comments that may be emitted immediately.
+    const CATCH_UP_WINDOW_S = 5
+
+    const media = this.media
+    if (!media) return 0
+    const total = timedComments.length
+    if (total === 0) return 0
+
+    const offsetS = this.config.offset / 1000
+    const base = media.currentTime - offsetS - CATCH_UP_WINDOW_S
+    const targetTime = Math.max(0, Number.isFinite(base) ? base : 0)
+
+    // Lower bound: first index with time >= targetTime.
+    let low = 0
+    let high = total - 1
+    let ans = total
+
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2)
+      const t = timedComments[mid].time
+      if (t >= targetTime) {
+        ans = mid
+        high = mid - 1
+      } else {
+        low = mid + 1
+      }
+    }
+
+    // If we're beyond the last comment time, just start from 0.
+    return ans >= total ? 0 : ans
+  }
+
   private startPreparse(timedComments: TimedComment[]) {
     if (timedComments.length === 0) return
 
     this.preparseTaskId += 1
     const taskId = this.preparseTaskId
 
-    const workerStarted = this.startWorkerParse(timedComments, taskId)
+    const startIndex = this.getPreparseStartIndex(timedComments)
+
+    const workerStarted = this.startWorkerParse(
+      timedComments,
+      taskId,
+      startIndex
+    )
     if (!workerStarted) {
-      const remoteStarted = this.startRemoteParse(timedComments, taskId)
+      const remoteStarted = this.startRemoteParse(
+        timedComments,
+        taskId,
+        startIndex
+      )
       if (!remoteStarted) {
-        this.scheduleIdlePreparse(timedComments, taskId)
+        this.scheduleIdlePreparse(timedComments, taskId, startIndex)
       }
     }
   }
 
   private startWorkerParse(
     timedComments: TimedComment[],
-    taskId: number
+    taskId: number,
+    startIndex: number
   ): boolean {
     if (timedComments.length < WORKER_THRESHOLD) {
       return false
@@ -410,9 +456,13 @@ export class DanmakuRenderer {
       // Avoid retrying on subsequent mounts for sites that consistently block workers via CSP.
       this.workerDisabledReason = 'worker error event'
       this.terminateWorker()
-      const remoteStarted = this.startRemoteParse(timedComments, taskId)
+      const remoteStarted = this.startRemoteParse(
+        timedComments,
+        taskId,
+        startIndex
+      )
       if (!remoteStarted) {
-        this.scheduleIdlePreparse(timedComments, taskId)
+        this.scheduleIdlePreparse(timedComments, taskId, startIndex)
       }
     }
 
@@ -421,6 +471,7 @@ export class DanmakuRenderer {
       taskId,
       comments: rawComments,
       chunkSize: WORKER_CHUNK_SIZE,
+      startIndex,
     }
     worker.postMessage(request)
     return true
@@ -428,7 +479,8 @@ export class DanmakuRenderer {
 
   private startRemoteParse(
     timedComments: TimedComment[],
-    taskId: number
+    taskId: number,
+    startIndex: number
   ): boolean {
     if (!this.remotePreparseTransport) {
       return false
@@ -449,6 +501,7 @@ export class DanmakuRenderer {
           taskId,
           comments: rawComments,
           chunkSize: WORKER_CHUNK_SIZE,
+          startIndex,
         },
         {
           onChunk: (msg) => {
@@ -470,7 +523,7 @@ export class DanmakuRenderer {
               error instanceof Error ? error.message : String(error)
             this.perfReporter?.('remote_parse_error', 0, { reason: message })
             this.terminateRemote()
-            this.scheduleIdlePreparse(timedComments, taskId)
+            this.scheduleIdlePreparse(timedComments, taskId, startIndex)
           },
         }
       )
@@ -484,9 +537,17 @@ export class DanmakuRenderer {
     return true
   }
 
-  private scheduleIdlePreparse(timedComments: TimedComment[], taskId: number) {
+  private scheduleIdlePreparse(
+    timedComments: TimedComment[],
+    taskId: number,
+    startIndex: number
+  ) {
     const total = timedComments.length
-    let index = 0
+    let index = Number.isFinite(startIndex)
+      ? Math.min(Math.max(Math.trunc(startIndex), 0), total)
+      : 0
+    if (index >= total) index = 0
+    let visited = 0
     let totalMs = 0
 
     const step = (deadline: IdleDeadline) => {
@@ -508,13 +569,20 @@ export class DanmakuRenderer {
       const start = performance.now()
       let processed = 0
 
-      while (index < total) {
+      while (visited < total) {
         const entry = timedComments[index]
-        if (!entry.parsed) {
-          entry.parsed = transformComment(entry.raw, 0)
+        if (!entry.parsed && !entry.parseError) {
+          try {
+            entry.parsed = transformComment(entry.raw, 0)
+          } catch {
+            entry.parseError = true
+          }
           processed += 1
         }
+
         index += 1
+        if (index >= total) index = 0
+        visited += 1
 
         if (processed >= IDLE_CHUNK_SIZE) {
           break
@@ -526,7 +594,7 @@ export class DanmakuRenderer {
 
       totalMs += performance.now() - start
 
-      if (index < total) {
+      if (visited < total) {
         this.idleHandle = requestIdle(step)
       } else {
         this.perfReporter?.('idle_preparse_total_ms', totalMs, {

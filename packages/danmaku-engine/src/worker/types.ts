@@ -6,6 +6,12 @@ export type ParseRequestMessage = {
   taskId: number
   comments: CommentEntity[]
   chunkSize: number
+  /**
+   * Optional starting index to prioritize parsing comments near the current
+   * playback cursor. The worker will parse `[startIndex..end)` first and then
+   * wrap around to `[0..startIndex)`.
+   */
+  startIndex?: number
 }
 
 export type ParseChunkMessage = {

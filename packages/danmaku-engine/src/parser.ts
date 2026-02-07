@@ -26,6 +26,11 @@ export interface TimedComment {
   time: number
   raw: CommentEntity
   parsed?: ParsedComment
+  /**
+   * Set when parsing fails (invalid `p`, unsupported mode, etc). We skip these
+   * entries at emit-time to avoid breaking the whole timeline.
+   */
+  parseError?: true
 }
 
 export interface DanmakuOption {

@@ -1,6 +1,10 @@
 import type { Manager } from '@mr-quin/danmu'
 import type { DanmakuOptions } from '../options'
-import { type ParsedComment, type TimedComment, transformComment } from '../parser'
+import {
+  type ParsedComment,
+  type TimedComment,
+  transformComment,
+} from '../parser'
 import { useFixedDanmaku } from './fixedDanmaku'
 
 const binarySearch = <T extends { time: number }>(
@@ -53,14 +57,23 @@ export const bindVideo =
 
     const toParsedComment = (
       comment: ParsedComment | TimedComment
-    ): ParsedComment => {
+    ): ParsedComment | null => {
       if ('raw' in comment) {
         if (comment.parsed) {
           return comment.parsed
         }
-        const parsed = transformComment(comment.raw, 0)
-        comment.parsed = parsed
-        return parsed
+        if (comment.parseError) {
+          return null
+        }
+        try {
+          const parsed = transformComment(comment.raw, 0)
+          comment.parsed = parsed
+          return parsed
+        } catch {
+          // Never let a single bad `p` break the whole timeline loop.
+          comment.parseError = true
+          return null
+        }
       }
       return comment
     }
@@ -70,6 +83,7 @@ export const bindVideo =
       progress = 0
     ) => {
       const parsed = toParsedComment(comment)
+      if (!parsed) return
 
       switch (parsed.mode) {
         case 'rtl': {
@@ -188,8 +202,9 @@ export const bindVideo =
       },
       updateOptions() {
         // the offset changes only when the config changes
-        if (getConfig().offset !== offset) {
-          offset = getConfig().offset / 1000
+        const nextOffset = getConfig().offset / 1000
+        if (nextOffset !== offset) {
+          offset = nextOffset
           updateCursor()
           manager.clear()
         }
