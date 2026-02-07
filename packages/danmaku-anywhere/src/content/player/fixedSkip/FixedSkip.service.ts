@@ -17,7 +17,8 @@ export class FixedSkipService {
   private activeButton: ActiveButtonEntry | null = null
   private currentVideo: HTMLVideoElement | null = null
   private skipButtonContainer: HTMLElement | null = null
-  private isTemporarilyHidden = false
+  private isDismissed = false
+  private lastVideoSrc = ''
 
   private readonly boundHandleTimeUpdate: (event: Event) => void
 
@@ -59,7 +60,7 @@ export class FixedSkipService {
 
   setOptions(opts: { fixedSkipSeconds: number }) {
     this.fixedSkipSeconds = opts.fixedSkipSeconds ?? 90
-    if (this.enabled) {
+    if (this.enabled && !this.isDismissed) {
       this.renderButton()
     }
   }
@@ -69,9 +70,28 @@ export class FixedSkipService {
   }
 
   private handleTimeUpdate(event: Event) {
-    this.currentVideo = event.target as HTMLVideoElement
-    // Render button only when we have a video, button isn't already shown, and not temporarily hidden
-    if (this.currentVideo && !this.activeButton && !this.isTemporarilyHidden) {
+    const video = event.target as HTMLVideoElement
+    this.currentVideo = video
+
+    // Reset dismissed state when video source changes (new episode)
+    if (video.currentSrc !== this.lastVideoSrc) {
+      this.lastVideoSrc = video.currentSrc
+      this.isDismissed = false
+      this.logger.debug('Video source changed, resetting dismissed state')
+    }
+
+    // Don't show button if:
+    // 1. Already clicked skip (isDismissed)
+    // 2. Current time is past the skip duration (no need to skip anymore)
+    if (this.isDismissed || video.currentTime > this.fixedSkipSeconds) {
+      if (this.activeButton) {
+        this.removeButton()
+      }
+      return
+    }
+
+    // Render button if we have a video and button isn't already shown
+    if (this.currentVideo && !this.activeButton) {
       this.renderButton()
     }
   }
@@ -91,7 +111,7 @@ export class FixedSkipService {
         seconds: this.fixedSkipSeconds,
         onClick: () => {
           this.skipForward()
-          this.hideButtonTemporarily()
+          this.dismissButton()
         },
       })
     )
@@ -107,16 +127,10 @@ export class FixedSkipService {
     }
   }
 
-  private hideButtonTemporarily() {
-    this.isTemporarilyHidden = true
+  private dismissButton() {
+    this.isDismissed = true
     this.removeButton()
-    // Re-show button after 3 seconds so user can skip again if needed
-    setTimeout(() => {
-      this.isTemporarilyHidden = false
-      if (this.enabled) {
-        this.renderButton()
-      }
-    }, 3000)
+    this.logger.debug('Button dismissed until video change')
   }
 
   private removeButton() {
