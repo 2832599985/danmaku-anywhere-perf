@@ -41,6 +41,14 @@ const { shadowRoot, root } = createPopoverRoot({
   id: PLAYER_ROOT_ID,
 })
 
+// Give shadowRoot proper dimensions so absolutely positioned children can reference it
+shadowRoot.style.position = 'fixed'
+shadowRoot.style.top = '0'
+shadowRoot.style.left = '0'
+shadowRoot.style.width = '100vw'
+shadowRoot.style.height = '100vh'
+shadowRoot.style.pointerEvents = 'none'
+
 // Create a dedicated container for the skip button that allows pointer events
 // The wrapper has pointer-events: none which blocks clicks in fullscreen mode
 const skipButtonContainer = document.createElement('div')
