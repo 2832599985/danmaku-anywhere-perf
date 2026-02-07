@@ -17,6 +17,7 @@ export class FixedSkipService {
   private activeButton: ActiveButtonEntry | null = null
   private currentVideo: HTMLVideoElement | null = null
   private skipButtonContainer: HTMLElement | null = null
+  private isTemporarilyHidden = false
 
   private readonly boundHandleTimeUpdate: (event: Event) => void
 
@@ -69,8 +70,8 @@ export class FixedSkipService {
 
   private handleTimeUpdate(event: Event) {
     this.currentVideo = event.target as HTMLVideoElement
-    // Render button only when we have a video and button isn't already shown
-    if (this.currentVideo && !this.activeButton) {
+    // Render button only when we have a video, button isn't already shown, and not temporarily hidden
+    if (this.currentVideo && !this.activeButton && !this.isTemporarilyHidden) {
       this.renderButton()
     }
   }
@@ -107,9 +108,11 @@ export class FixedSkipService {
   }
 
   private hideButtonTemporarily() {
+    this.isTemporarilyHidden = true
     this.removeButton()
     // Re-show button after 3 seconds so user can skip again if needed
     setTimeout(() => {
+      this.isTemporarilyHidden = false
       if (this.enabled) {
         this.renderButton()
       }
