@@ -56,7 +56,7 @@ export class FixedSkipService {
   }
 
   setOptions(opts: { fixedSkipSeconds: number }) {
-    this.fixedSkipSeconds = opts.fixedSkipSeconds
+    this.fixedSkipSeconds = opts.fixedSkipSeconds ?? 90
     if (this.enabled) {
       this.renderButton()
     }
@@ -93,9 +93,10 @@ export class FixedSkipService {
   }
 
   private skipForward() {
-    if (this.currentVideo) {
+    const video = this.currentVideo ?? this.videoEventService.getVideoElement()
+    if (video) {
       this.logger.debug(`Skipping forward ${this.fixedSkipSeconds}s`)
-      this.currentVideo.currentTime += this.fixedSkipSeconds
+      video.currentTime += this.fixedSkipSeconds
     }
   }
 
