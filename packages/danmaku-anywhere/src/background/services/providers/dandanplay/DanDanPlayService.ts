@@ -240,7 +240,11 @@ export class DanDanPlayService implements IDanmakuProvider {
 
     this.logger.debug('Fetching danmaku', meta, paramsCopy)
 
-    const commentsRes = await danDanPlay.commentGetComment(
+    // NOTE:
+    // Some DanDanPlay servers may return related/third-party comments without applying the
+    // required time shift, which makes a subset of comments appear minutes off. Fetching
+    // related items manually allows us to apply `shift` precisely.
+    const commentsRes = await danDanPlay.commentGetCommentManualWithRelated(
       providerIds.episodeId,
       paramsCopy,
       this.context
