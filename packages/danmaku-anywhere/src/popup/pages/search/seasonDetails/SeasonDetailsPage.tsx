@@ -1,4 +1,4 @@
-import {
+﻿import {
   DanmakuSourceType,
   type EpisodeMeta,
   type WithSeason,
@@ -21,6 +21,7 @@ import { ErrorMessage } from '@/common/components/ErrorMessage'
 import { TabLayout } from '@/common/components/layout/TabLayout'
 import { TabToolbar } from '@/common/components/layout/TabToolbar'
 import { useToast } from '@/common/components/Toast/toastStore'
+import { resolveBatchDownloadOutcome } from '@/common/danmaku/batchDownloadOutcome'
 import { useFetchDanmakuLite } from '@/common/danmaku/queries/useFetchDanmakuLite'
 import { useFetchGenericDanmaku } from '@/common/danmaku/queries/useFetchGenericDanmaku'
 import { isNotCustom } from '@/common/danmaku/utils'
@@ -117,10 +118,13 @@ export const SeasonDetailsPage = () => {
     setBatchProgress({ total: selectedEpisodes.length, completed: 0 })
 
     toast.info(
-      t('searchPage.batchDownload.start', '开始批量下载：{{count}} 集', {
+      t('searchPage.batchDownload.start', {
         count: selectedEpisodes.length,
       })
     )
+
+    let completed = 0
+    let batchError: unknown
 
     try {
       for (let i = 0; i < selectedEpisodes.length; i++) {
@@ -135,9 +139,10 @@ export const SeasonDetailsPage = () => {
           },
         })
 
+        completed = i + 1
         setBatchProgress((prev) => {
           if (!prev) return prev
-          return { ...prev, completed: i + 1 }
+          return { ...prev, completed }
         })
 
         // Yield so the UI can update progress and remain responsive.
@@ -145,19 +150,42 @@ export const SeasonDetailsPage = () => {
         await new Promise((r) => setTimeout(r, 0))
       }
     } catch (e) {
-      // The underlying mutation already toasts on errors; keep going is harder with mutation state,
-      // so for now we stop the batch if an unexpected error bubbles up here.
-      const message = e instanceof Error ? e.message : String(e)
-      toast.error(message)
+      batchError = e
     } finally {
-      setBatchProgress(null)
       // Refresh the season/episode caches once at the end so the list reflects newly downloaded items.
       void queryClient.invalidateQueries({
         queryKey: seasonQueryKeys.all(),
         exact: true,
       })
       void queryClient.invalidateQueries({ queryKey: episodeQueryKeys.all() })
-      toast.success(t('searchPage.batchDownload.done', '批量下载完成'))
+
+      const result = resolveBatchDownloadOutcome({
+        total: selectedEpisodes.length,
+        completed,
+        cancelled: cancelBatchRef.current,
+        error: batchError,
+      })
+
+      if (result.outcome === 'success') {
+        toast.success(t('searchPage.batchDownload.done'))
+      } else if (result.outcome === 'cancelled') {
+        toast.info(
+          t('searchPage.batchDownload.cancelled', {
+            done: result.completed,
+            total: result.total,
+          })
+        )
+      } else {
+        const message =
+          batchError instanceof Error ? batchError.message : String(batchError)
+        toast.error(
+          t('searchPage.batchDownload.failed', {
+            message,
+          })
+        )
+      }
+
+      setBatchProgress(null)
       clearSelection()
       setIsSelectMode(false)
     }
@@ -179,14 +207,14 @@ export const SeasonDetailsPage = () => {
                   onClick={handleSelectAll}
                   disabled={isBatchDownloading || allEpisodes.length === 0}
                 >
-                  {t('common.selectAll', '全选')}
+                  {t('common.selectAll')}
                 </Button>
                 <Button
                   size="small"
                   onClick={() => clearSelection()}
                   disabled={isBatchDownloading || selectedCount === 0}
                 >
-                  {t('common.clear', '清空')}
+                  {t('common.clear')}
                 </Button>
                 <Button
                   size="small"
@@ -195,7 +223,7 @@ export const SeasonDetailsPage = () => {
                   onClick={handleBatchDownload}
                   disabled={isBatchDownloading || selectedCount === 0}
                 >
-                  {t('searchPage.batchDownload.download', '下载 ({{count}})', {
+                  {t('searchPage.batchDownload.download', {
                     count: selectedCount,
                   })}
                 </Button>
@@ -205,7 +233,7 @@ export const SeasonDetailsPage = () => {
                     color="warning"
                     onClick={handleCancelBatch}
                   >
-                    {t('common.cancel', '停止')}
+                    {t('common.cancel')}
                   </Button>
                 )}
                 <Button
@@ -213,7 +241,7 @@ export const SeasonDetailsPage = () => {
                   onClick={toggleSelectMode}
                   disabled={isBatchDownloading}
                 >
-                  {t('common.done', '完成')}
+                  {t('common.done')}
                 </Button>
               </>
             ) : (
@@ -222,7 +250,7 @@ export const SeasonDetailsPage = () => {
                 onClick={toggleSelectMode}
                 disabled={isPending}
               >
-                {t('searchPage.batchDownload.enable', '批量下载')}
+                {t('searchPage.batchDownload.enable')}
               </Button>
             )}
           </Stack>
@@ -231,14 +259,10 @@ export const SeasonDetailsPage = () => {
       {batchProgress && (
         <Stack px={2} py={1} gap={1}>
           <Typography variant="caption" color="text.secondary">
-            {t(
-              'searchPage.batchDownload.progress',
-              '下载进度：{{done}}/{{total}}',
-              {
-                done: batchProgress.completed,
-                total: batchProgress.total,
-              }
-            )}
+            {t('searchPage.batchDownload.progress', {
+              done: batchProgress.completed,
+              total: batchProgress.total,
+            })}
           </Typography>
           <LinearProgress
             variant="determinate"

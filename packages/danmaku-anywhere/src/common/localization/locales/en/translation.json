@@ -63,6 +63,7 @@
     "apply": "Apply",
     "autoSave": "Auto-save",
     "cancel": "Cancel",
+    "clear": "Clear",
     "close": "Close",
     "confirm": "Confirm",
     "confirmDeleteMessage": "Are you sure you want to delete \"{{name}}\"?",
@@ -74,6 +75,7 @@
     "delete": "Delete",
     "deleted": "Deleted",
     "docs": "Documentation",
+    "done": "Done",
     "duration": {
       "day_one": "{{count}} day",
       "day_other": "{{count}} days"
@@ -95,6 +97,7 @@
     "saved": "Saved",
     "saving": "Saving...",
     "search": "Search",
+    "selectAll": "Select all",
     "success": "Success",
     "test": "Test",
     "time": "Time",
@@ -513,6 +516,15 @@
         "videoUrl": "Only supports parsing of anime, drama, movies, and other non-user uploaded videos. Supported sources: Bilibili, Tencent Video"
       },
       "videoUrl": "Video URL"
+    },
+    "batchDownload": {
+      "start": "Start batch download: {{count}} episodes",
+      "download": "Download ({{count}})",
+      "enable": "Batch download",
+      "progress": "Download progress: {{done}}/{{total}}",
+      "done": "Batch download completed",
+      "cancelled": "Batch download stopped: {{done}}/{{total}} completed",
+      "failed": "Batch download failed: {{message}}"
     },
     "retrySearch": "Retry",
     "search": "Search",

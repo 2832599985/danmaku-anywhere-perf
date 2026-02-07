@@ -63,6 +63,7 @@
     "apply": "应用",
     "autoSave": "自动保存",
     "cancel": "取消",
+    "clear": "清空",
     "close": "关闭",
     "confirm": "确认",
     "confirmDeleteMessage": "确定要删除 \"{{name}}\" 吗？",
@@ -74,6 +75,7 @@
     "delete": "删除",
     "deleted": "已删除",
     "docs": "文档",
+    "done": "完成",
     "duration": {
       "day_other": "天"
     },
@@ -94,6 +96,7 @@
     "saved": "已保存",
     "saving": "正在保存...",
     "search": "搜索",
+    "selectAll": "全选",
     "success": "成功",
     "test": "测试",
     "time": "时间",
@@ -499,6 +502,15 @@
         "videoUrl": "仅支持解析番剧，电影等非用户上传类视频。支持来源：哔哩哔哩、腾讯视频"
       },
       "videoUrl": "视频链接"
+    },
+    "batchDownload": {
+      "start": "开始批量下载：{{count}} 集",
+      "download": "下载 ({{count}})",
+      "enable": "批量下载",
+      "progress": "下载进度：{{done}}/{{total}}",
+      "done": "批量下载完成",
+      "cancelled": "批量下载已停止：已完成 {{done}}/{{total}}",
+      "failed": "批量下载失败：{{message}}"
     },
     "retrySearch": "重试",
     "search": "搜索",

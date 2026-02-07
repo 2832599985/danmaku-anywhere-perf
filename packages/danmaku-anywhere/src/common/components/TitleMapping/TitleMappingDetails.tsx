@@ -102,7 +102,7 @@ export const TitleMappingDetails = ({ map }: TitleMappingDetailsProps) => {
                   return matchWithPinyin(option.title, state.inputValue)
                 })
               }}
-              isOptionEqualToValue={(option, value) => option.id === value.id}
+              isOptionEqualToValue={(option, value) => option.id === value?.id}
               noOptionsText={t(
                 'titleMapping.noSeasons',
                 'No options for the selected provider'

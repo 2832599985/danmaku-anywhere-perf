@@ -152,6 +152,12 @@ export class OptionsService<T extends OptionsSchema> {
     if (!options) {
       return this.defaultOptions
     }
+    if (options.data === undefined || options.data === null) {
+      this.logger.warn(
+        'Stored options payload is missing "data"; falling back to default options'
+      )
+      return this.defaultOptions
+    }
     return options.data
   }
 

@@ -83,8 +83,9 @@ export class ExtensionOptionsService implements IStoreService {
               draft.danmakuSources.dandanplay.enabled = true
               draft.danmakuSources.bilibili = {
                 enabled: false,
-                // biome-ignore lint/suspicious/noExplicitAny: deprecated field
-              } as any
+                danmakuTypePreference: 'xml',
+                protobufLimitPerMin: 200,
+              }
             }
           }),
       })
