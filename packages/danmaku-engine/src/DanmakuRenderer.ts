@@ -20,10 +20,14 @@ import type {
 } from './worker/types'
 
 const WORKER_THRESHOLD = 5000
-const WORKER_CHUNK_SIZE = 1000
+// Smaller chunks reduce "time to first parsed batch", which helps keep playback
+// timeline aligned (avoids main-thread on-demand parsing early in playback).
+const WORKER_CHUNK_SIZE = 300
 const IDLE_CHUNK_SIZE = 300
 const IDLE_MIN_TIME_REMAINING = 4
 const IDLE_POLYFILL_BUDGET_MS = 12
+const WARMUP_BUDGET_MS = 6
+const WARMUP_MAX_COMMENTS = 400
 
 const requestIdle = (cb: IdleRequestCallback): number => {
   if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
@@ -173,6 +177,12 @@ export class DanmakuRenderer {
       sorted: !isSorted,
       count: timedComments.length,
     })
+
+    // Warm up parsing for the comments closest to the current playback cursor.
+    // This reduces the chance of the timeupdate loop needing to synchronously
+    // transform comments on the main thread (which makes some comments appear late).
+    const preparseStartIndex = this.getPreparseStartIndex(timedComments)
+    this.warmupPreparse(timedComments, preparseStartIndex)
 
     const managerStart = performance.now()
     const manager = create<ParsedComment>({
@@ -374,6 +384,48 @@ export class DanmakuRenderer {
 
     // If we're beyond the last comment time, just start from 0.
     return ans >= total ? 0 : ans
+  }
+
+  private warmupPreparse(timedComments: TimedComment[], startIndex: number) {
+    const total = timedComments.length
+    if (total === 0) return
+
+    const safeStart = Number.isFinite(startIndex)
+      ? Math.min(Math.max(Math.trunc(startIndex), 0), total)
+      : 0
+
+    const start = performance.now()
+    let processed = 0
+    let parsedOk = 0
+    let parsedFail = 0
+
+    for (let i = 0; i < total && processed < WARMUP_MAX_COMMENTS; i += 1) {
+      const idx = (safeStart + i) % total
+      const entry = timedComments[idx]
+      if (entry.parsed || entry.parseError) continue
+
+      try {
+        entry.parsed = transformComment(entry.raw, 0)
+        parsedOk += 1
+      } catch {
+        entry.parseError = true
+        parsedFail += 1
+      }
+
+      processed += 1
+      if (performance.now() - start >= WARMUP_BUDGET_MS) {
+        break
+      }
+    }
+
+    const totalMs = performance.now() - start
+    if (processed > 0) {
+      this.perfReporter?.('warmup_preparse_ms', totalMs, {
+        processed,
+        ok: parsedOk,
+        fail: parsedFail,
+      })
+    }
   }
 
   private startPreparse(timedComments: TimedComment[]) {
