@@ -12,12 +12,6 @@ export const chromeSender: ChromeSender = async <TInput, TOutput>(
     payload
   )) as RPCResponse<TOutput>
 
-  if (chrome.runtime.lastError) {
-    throw new RpcException(
-      chrome.runtime.lastError.message ?? 'Unknown lastError'
-    )
-  }
-
   return res
 }
 
@@ -42,9 +36,13 @@ export const tabSender: TabSender = async <TInput, TOutput>(
     throw new RpcException('No matching tab found')
   }
 
+  if (tab.id === undefined) {
+    throw new RpcException('Tab has no ID')
+  }
+
   try {
     return (await chrome.tabs.sendMessage(
-      tab.id as number,
+      tab.id,
       payload
     )) as RPCResponse<TOutput>
   } catch (e) {

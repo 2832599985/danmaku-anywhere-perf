@@ -27,19 +27,23 @@ export const useMigrateDanmaku = () => {
      * If the previous active frame is mounted, unmount the danmaku,
      * then mount it to the new active frame
      */
-    if (
-      prevActiveFrameId.current &&
-      allFrames.get(prevActiveFrameId.current)?.mounted
-    ) {
-      unmountDanmaku.mutate(prevActiveFrameId.current)
-    }
-
-    if (episodes && episodes.length > 0) {
-      if ('comments' in episodes[0]) {
-        void mountDanmaku(episodes as GenericEpisode[])
+    const migrate = async () => {
+      if (
+        prevActiveFrameId.current !== undefined &&
+        allFrames.get(prevActiveFrameId.current)?.mounted
+      ) {
+        await unmountDanmaku.mutateAsync(prevActiveFrameId.current)
       }
+
+      if (episodes && episodes.length > 0) {
+        if ('comments' in episodes[0]) {
+          void mountDanmaku(episodes as GenericEpisode[])
+        }
+      }
+
+      prevActiveFrameId.current = activeFrame.frameId
     }
 
-    prevActiveFrameId.current = activeFrame.frameId
+    void migrate()
   }, [activeFrame])
 }

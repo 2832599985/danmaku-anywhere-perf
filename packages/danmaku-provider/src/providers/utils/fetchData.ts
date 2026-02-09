@@ -51,9 +51,9 @@ const createUrl = (url: string, query?: Record<string, unknown>) => {
 
 async function defaultGetErrorMessage(res: Response) {
   if (res.headers.has('X-Error-Message')) {
-    return res.headers.get('X-Error-Message')
+    return res.headers.get('X-Error-Message') ?? undefined
   }
-  return null
+  return undefined
 }
 
 export const fetchData = async <OutSchema extends ZodType>(

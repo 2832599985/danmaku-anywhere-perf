@@ -149,8 +149,8 @@ export class VideoNodeObserverService {
     const lastEmitted = this.eventLastEmitted.get(event) || 0
     const now = Date.now()
 
-    // Throttle events to avoid excessive calls
-    if (now - lastEmitted < 100) return
+    // Throttle events to avoid excessive calls, but allow videoNodeRemove to bypass
+    if (event !== 'videoNodeRemove' && now - lastEmitted < 100) return
 
     if (event === 'videoNodeRemove') {
       // Debounce the videoNodeRemove event to allow for potential re-adding of the node
@@ -222,6 +222,15 @@ export class VideoNodeObserverService {
   public stop() {
     this.rootObs.disconnect()
     this.srcObs.cleanup()
+    for (const video of this.videoStack) {
+      const listener = this.videoListeners.get(video)
+      if (listener) {
+        video.removeEventListener('play', listener)
+        video.removeEventListener('pause', listener)
+        this.videoListeners.delete(video)
+      }
+    }
+    this.videoStack = []
     this.eventMap.clear()
   }
 }

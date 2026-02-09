@@ -62,7 +62,9 @@ export interface DanmakuOption {
   speed?: number
 }
 
-const EMPTY_STYLE: Record<string, string> = {}
+const EMPTY_STYLE: Record<string, string> = Object.freeze(
+  {} as Record<string, string>
+)
 
 export const transformComment = (
   comment: CommentEntity,
@@ -92,6 +94,8 @@ export const transformComment = (
   return parsed
 }
 
+const regexCache = new Map<string, RegExp | null>()
+
 // returns true if the comment should be filtered out
 export const applyFilter = (comment: string, filters: DanmakuFilter[]) => {
   return filters.some(({ type, value, enabled }) => {
@@ -100,8 +104,18 @@ export const applyFilter = (comment: string, filters: DanmakuFilter[]) => {
     switch (type) {
       case 'text':
         return comment.includes(value)
-      case 'regex':
-        return new RegExp(value).test(comment)
+      case 'regex': {
+        if (!regexCache.has(value)) {
+          try {
+            regexCache.set(value, new RegExp(value))
+          } catch {
+            regexCache.set(value, null)
+          }
+        }
+        const regex = regexCache.get(value)
+        if (!regex) return false
+        return regex.test(comment)
+      }
     }
   })
 }

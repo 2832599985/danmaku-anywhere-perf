@@ -199,6 +199,7 @@ export const bindVideo =
         video.removeEventListener('playing', handlePlay)
         video.removeEventListener('pause', handlePause)
         video.removeEventListener('waiting', handlePause)
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
       },
       updateOptions() {
         // the offset changes only when the config changes

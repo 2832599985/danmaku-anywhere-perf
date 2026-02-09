@@ -44,14 +44,10 @@ export const SeasonDetailsPage = () => {
 
   const goBack = useGoBack()
 
-  if (!season || !provider) return null
-
-  const isCustomSeason = !isNotCustom(season)
-  // Use a non-suspense query so the toolbar can render immediately, while still sharing cache
-  // with the suspense query inside `EpisodeSearchList`.
-  const seasonId = isNotCustom(season) ? season.id : 0
+  const isCustomSeason = season ? !isNotCustom(season) : true
+  const seasonId = season && isNotCustom(season) ? season.id : 0
   const episodesQuery = useQuery({
-    enabled: !isCustomSeason,
+    enabled: !!season && !!provider && !isCustomSeason,
     queryKey: seasonQueryKeys.episodes(seasonId),
     queryFn: () => chromeRpcClient.episodeFetchBySeason({ seasonId }),
     select: (res) => res.data,
@@ -70,9 +66,6 @@ export const SeasonDetailsPage = () => {
   }>(null)
   const cancelBatchRef = useRef(false)
 
-  const selectedCount = selectedKeys.size
-  const isBatchDownloading = batchProgress !== null
-
   const allEpisodes = episodesQuery.data ?? []
 
   const selectedEpisodes = useMemo(() => {
@@ -80,6 +73,11 @@ export const SeasonDetailsPage = () => {
     if (selectedKeys.size === 0) return []
     return allEpisodes.filter((ep) => selectedKeys.has(buildEpisodeKey(ep)))
   }, [allEpisodes, isCustomSeason, selectedKeys])
+
+  if (!season || !provider) return null
+
+  const selectedCount = selectedKeys.size
+  const isBatchDownloading = batchProgress !== null
 
   const clearSelection = () => setSelectedKeys(new Set())
 

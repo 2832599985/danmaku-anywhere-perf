@@ -126,6 +126,7 @@ export class VideoSkipService {
     }
     if (this.activeButton) {
       this.activeButton.root.unmount()
+      this.activeButton.node.remove()
       this.activeButton = null
     }
     this.currentVideo = null

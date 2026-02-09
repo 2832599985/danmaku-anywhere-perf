@@ -21,7 +21,7 @@ export const createPopoverRoot = ({ id }: PopoverRootOptions) => {
 
   shadowContainer.appendChild(shadowRoot)
 
-  document.body.append(root)
+  ;(document.body || document.documentElement).append(root)
   root.showPopover()
 
   const shadowStyle = document.createElement('style')
@@ -29,7 +29,7 @@ export const createPopoverRoot = ({ id }: PopoverRootOptions) => {
 
   // prevent global styles from leaking into shadow dom
   // TODO: rem unit is still affected by html { font-size }
-  shadowStyle.innerHTML = shadowCss
+  shadowStyle.textContent = shadowCss
 
   return {
     // root element in the real dom

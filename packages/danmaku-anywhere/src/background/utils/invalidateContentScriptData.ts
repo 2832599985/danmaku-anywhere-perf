@@ -7,6 +7,7 @@ export const invalidateContentScriptData = async (senderTabId?: number) => {
       // don't send invalidateEpisodes to the tab that initiated the request
       return
     }
+    const tabIndex = tab.index === -1 ? undefined : tab.index
     void controllerRpcClient
       .invalidateCache(
         undefined,
@@ -14,7 +15,7 @@ export const invalidateContentScriptData = async (senderTabId?: number) => {
         {
           tabInfo: {
             windowId: tab.windowId,
-            index: tab.index,
+            index: tabIndex,
           },
         }
       )

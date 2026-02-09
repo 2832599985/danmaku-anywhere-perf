@@ -257,15 +257,15 @@ const useStoreBase = create<StoreState>()(
         return activeFrame
       },
       setActiveFrame: (frameId) => {
-        const selectedFrame = get().frame.allFrames.get(frameId)
-
-        if (!selectedFrame) {
-          throw new Error(
-            `Error setting active frame: Frame ${frameId} not found`
-          )
-        }
-
         set((state) => {
+          const selectedFrame = state.frame.allFrames.get(frameId)
+
+          if (!selectedFrame) {
+            throw new Error(
+              `Error setting active frame: Frame ${frameId} not found`
+            )
+          }
+
           state.frame.activeFrame = selectedFrame
         })
       },

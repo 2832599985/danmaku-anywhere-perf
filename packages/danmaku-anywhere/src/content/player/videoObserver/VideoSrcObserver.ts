@@ -14,13 +14,13 @@ export class VideoSrcObserver {
         if (!(target instanceof HTMLVideoElement)) continue
 
         if (this.currentSrc !== target.src) {
+          this.currentSrc = target.src
           this.srcChangeListeners.forEach((listener) => {
             if (this.videoNode) {
               listener(this.currentSrc, this.videoNode)
             }
           })
         }
-        this.currentSrc = target.src
       }
     })
   }

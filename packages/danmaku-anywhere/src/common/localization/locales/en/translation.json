@@ -251,8 +251,8 @@
     "importSuccess_one": "Successfully imported {{count}} file",
     "importSuccess_other": "Successfully imported {{count}} files",
     "parseError": "Failed to parse file",
-    "skipped_one": "Skpped {{count}} file",
-    "skipped_other": "Skpped {{count}} files",
+    "skipped_one": "Skipped {{count}} file",
+    "skipped_other": "Skipped {{count}} files",
     "willImport_one": "Will import {{count}} file",
     "willImport_other": "Will import {{count}} files"
   },
@@ -387,8 +387,8 @@
       "bilibili": {
         "danmakuTypePreference": "Danmaku Type Preference",
         "help": {
-          "danmakuTypePreferenceProtobuf": "optionsPage.danmakuSource.bilibili.help.danmakuTypePreferenceProtobuf",
-          "danmakuTypePreferenceXML": "optionsPage.danmakuSource.bilibili.help.danmakuTypePreferenceXML"
+          "danmakuTypePreferenceProtobuf": "Protobuf: Slower to fetch, but returns more comments, up to 1000 per minute. Longer videos take longer to fetch.",
+          "danmakuTypePreferenceXML": "XML: Fast to fetch, but returns fewer comments. Depending on the video type, between 500 and 10000 comments."
         }
       },
       "dandanplay": {
@@ -432,7 +432,7 @@
       "advanced": "Advanced",
       "backup": "Backup & Restore",
       "dataManagement": "Data Management",
-      "help": "关于",
+      "help": "About",
       "hotkeys": "Hotkeys",
       "player": "Player Settings"
     },
@@ -454,7 +454,7 @@
       "enabled": "Enable Retention Policy",
       "purgeNow": "Purge Now",
       "tooltip": {
-        "deleteCommentsAfter": "optionsPage.retentionPolicy.tooltip.deleteCommentsAfter",
+        "deleteCommentsAfter": "Comments older than the specified number of days will be deleted. Set to 0 to never delete.",
         "nextPurge": "Next purge at {{time}}"
       }
     },

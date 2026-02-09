@@ -108,16 +108,26 @@ export class RpcManager {
 
           match(data)
             .with({ state: 'active' }, (data) => {
-              void this.iconService.setActive(tabId, data.count)
+              void this.iconService
+                .setActive(tabId, data.count)
+                .catch((e) => this.logger.warn('Failed to set icon active', e))
             })
             .with({ state: 'inactive' }, () => {
-              void this.iconService.setNormal(tabId)
+              void this.iconService
+                .setNormal(tabId)
+                .catch((e) => this.logger.warn('Failed to set icon normal', e))
             })
             .with({ state: 'available' }, () => {
-              void this.iconService.setNormal(tabId)
+              void this.iconService
+                .setNormal(tabId)
+                .catch((e) => this.logger.warn('Failed to set icon normal', e))
             })
             .with({ state: 'unavailable' }, () => {
-              void this.iconService.setUnavailable(tabId)
+              void this.iconService
+                .setUnavailable(tabId)
+                .catch((e) =>
+                  this.logger.warn('Failed to set icon unavailable', e)
+                )
             })
             .exhaustive()
 
@@ -330,6 +340,7 @@ export class RpcManager {
             'rw',
             this.db.season,
             this.db.episode,
+            this.db.seasonMap,
             async () => {
               const seasons = await this.db.season
                 .where({ providerConfigId: id })
@@ -341,6 +352,20 @@ export class RpcManager {
                   .where('seasonId')
                   .anyOf(seasonIds)
                   .delete()
+
+                // Clean up seasonMap entries referencing deleted seasons
+                for (const seasonId of seasonIds) {
+                  await this.db.seasonMap
+                    .where('seasonIds')
+                    .equals(seasonId)
+                    .modify((val) => {
+                      const updated =
+                        SeasonMap.fromSnapshot(val).withoutSeasonId(seasonId)
+                      const snapshot = updated.toSnapshot()
+                      val.seasonIds = snapshot.seasonIds
+                      val.seasons = snapshot.seasons
+                    })
+                }
               }
 
               await this.db.season.where({ providerConfigId: id }).delete()
@@ -440,7 +465,35 @@ export class RpcManager {
     rpcServer.listen(chrome.runtime.onMessage)
     rpcRelay.listen(chrome.runtime.onMessage)
 
-    // also listen to external messages
-    rpcServer.listen(chrome.runtime.onMessageExternal)
+    // Only expose safe read-only methods to external extensions
+    const externalAllowedMethods = new Set([
+      'getExtensionManifest',
+      'getPlatformInfo',
+      'seasonGetAll',
+      'seasonFilter',
+      'episodeFilter',
+      'episodeFilterLite',
+      'episodeFilterCustom',
+      'episodeFilterCustomLite',
+      'seasonMapGetAll',
+    ])
+
+    chrome.runtime.onMessageExternal.addListener(
+      (message, sender, sendResponse) => {
+        if (!message?.method || !externalAllowedMethods.has(message.method)) {
+          sendResponse({
+            state: 'errored',
+            error: `Method not allowed for external callers: ${message?.method}`,
+          })
+          return
+        }
+
+        rpcServer
+          .onMessage(message, sender)
+          .then(sendResponse)
+          .catch(this.logger.error)
+        return true
+      }
+    )
   }
 }

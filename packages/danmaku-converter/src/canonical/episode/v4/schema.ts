@@ -19,7 +19,7 @@ import {
  */
 export const zCustomEpisodeInsertV4 = z.object({
   provider: z.literal(DanmakuSourceType.MacCMS),
-  title: z.string().refine(stripHtml),
+  title: z.string().transform(stripHtml),
   comments: z.array(zCommentEntity),
   commentCount: z.number(),
   schemaVersion: z.literal(4),
@@ -36,7 +36,7 @@ export type CustomEpisodeLiteV4 = Omit<CustomEpisodeV4, 'comments'>
  */
 const zBaseEpisodeV4 = z.object({
   // Episode title
-  title: z.string().refine(stripHtml),
+  title: z.string().transform(stripHtml),
   // Episode number
   episodeNumber: z.union([z.number(), z.string()]).optional(),
   // Cover image url

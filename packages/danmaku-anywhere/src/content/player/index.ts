@@ -222,7 +222,7 @@ extensionOptionsService.onChange(applyPlayerOptions)
 /**
  * Window events
  */
-document.addEventListener('fullscreenchange', () => {
+const handleFullscreenChange = () => {
   /**
    * The last element in the top layer is shown on top.
    * Hiding then showing the popover will make it the last element in the top layer.
@@ -233,9 +233,20 @@ document.addEventListener('fullscreenchange', () => {
   root.showPopover()
   // Then notify the controller so that the controller can also toggle popover to stay on top
   void playerRpcClient.controller['relay:event:showPopover']({ frameId })
-})
+}
+
+document.addEventListener('fullscreenchange', handleFullscreenChange)
 
 playerRpcServer.listen(chrome.runtime.onMessage)
+
+window.addEventListener('pagehide', () => {
+  document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  playerRpcServer.unlisten(chrome.runtime.onMessage)
+  managerService.stop()
+  videoSkipService.disable()
+  fixedSkipService.disable()
+  danmakuDensityService.disable()
+})
 
 Logger.debug('Player script listening')
 

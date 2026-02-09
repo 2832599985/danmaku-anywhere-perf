@@ -124,11 +124,18 @@ export class DanmakuService {
   }
 
   async bulkUpsert(data: EpisodeInsert[]): Promise<Episode[]> {
-    const results: Episode[] = []
-    for (const item of data) {
-      results.push(await this.upsert(item))
-    }
-    return results
+    return this.db.transaction(
+      'rw',
+      this.db.episode,
+      this.db.season,
+      async () => {
+        const results: Episode[] = []
+        for (const item of data) {
+          results.push(await this.upsert(item))
+        }
+        return results
+      }
+    )
   }
 
   async upsert<T extends EpisodeInsert>(data: T): Promise<DbEntity<T>> {

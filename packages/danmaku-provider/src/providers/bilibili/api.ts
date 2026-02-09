@@ -75,8 +75,6 @@ const search = async (
 export const searchMedia = async (
   params: BiliBiliSearchParams
 ): Promise<Result<BilibiliMedia[], DanmakuProviderError>> => {
-  await throttle()
-
   // We need to handle multiple promises returning Result
   const [ftResult, bangumiResult] = await Promise.all([
     search(params, 'media_ft'),

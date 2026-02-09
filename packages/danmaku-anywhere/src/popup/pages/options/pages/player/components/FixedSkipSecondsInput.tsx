@@ -1,5 +1,5 @@
 import { ListItem, ListItemText, Stack, TextField } from '@mui/material'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
@@ -10,6 +10,10 @@ export const FixedSkipSecondsInput = () => {
   const [value, setValue] = useState(
     String(data.playerOptions.fixedSkipSeconds ?? 90)
   )
+
+  useEffect(() => {
+    setValue(String(data.playerOptions.fixedSkipSeconds ?? 90))
+  }, [data.playerOptions.fixedSkipSeconds])
 
   const handleBlur = async () => {
     const parsed = Number.parseInt(value, 10)

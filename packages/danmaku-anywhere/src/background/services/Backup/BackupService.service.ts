@@ -23,7 +23,32 @@ export class BackupService {
         throw new Error('Failed to parse backup data as JSON')
       }
     }
-    // TODO: validate backup data
+
+    // Validate top-level structure of backup data
+    if (
+      !backupData ||
+      typeof backupData !== 'object' ||
+      !('meta' in backupData) ||
+      !('services' in backupData)
+    ) {
+      throw new Error(
+        'Invalid backup data: missing required "meta" and "services" keys'
+      )
+    }
+
+    const { meta, services } = backupData as Record<string, unknown>
+    if (
+      !meta ||
+      typeof meta !== 'object' ||
+      !('version' in meta) ||
+      typeof (meta as Record<string, unknown>).version !== 'number'
+    ) {
+      throw new Error('Invalid backup data: "meta.version" must be a number')
+    }
+    if (!services || typeof services !== 'object') {
+      throw new Error('Invalid backup data: "services" must be an object')
+    }
+
     return this.configStateService.restoreState(backupData as BackupData)
   }
 

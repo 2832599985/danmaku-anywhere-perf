@@ -27,7 +27,7 @@ export const FrameManager = () => {
   const config = useActiveConfig()
 
   const setVideoId = useStore.use.setVideoId()
-  const { activeFrame, setActiveFrame, updateFrame } = useStore.use.frame()
+  const { setActiveFrame, updateFrame } = useStore.use.frame()
 
   const unmountDanmaku = useUnmountDanmaku()
   const { preloadNext, canLoadNext } = usePreloadNextEpisode()
@@ -49,7 +49,11 @@ export const FrameManager = () => {
      *
      * TODO: need some heuristic to handle this case
      */
-    if (activeFrame?.hasVideo && activeFrame.frameId !== frameId) {
+    const currentActiveFrame = useStore.getState().frame.activeFrame
+    if (
+      currentActiveFrame?.hasVideo &&
+      currentActiveFrame.frameId !== frameId
+    ) {
       toast.warn(
         t('danmaku.alert.multipleFrames', 'Multiple frames with video detected')
       )
@@ -63,9 +67,10 @@ export const FrameManager = () => {
   const videoRemovedHandler = useEventCallback((frameId: number) => {
     // Reset state if video is removed from the active frame,
     // but keep the current active frame even when the video is removed
-    if (activeFrame?.frameId === frameId) {
+    const currentActiveFrame = useStore.getState().frame.activeFrame
+    if (currentActiveFrame?.frameId === frameId) {
       setVideoId(undefined)
-      if (activeFrame.mounted) {
+      if (currentActiveFrame.mounted) {
         unmountDanmaku.mutate(frameId)
       }
     }
@@ -73,7 +78,8 @@ export const FrameManager = () => {
   })
 
   const handlePreloadNext = useEventCallback((frameId: number) => {
-    if (frameId !== activeFrame?.frameId || !canLoadNext()) {
+    const currentActiveFrame = useStore.getState().frame.activeFrame
+    if (frameId !== currentActiveFrame?.frameId || !canLoadNext()) {
       return
     }
     preloadNext.mutate(undefined, {

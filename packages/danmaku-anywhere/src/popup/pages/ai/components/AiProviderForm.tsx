@@ -228,6 +228,15 @@ export const AiProviderForm = ({
           </>
         )}
 
+        {isBuiltIn && (
+          <Typography variant="body2" color="text.secondary">
+            {t(
+              'integration.ai.cannotEditBuiltIn',
+              'Settings for the built-in provider cannot be changed. To use custom prompts, change to another AI provider.'
+            )}
+          </Typography>
+        )}
+
         {!isBuiltIn && (
           <Box display="flex" justifyContent="flex-end" gap={1}>
             <Button

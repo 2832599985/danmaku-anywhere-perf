@@ -64,6 +64,9 @@ export function* sampleFromBucket<T>(bucket: T[], limit: number): Generator<T> {
 
   if (limit === 0) return
 
+  // Note: floating-point arithmetic may cause the loop to yield one fewer item
+  // than `limit` in rare edge cases (e.g. when Math.random() * interval + N * interval
+  // rounds up past bucket.length). This is acceptable for sampling purposes.
   const interval = bucket.length / limit
   let i = Math.random() * interval
 

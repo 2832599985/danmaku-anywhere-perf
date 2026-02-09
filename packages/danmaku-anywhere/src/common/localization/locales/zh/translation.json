@@ -77,6 +77,7 @@
     "docs": "文档",
     "done": "完成",
     "duration": {
+      "day_one": "天",
       "day_other": "天"
     },
     "enable": "启用",
@@ -168,10 +169,13 @@
       "exportError": "导出失败：{{message}}",
       "fetchError": "获取弹幕失败：{{message}}",
       "frameListEmpty": "浏览器返回的Frame列表为空，这可能是浏览器的bug。",
+      "mounted_one": "弹幕已装填：{{name}} ({{count}})",
       "mounted_other": "弹幕已装填：{{name}} ({{count}})",
+      "mountedMultiple_one": "已装填{{count}}个多选弹幕",
       "mountedMultiple_other": "已装填{{count}}个多选弹幕",
       "mountError": "装填弹幕失败：{{message}}",
       "multipleFrames": "检测到多个含有视频的Frame",
+      "refreshed_one": "弹幕已刷新：{{name}} ({{count}})",
       "refreshed_other": "弹幕已刷新：{{name}} ({{count}})",
       "refreshingDanmaku": "正在刷新弹幕",
       "unmounted": "弹幕已卸载",
@@ -180,6 +184,7 @@
     },
     "backup": "导出备份",
     "commentContent": "弹幕内容",
+    "commentCounted_one": "{{count}}条弹幕",
     "commentCounted_other": "{{count}}条弹幕",
     "disable": "隐藏弹幕",
     "enable": "显示弹幕",
@@ -240,11 +245,15 @@
     },
     "import": "导入弹幕",
     "importDesc": "导入本地弹幕时文件名将用为弹幕名称。支持.json和.xml文件",
+    "importError_one": "{{count}}个文件导入失败",
     "importError_other": "{{count}}个文件导入失败",
     "importFolder": "导入文件夹",
+    "importSuccess_one": "成功导入{{count}}个文件",
     "importSuccess_other": "成功导入{{count}}个文件",
     "parseError": "文件解析失败",
+    "skipped_one": "跳过{{count}}个文件",
     "skipped_other": "跳过{{count}}个文件",
+    "willImport_one": "将导入{{count}}个文件",
     "willImport_other": "将导入{{count}}个文件"
   },
   "integration": {
@@ -330,8 +339,10 @@
       "pickElement": "选择元素",
       "quick": "优先",
       "regex": "正则表达式（可选）",
+      "regexRuleCount_one": "{{count}}个正则规则",
       "regexRuleCount_other": "{{count}}个正则规则",
       "seasonNumber": "季数（可选）",
+      "selectorRuleCount_one": "{{count}}个XPath规则",
       "selectorRuleCount_other": "{{count}}个XPath规则",
       "title": "配置自动化配置",
       "videoTitle": "视频标题",
@@ -344,12 +355,14 @@
       "checkMountConfig": "检查装填配置",
       "mountingDisabled": "无法在当前页面装填弹幕"
     },
+    "confirmDeleteMultiple_one": "确定要删除{{count}}个弹幕吗？",
     "confirmDeleteMultiple_other": "确定要删除{{count}}个弹幕吗？",
     "goSearch": "前往搜索",
     "importDanmaku": "导入弹幕（或拖拽至此）",
     "libraryEmpty": "弹幕库里什么也没有...",
     "or": "或者",
     "pageTitle": "弹幕库",
+    "selectedCount_one": "已选择{{count}}",
     "selectedCount_other": "已选择{{count}}"
   },
   "optionsPage": {
@@ -434,6 +447,7 @@
     "restrictInitiatorDomain": "限制DNR至发起自扩展的请求",
     "retentionPolicy": {
       "alert": {
+        "nDanmakuDeleted_one": "已删除{{count}}条弹幕",
         "nDanmakuDeleted_other": "已删除{{count}}条弹幕"
       },
       "deleteCommentsAfter": "弹幕保留时间",

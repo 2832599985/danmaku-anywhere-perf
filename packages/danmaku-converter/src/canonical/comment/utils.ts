@@ -2,6 +2,11 @@ import { hexToRgb888, rgb888ToHex } from '../../utils/index.js'
 import type { CommentOptions } from './types.js'
 import { CommentMode } from './types.js'
 
+/**
+ * Parse a gradient string of the form "start~end,flag".
+ * Callers must wrap in try-catch as this does no input validation --
+ * malformed strings will produce NaN / undefined results.
+ */
 export const parseCommentGradient = (s: string) => {
   const [gr, flag] = s.split(',')
   const [start, end] = gr.split('~')

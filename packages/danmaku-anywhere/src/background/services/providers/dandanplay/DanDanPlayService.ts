@@ -288,9 +288,10 @@ export class DanDanPlayService implements IDanmakuProvider {
   }
 
   async sendComment(
+    episodeId: number,
     request: danDanPlay.SendCommentRequest
   ): Promise<Result<{ cid: number }, DanmakuProviderError>> {
-    return danDanPlay.commentSendComment(request)
+    return danDanPlay.commentSendComment(episodeId, request)
   }
 
   async register(

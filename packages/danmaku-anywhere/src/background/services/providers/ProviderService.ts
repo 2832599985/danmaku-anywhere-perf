@@ -17,6 +17,7 @@ import { assertProviderType, isProvider } from '@/common/danmaku/utils'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import type { ProviderConfig } from '@/common/options/providerConfig/schema'
 import { ProviderConfigService } from '@/common/options/providerConfig/service'
+import { RpcException } from '@/common/rpc/types'
 import { invariant, isServiceWorker } from '@/common/utils/utils'
 import type { IDanmakuProvider, OmitSeasonId } from './IDanmakuProvider'
 import {
@@ -133,6 +134,10 @@ export class ProviderService {
 
   async refreshSeason(filter: SeasonQueryFilter) {
     const [season] = await this.seasonService.filter(filter)
+
+    if (!season) {
+      throw new RpcException('Season not found for the given filter')
+    }
 
     const providerConfig = await this.providerConfigService.mustGet(
       season.providerConfigId

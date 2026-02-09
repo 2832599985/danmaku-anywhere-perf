@@ -80,8 +80,8 @@ const fetchDanDanPlay = async <T extends ZodType>(
 
   // parse query early
   if (options.requestSchema?.query) {
-    options.query = options.requestSchema.query.parse(options.query)
-    options.requestSchema.query = undefined
+    const parsedQuery = options.requestSchema.query.parse(options.query)
+    options.query = parsedQuery
   }
   // append query to path
   let path = options.path
@@ -97,7 +97,7 @@ const fetchDanDanPlay = async <T extends ZodType>(
       )
     }
     return fetchData<T>({
-      url: `${context.baseUrl}${options.path}`, // use unmodified path
+      url: `${context.baseUrl}${path}`,
       ...options,
       headers,
     })
@@ -182,10 +182,13 @@ export const commentGetComment = async (
   )
 
   if (!result.success) return result
-  return ok(result.data.comments)
+  const data = result.data
+
+  return ok(data.comments)
 }
 
 export const commentSendComment = async (
+  episodeId: number,
   request: SendCommentRequest,
   context?: DanDanPlayQueryContext
 ): Promise<
@@ -193,7 +196,7 @@ export const commentSendComment = async (
 > => {
   const result = await fetchDanDanPlay(
     {
-      path: '/v2/search/episodes',
+      path: `/v2/comment/${episodeId.toString()}`,
       body: request,
       responseSchema: zSendCommentResponseV2,
       requestSchema: {
@@ -286,7 +289,7 @@ export const commentGetCommentManualWithRelated = async (
               // if the shift is not 0, we need to adjust the time of the comments
               if (entry.shift !== 0) {
                 const options = parseCommentEntityP(comment.p)
-                options.time += entry.shift
+                options.time = Math.max(0, options.time + entry.shift)
                 comment.p = commentOptionsToString(options)
               }
 

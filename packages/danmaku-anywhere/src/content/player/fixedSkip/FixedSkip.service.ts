@@ -123,7 +123,7 @@ export class FixedSkipService {
     const video = this.currentVideo ?? this.videoEventService.getVideoElement()
     if (video) {
       this.logger.debug(`Skipping forward ${this.fixedSkipSeconds}s`)
-      video.currentTime += this.fixedSkipSeconds
+      video.currentTime = this.fixedSkipSeconds
     }
   }
 

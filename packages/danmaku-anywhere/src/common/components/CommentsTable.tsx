@@ -93,7 +93,9 @@ export const CommentsTable = ({
           const aTime = parseCommentEntityTime(a.p)
           const bTime = parseCommentEntityTime(b.p)
           const invalidValue =
-            order === 'asc' ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY
+            order === 'asc'
+              ? Number.POSITIVE_INFINITY
+              : Number.NEGATIVE_INFINITY
           const aValue = Number.isFinite(aTime) ? aTime : invalidValue
           const bValue = Number.isFinite(bTime) ? bTime : invalidValue
 
@@ -125,7 +127,9 @@ export const CommentsTable = ({
         }}
       >
         <Typography variant="h6" sx={{ flexGrow: 1 }}>
-          {t('danmaku.commentCounted', { count: comments.length })}
+          {t('danmaku.commentCounted', {
+            count: filter.trim() ? filteredComments.length : comments.length,
+          })}
         </Typography>
         <FilterButton filter={filter} onChange={setFilter} />
         {showRefresh && (
@@ -156,8 +160,12 @@ export const CommentsTable = ({
                     active={orderBy === cell.id}
                     direction={orderBy === cell.id ? order : 'asc'}
                     onClick={() => {
-                      setOrderBy(cell.id)
-                      setOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+                      if (orderBy !== cell.id) {
+                        setOrderBy(cell.id)
+                        setOrder('asc')
+                      } else {
+                        setOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+                      }
                     }}
                   >
                     {cell.label}

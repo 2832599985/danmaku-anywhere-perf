@@ -1,4 +1,5 @@
 import { Mutex } from 'async-mutex'
+import { Logger } from '@/common/Logger'
 import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
 import { container } from '../ioc'
 import { getSelfDomain } from './getSelfDomain'
@@ -51,7 +52,11 @@ export async function setSessionHeader(
     return {
       removeRule,
       async [Symbol.asyncDispose]() {
-        await removeRule()
+        try {
+          await removeRule()
+        } catch (e) {
+          Logger.warn('Failed to remove session rule during dispose', e)
+        }
       },
     }
   } finally {

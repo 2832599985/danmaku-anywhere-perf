@@ -1,9 +1,10 @@
-import { Container, Paper } from '@mui/material'
+import { Container, Paper, useTheme } from '@mui/material'
 import type { PropsWithChildren } from 'react'
 import { usePlatformInfo } from '@/common/hooks/usePlatformInfo'
 
 export const PopupLayout = ({ children }: PropsWithChildren<{}>) => {
   const { isMobile } = usePlatformInfo()
+  const theme = useTheme()
 
   const width = isMobile ? '100vw' : 500
   const height = isMobile ? '100vh' : 600
@@ -26,8 +27,8 @@ export const PopupLayout = ({ children }: PropsWithChildren<{}>) => {
           height: 1,
           overflow: 'hidden',
           position: 'relative',
-          background: '#0f172a',
-          color: '#fff',
+          background: theme.palette.background.default,
+          color: theme.palette.text.primary,
         }}
       >
         {children}

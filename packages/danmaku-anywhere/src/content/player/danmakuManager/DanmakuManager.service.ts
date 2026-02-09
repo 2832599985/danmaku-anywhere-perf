@@ -39,6 +39,7 @@ export class DanmakuManagerService {
 
   // State
   public isMounted = false
+  private started = false
 
   // Styles
   private rect = new DOMRectReadOnly()
@@ -48,6 +49,10 @@ export class DanmakuManagerService {
 
   // Observers
   private rectObs?: RectObserver
+
+  // Bound event handlers (stable references for add/removeEventListener)
+  private readonly boundHandleVideoNodeChange: (video: HTMLVideoElement) => void
+  private readonly boundHandleVideoNodeRemove: (video: HTMLVideoElement) => void
 
   constructor(
     @inject(VideoNodeObserverService)
@@ -70,6 +75,9 @@ export class DanmakuManagerService {
     this.renderer.setRemotePreparseTransport(createRemotePreparseTransport())
 
     this.debugOverlayService.attach(this.renderer)
+
+    this.boundHandleVideoNodeChange = this.handleVideoNodeChange.bind(this)
+    this.boundHandleVideoNodeRemove = this.handleVideoNodeRemove.bind(this)
 
     const extensionOptionsService = uiContainer.get(ExtensionOptionsService)
 
@@ -96,15 +104,17 @@ export class DanmakuManagerService {
   }
 
   start(videoSelector: string) {
+    if (this.started) return
+    this.started = true
     this.logger.debug('Starting')
 
     this.videoNodeObs.addEventListener(
       'videoNodeChange',
-      this.handleVideoNodeChange.bind(this)
+      this.boundHandleVideoNodeChange
     )
     this.videoNodeObs.addEventListener(
       'videoNodeRemove',
-      this.handleVideoNodeRemove.bind(this)
+      this.boundHandleVideoNodeRemove
     )
 
     this.videoNodeObs.start(videoSelector)
@@ -270,6 +280,7 @@ export class DanmakuManagerService {
 
   stop() {
     this.logger.debug('Stopping')
+    this.started = false
 
     this.teardownObs()
     this.videoNodeObs.stop()

@@ -29,7 +29,20 @@ export class ReadinessService {
   }
 
   async waitUntilReady() {
-    return this.readyPromise
+    const READY_TIMEOUT = 30_000
+    return Promise.race([
+      this.readyPromise,
+      new Promise<void>((resolve) => {
+        setTimeout(() => {
+          if (!this.isReady) {
+            this.logger.warn(
+              `ReadinessService: timed out after ${READY_TIMEOUT}ms waiting for ready state, resolving anyway`
+            )
+          }
+          resolve()
+        }, READY_TIMEOUT)
+      }),
+    ])
   }
 
   setReady() {
@@ -49,6 +62,7 @@ export class ReadinessService {
 
     if (err) {
       this.logger.error('Failed to read last version', err)
+      this.setReady()
       return
     }
 

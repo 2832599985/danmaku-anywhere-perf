@@ -1,8 +1,8 @@
 import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
 import { debounce } from '@mui/material'
 import { inject, injectable } from 'inversify'
-import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import { uiContainer } from '@/common/ioc/uiIoc'
+import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
 import { PerfTimer } from '@/common/utils/perf'
 import { DanmakuLayoutService } from '@/content/player/danmakuLayout/DanmakuLayout.service'
@@ -71,6 +71,8 @@ export class DanmakuDensityService {
   }
 
   enable() {
+    // Guard prevents duplicate listeners: if already enabled, early return
+    // ensures setupEventListeners() is only called once.
     if (this.enabled) {
       return
     }

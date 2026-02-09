@@ -200,7 +200,15 @@ export const zTencentComment = z.object({
           data.content_style?.color ??
           'ffffff'
 
-        const color = hexToRgb888(`#${hexString}`)
+        let color: number
+        try {
+          color = hexToRgb888(`#${hexString}`)
+          if (Number.isNaN(color)) {
+            color = 16777215
+          }
+        } catch {
+          color = 16777215
+        }
 
         // 将字符串 id 转换为数字用于去重
         const numericId = Number.parseInt(data.id, 10)

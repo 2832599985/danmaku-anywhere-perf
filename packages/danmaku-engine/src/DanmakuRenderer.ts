@@ -315,9 +315,14 @@ export class DanmakuRenderer {
   private mergeConfig = (config?: Partial<DanmakuOptions>): DanmakuOptions => {
     if (!config) return this.config
 
-    // manually merge styles
+    // manually merge nested objects
     const style = { ...this.config.style, ...config.style }
-    return { ...this.config, ...config, style }
+    const area = { ...this.config.area, ...config.area }
+    const specialComments = {
+      ...this.config.specialComments,
+      ...config.specialComments,
+    }
+    return { ...this.config, ...config, style, area, specialComments }
   }
 
   destroy(): void {
@@ -488,6 +493,7 @@ export class DanmakuRenderer {
     }
 
     this.worker = worker
+    // rawComments indices must match timedComments indices 1:1 since both are derived from the same filtered source.
     const rawComments = timedComments.map((item) => item.raw)
     this.perfReporter?.('worker_start', 0, { count: rawComments.length })
 
@@ -545,6 +551,7 @@ export class DanmakuRenderer {
 
     this.terminateRemote()
 
+    // rawComments indices must match timedComments indices 1:1 since both are derived from the same filtered source.
     const rawComments = timedComments.map((item) => item.raw)
     this.perfReporter?.('remote_parse_start', 0, { count: rawComments.length })
 

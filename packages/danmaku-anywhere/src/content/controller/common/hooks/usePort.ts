@@ -10,8 +10,7 @@ export const usePort = () => {
 
   useEffect(() => {
     const handleDisconnect = () => {
-      // setDisconnected(true)
-      // Logger.warn('Extension context disconnected.')
+      setDisconnected(true)
     }
 
     if (!port) {

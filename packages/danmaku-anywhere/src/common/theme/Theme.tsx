@@ -4,7 +4,13 @@ import { createTheme, ThemeProvider } from '@mui/material/styles'
 import type { Localization } from '@mui/x-data-grid/internals'
 import { enUS, zhCN } from '@mui/x-data-grid/locales'
 import { produce } from 'immer'
-import { createContext, type PropsWithChildren, use, useMemo } from 'react'
+import {
+  createContext,
+  type PropsWithChildren,
+  use,
+  useCallback,
+  useMemo,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import type { UserTheme } from '@/common/options/extensionOptions/schema'
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
@@ -12,33 +18,37 @@ import { ColorMode } from '@/common/theme/enums'
 
 import { tryCatchSync } from '@/common/utils/tryCatch'
 
-const defaultThemeOptions: ThemeOptions = {
+const getDefaultThemeOptions = (mode: 'dark' | 'light'): ThemeOptions => ({
   palette: {
-    mode: 'dark',
+    mode,
     primary: {
       main: '#8b5cf6', // Violet
     },
     secondary: {
       main: '#d946ef', // Pink/Fuchsia
     },
-    background: {
-      default: '#0f172a', // Deep Slate
-      paper: '#0f172a', // Deep Slate (base for glass)
-    },
+    ...(mode === 'dark' && {
+      background: {
+        default: '#0f172a', // Deep Slate
+        paper: '#0f172a', // Deep Slate (base for glass)
+      },
+    }),
   },
   shape: {
     borderRadius: 16,
   },
   components: {
-    MuiPaper: {
-      styleOverrides: {
-        root: {
-          backgroundColor: 'rgba(15, 23, 42, 0.7)',
-          backdropFilter: 'blur(12px)',
-          backgroundImage: 'none',
+    ...(mode === 'dark' && {
+      MuiPaper: {
+        styleOverrides: {
+          root: {
+            backgroundColor: 'rgba(15, 23, 42, 0.7)',
+            backdropFilter: 'blur(12px)',
+            backgroundImage: 'none',
+          },
         },
       },
-    },
+    }),
     MuiButton: {
       styleOverrides: {
         root: {
@@ -48,7 +58,7 @@ const defaultThemeOptions: ThemeOptions = {
       },
     },
   },
-}
+})
 
 type ThemeContext = UserTheme & {
   setColorMode: (colorScheme: ColorMode) => void
@@ -76,13 +86,16 @@ export const Theme = ({ children, options = {} }: ThemeProps) => {
 
   const { data, partialUpdate } = useExtensionOptions()
 
-  const setColorMode = async (colorScheme: ColorMode) => {
-    await partialUpdate(
-      produce(data, (draft) => {
-        draft.theme.colorMode = colorScheme
-      })
-    )
-  }
+  const setColorMode = useCallback(
+    async (colorScheme: ColorMode) => {
+      await partialUpdate(
+        produce(data, (draft) => {
+          draft.theme.colorMode = colorScheme
+        })
+      )
+    },
+    [data, partialUpdate]
+  )
 
   const colorMode = data.theme.colorMode
   const preferredColorScheme = (prefersDarkMode ?? true) ? 'dark' : 'light'
@@ -95,8 +108,9 @@ export const Theme = ({ children, options = {} }: ThemeProps) => {
       en: enUS,
     }
 
+    const base = getDefaultThemeOptions(colorScheme)
     return createTheme(
-      produce(defaultThemeOptions, (draft) => {
+      produce(base, (draft) => {
         Object.assign(draft, options)
         if (!draft.palette) draft.palette = {}
         draft.palette.mode = colorScheme

@@ -27,7 +27,7 @@ export const useUnmountDanmaku = () => {
       return true
     },
     onSuccess: (_, frameId) => {
-      if (frameId) updateFrame(frameId, { mounted: false })
+      if (frameId !== undefined) updateFrame(frameId, { mounted: false })
       unmount()
       toast.info(t('danmaku.alert.unmounted', 'Danmaku Unmounted'))
     },

@@ -19,6 +19,7 @@ import {
 } from '@mui/material'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { produce } from 'immer'
+import { useRef } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { Outlet } from 'react-router'
@@ -127,8 +128,10 @@ export const RetentionPolicyPage = () => {
 
   const { mutate: wipeData, isPending: isWiping } = useWipeDanmakuStorage()
 
+  const includeCustomEpisodesRef = useRef(false)
+
   const handleWipeData = () => {
-    let includeCustomEpisodes = false
+    includeCustomEpisodesRef.current = false
 
     dialog.delete({
       title: t(
@@ -147,7 +150,7 @@ export const RetentionPolicyPage = () => {
             control={
               <Checkbox
                 onChange={(e) => {
-                  includeCustomEpisodes = e.target.checked
+                  includeCustomEpisodesRef.current = e.target.checked
                 }}
               />
             }
@@ -170,7 +173,7 @@ export const RetentionPolicyPage = () => {
           ),
           onConfirm: () =>
             wipeData(
-              { includeCustomEpisodes },
+              { includeCustomEpisodes: includeCustomEpisodesRef.current },
               { onSuccess: () => toast.success(t('common.success', 'Success')) }
             ),
           confirmButtonProps: { sx: { order: -1 }, color: 'error' },

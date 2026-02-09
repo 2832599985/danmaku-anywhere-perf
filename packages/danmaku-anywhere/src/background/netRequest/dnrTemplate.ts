@@ -18,7 +18,13 @@ export function resolveDnrTemplate(
   for (const [headerName, valueTemplate] of Object.entries(template)) {
     result[headerName] = valueTemplate.replace(/\{(\w+)\}/g, (_, key) => {
       const value = context[key]
-      return value !== undefined && value !== null ? String(value) : ''
+      if (value === undefined || value === null) {
+        console.warn(
+          `dnrTemplate: placeholder "{${key}}" resolved to empty string`
+        )
+        return ''
+      }
+      return String(value)
     })
   }
 
