@@ -200,3 +200,27 @@ export const concatArr = <T>(a: T[], b: T[]): T[] => {
   }
   return a
 }
+
+/**
+ * 弹幕去重：优先使用 cid，fallback 到 content+time 组合
+ */
+export const dedupeComments = <
+  T extends { cid?: number; p: string; m: string },
+>(
+  comments: T[]
+): T[] => {
+  const seen = new Set<string>()
+  return comments.filter((comment) => {
+    // 优先使用 cid 去重
+    const key =
+      comment.cid !== undefined
+        ? `cid:${comment.cid}`
+        : `pt:${comment.p}|${comment.m}`
+
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}

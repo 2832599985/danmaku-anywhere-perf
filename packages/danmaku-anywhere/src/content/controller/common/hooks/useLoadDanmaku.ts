@@ -16,7 +16,7 @@ import { Logger } from '@/common/Logger'
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
 import { playerRpcClient } from '@/common/rpcClient/background/client'
 import { PerfTimer } from '@/common/utils/perf'
-import { concatArr } from '@/common/utils/utils'
+import { concatArr, dedupeComments } from '@/common/utils/utils'
 import { useStore } from '@/content/controller/store/store'
 
 const useMountDanmaku = () => {
@@ -42,13 +42,16 @@ const useMountDanmaku = () => {
   return useMutation({
     mutationFn: async (episodes: GenericEpisode[]) => {
       perfRef.current?.mark('mount_start')
-      const comments: CommentEntity[] =
+      const rawComments: CommentEntity[] =
         episodes.length === 1
           ? episodes[0].comments
           : episodes.reduce<CommentEntity[]>((acc, episode) => {
               concatArr(acc, episode.comments)
               return acc
             }, [])
+
+      // 去重：优先使用 cid，fallback 到 content+time
+      const comments = dedupeComments(rawComments)
 
       perfRef.current?.mark('mount_comments_ready')
       const res = await playerRpcClient.player['relay:command:mount']({

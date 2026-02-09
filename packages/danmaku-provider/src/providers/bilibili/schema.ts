@@ -95,6 +95,7 @@ export const zBilibiliCommentProto = z.object({
     .array(
       z
         .object({
+          id: z.bigint().optional(), // 弹幕唯一ID (dmid)
           progress: z.int(), // time in milliseconds
           mode: z.int().transform((mode) => {
             switch (mode) {
@@ -123,6 +124,8 @@ export const zBilibiliCommentProto = z.object({
           return {
             p: `${data.progress / 1000},${data.mode},${data.color}`,
             m: data.content,
+            // 保留弹幕ID用于去重 (bigint -> number，B站弹幕ID在安全范围内)
+            cid: data.id !== undefined ? Number(data.id) : undefined,
           }
         })
     )

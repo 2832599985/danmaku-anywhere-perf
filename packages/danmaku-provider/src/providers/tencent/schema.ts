@@ -202,9 +202,13 @@ export const zTencentComment = z.object({
 
         const color = hexToRgb888(`#${hexString}`)
 
+        // 将字符串 id 转换为数字用于去重
+        const numericId = Number.parseInt(data.id, 10)
+
         return {
           p: `${data.time_offset / 1000},${CommentMode.rtl},${color}`,
           m: data.content,
+          cid: Number.isNaN(numericId) ? undefined : numericId,
         }
       })
   ),
