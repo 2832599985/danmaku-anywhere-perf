@@ -101,9 +101,18 @@ export class MacCmsProviderService implements IDanmakuProvider {
   }
 
   async getEpisodesByIndexedId(
-    indexedId: string
+    indexedId: string,
+    title?: string
   ): Promise<OmitSeasonId<EpisodeMeta>[]> {
-    const playUrls = this.episodeCache.get(indexedId)
+    let playUrls = this.episodeCache.get(indexedId)
+
+    if (!playUrls && title) {
+      this.logger.debug(
+        `Cache miss for indexedId: ${indexedId}, re-searching with title: ${title}`
+      )
+      await this.search({ keyword: title })
+      playUrls = this.episodeCache.get(indexedId)
+    }
 
     if (!playUrls) {
       this.logger.warn(
@@ -122,7 +131,10 @@ export class MacCmsProviderService implements IDanmakuProvider {
   ): Promise<WithSeason<EpisodeMeta> | null> {
     assertProviderType(season, DanmakuSourceType.MacCMS)
 
-    const episodes = await this.getEpisodesByIndexedId(season.indexedId)
+    const episodes = await this.getEpisodesByIndexedId(
+      season.indexedId,
+      season.title
+    )
 
     if (episodes.length === 0) {
       return null

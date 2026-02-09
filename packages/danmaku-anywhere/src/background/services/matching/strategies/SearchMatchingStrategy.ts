@@ -38,65 +38,88 @@ export class SearchMatchingStrategy implements IMatchingStrategy {
   async match(input: MatchEpisodeInput): Promise<MatchEpisodeResult | null> {
     const { title, mapKey, episodeNumber } = input
 
-    const autoProvider =
-      await this.providerConfigService.getFirstAutomaticProvider()
+    const autoProviders =
+      await this.providerConfigService.getAutomaticProviders()
 
-    if (!autoProvider) {
+    if (autoProviders.length === 0) {
       return null
     }
 
-    const service = this.danmakuProviderFactory(autoProvider)
-
-    this.logger.debug(`Searching for season: ${title}`)
-    const foundSeasonInserts = await service.search({
-      keyword: title,
-    })
-
-    const foundSeasons = await this.seasonService.bulkUpsert(foundSeasonInserts)
-
-    if (foundSeasons.length === 0) {
-      return { status: 'notFound', data: null, cause: 'No seasons found' }
-    }
-
-    if (foundSeasons.length === 1) {
-      const firstSeason = foundSeasons[0] as Season
-      this.logger.debug('Single season found, auto-mapping', firstSeason)
-
-      await this.titleMappingService.add(
-        SeasonMap.fromSeason(mapKey, firstSeason)
-      )
-
-      if (episodeNumber === undefined) {
-        return {
-          status: 'notFound',
-          data: null,
-          cause: 'Episode number is undefined',
-        }
-      }
-
+    for (const autoProvider of autoProviders) {
       try {
-        const data = await this.episodeResolver.resolveEpisode(
-          firstSeason,
-          episodeNumber
+        const service = this.danmakuProviderFactory(autoProvider)
+
+        this.logger.debug(
+          `Searching for season with provider ${autoProvider.name ?? autoProvider.id}: ${title}`
         )
+        const foundSeasonInserts = await service.search({
+          keyword: title,
+        })
+
+        const foundSeasons =
+          await this.seasonService.bulkUpsert(foundSeasonInserts)
+
+        if (foundSeasons.length === 0) {
+          this.logger.debug(
+            `No seasons found with provider ${autoProvider.name ?? autoProvider.id}`
+          )
+          continue
+        }
+
+        if (foundSeasons.length === 1) {
+          const firstSeason = foundSeasons[0] as Season
+          this.logger.debug('Single season found, auto-mapping', firstSeason)
+
+          await this.titleMappingService.add(
+            SeasonMap.fromSeason(mapKey, firstSeason)
+          )
+
+          if (episodeNumber === undefined) {
+            return {
+              status: 'notFound',
+              data: null,
+              cause: 'Episode number is undefined',
+            }
+          }
+
+          try {
+            const data = await this.episodeResolver.resolveEpisode(
+              firstSeason,
+              episodeNumber
+            )
+            return {
+              status: 'success',
+              data,
+              metadata: { strategy: 'search', providerConfig: autoProvider },
+            }
+          } catch (e) {
+            return {
+              status: 'notFound',
+              data: null,
+              cause: serializeError(e).message,
+            }
+          }
+        }
+
+        // Multiple results found, return disambiguation
         return {
-          status: 'success',
-          data,
+          status: 'disambiguation',
+          data: foundSeasons,
           metadata: { strategy: 'search', providerConfig: autoProvider },
         }
       } catch (e) {
-        return {
-          status: 'notFound',
-          data: null,
-          cause: serializeError(e).message,
-        }
+        this.logger.warn(
+          `Provider ${autoProvider.name ?? autoProvider.id} search failed, trying next`,
+          e
+        )
+        continue
       }
     }
 
     return {
-      status: 'disambiguation',
-      data: foundSeasons,
-      metadata: { strategy: 'search', providerConfig: autoProvider },
+      status: 'notFound',
+      data: null,
+      cause: 'No seasons found across all providers',
     }
   }
 }

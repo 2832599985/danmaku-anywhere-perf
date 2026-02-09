@@ -117,7 +117,10 @@ export class ProviderService {
       }
       case DanmakuSourceType.MacCMS: {
         assertProviderType(season, DanmakuSourceType.MacCMS)
-        const episodes = await service.getEpisodesByIndexedId(season.indexedId)
+        const episodes = await service.getEpisodesByIndexedId(
+          season.indexedId,
+          season.title
+        )
         return enrichEpisodes(episodes, season) as WithSeason<EpisodeMeta>[]
       }
     }
