@@ -119,6 +119,8 @@ export type BackgroundMethods = {
   getActiveTabUrl: RPCDef<void, string | null>
   getFrameId: RPCDef<void, number>
   getAllFrames: RPCDef<void, chrome.webNavigation.GetAllFrameResultDetails[]>
+  getExtensionManifest: RPCDef<void, chrome.runtime.ManifestV3>
+  getAlarm: RPCDef<string, chrome.alarms.Alarm | null>
   injectScript: RPCDef<number, void>
   remoteLog: RPCDef<LogEntry, void>
   exportDebugData: RPCDef<void, { id: string }>
@@ -145,6 +147,7 @@ export type BackgroundMethods = {
   testAiProvider: RPCDef<AiProviderConfigInput, TestAiProviderResponse>
   backupExport: RPCDef<void, BackupData>
   backupImport: RPCDef<unknown, BackupRestoreResult>
+  dataWipeDanmaku: RPCDef<{ includeCustomEpisodes: boolean }, void>
 }
 
 type InputWithFrameId<TInput> = TInput extends void

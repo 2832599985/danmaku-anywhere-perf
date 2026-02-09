@@ -56,6 +56,7 @@ export type DanmakuRenderProps = {
   styles: Record<string, string>
   mode: ParsedComment['mode']
   color: string
+  gradient?: ParsedComment['gradient']
 }
 
 export type PerfReporter = (
@@ -222,6 +223,7 @@ export class DanmakuRenderer {
             styles: { ...danmaku.data.style },
             mode: danmaku.data.mode,
             color: danmaku.data.color,
+            gradient: danmaku.data.gradient,
           })
         },
         willRender: (ref) => {

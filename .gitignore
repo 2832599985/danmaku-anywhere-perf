@@ -37,3 +37,4 @@ _tmp_bench_*.json
 bench-artifacts/
 bench-load-danmaku-report.md
 
+.wrangler

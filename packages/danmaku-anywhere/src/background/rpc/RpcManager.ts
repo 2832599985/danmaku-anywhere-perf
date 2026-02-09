@@ -7,6 +7,7 @@ import { inject, injectable } from 'inversify'
 import { match } from 'ts-pattern'
 import { ScriptingManager } from '@/background/scripting/ScriptingManager'
 import { BackupService } from '@/background/services/Backup/BackupService.service'
+import { DataManagementService } from '@/background/services/DataManagementService'
 import { GenAIService } from '@/background/services/GenAIService'
 import { IconService } from '@/background/services/IconService'
 import { ImageCacheService } from '@/background/services/ImageCache/ImageCache.service'
@@ -67,7 +68,9 @@ export class RpcManager {
     @inject(LoggerSymbol) logger: ILogger,
     @inject(DebugFileService) private debugFileService: DebugFileService,
     @inject(ImageCacheService) private imageCacheService: ImageCacheService,
-    @inject(BackupService) private backupService: BackupService
+    @inject(BackupService) private backupService: BackupService,
+    @inject(DataManagementService)
+    private dataManagementService: DataManagementService
   ) {
     this.logger = logger.sub('[RpcManager]')
   }
@@ -214,6 +217,16 @@ export class RpcManager {
 
           return frames
         },
+        getExtensionManifest: async () => {
+          return chrome.runtime.getManifest() as chrome.runtime.ManifestV3
+        },
+        getAlarm: async (name) => {
+          if (!chrome.alarms) {
+            return null
+          }
+
+          return chrome.alarms.get(name)
+        },
         getFrameId: async (_, sender) => {
           if (sender.frameId === undefined) {
             throw new RpcException('Sender does not have frame id')
@@ -346,6 +359,10 @@ export class RpcManager {
           void invalidateContentScriptData(sender.tab?.id)
           return result
         },
+        dataWipeDanmaku: async (data, sender) => {
+          await this.dataManagementService.wipeAllData(data)
+          void invalidateContentScriptData(sender.tab?.id)
+        },
       },
       {
         logger: this.logger,
@@ -420,8 +437,8 @@ export class RpcManager {
       }
     )
 
-    rpcServer.listen()
-    rpcRelay.listen()
+    rpcServer.listen(chrome.runtime.onMessage)
+    rpcRelay.listen(chrome.runtime.onMessage)
 
     // also listen to external messages
     rpcServer.listen(chrome.runtime.onMessageExternal)

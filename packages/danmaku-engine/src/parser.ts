@@ -20,6 +20,11 @@ export interface ParsedComment {
   time: number
   style: Record<string, string>
   color: string
+  gradient?: {
+    start: string
+    end: string
+    stroke: boolean
+  }
 }
 
 export interface TimedComment {
@@ -77,17 +82,8 @@ export const transformComment = (
 
   if (s) {
     try {
-      const style: Record<string, string> = {}
       const { start, end, stroke } = parseCommentGradient(s)
-      style.background = `linear-gradient(to right, ${start}, ${end})`
-      style.backgroundClip = 'text'
-      style.webkitBackgroundClip = 'text'
-      if (stroke) {
-        style.webkitTextStroke = '2px transparent'
-      } else {
-        style.webkitTextFillColor = 'transparent'
-      }
-      parsed.style = style
+      parsed.gradient = { start, end, stroke }
     } catch {
       // ignore errors
     }
