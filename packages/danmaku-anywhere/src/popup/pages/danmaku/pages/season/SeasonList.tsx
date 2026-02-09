@@ -48,6 +48,7 @@ const SeasonListSuspense = () => {
       timeUpdated: 0,
       id: 0,
       providerIds: {},
+      providerConfigId: '',
     }
     return [customSeason, ...seasons]
   }, [seasons, customEpisodes])

@@ -133,6 +133,7 @@ export const useDanmakuTree = (
         id: -1,
         provider: DanmakuSourceType.MacCMS,
         providerIds: {},
+        providerConfigId: '',
       }
 
       treeItems.push(

@@ -1,6 +1,9 @@
-import type { z } from 'zod'
-import type { DanmakuSourceType, DbEntity } from '../provider/provider.js'
-import type { SeasonInsertV1, SeasonV1, zBaseSeasonV1 } from './v1/schema.js'
+import type {
+  ByProvider,
+  DanmakuSourceType,
+  DbEntity,
+} from '../provider/provider.js'
+import type { SeasonInsertV1, SeasonV1 } from './v1/schema.js'
 
 export * from './v1/schema.js'
 
@@ -8,9 +11,9 @@ export const SEASON_SCHEMA_VERSION = 1
 
 export type Season = SeasonV1
 export type SeasonInsert = SeasonInsertV1
-// Not a real season, only used to represent a group of custom episodes
-export type CustomSeasonInsert = z.infer<typeof zBaseSeasonV1> & {
-  provider: DanmakuSourceType.MacCMS
-  providerIds: {}
-}
+// CustomSeason is now just the MacCMS variant of SeasonV1
+export type CustomSeasonInsert = ByProvider<
+  SeasonInsertV1,
+  DanmakuSourceType.MacCMS
+>
 export type CustomSeason = DbEntity<CustomSeasonInsert>

@@ -52,10 +52,19 @@ export const zTencentSeasonV1 = zBaseSeasonV1.extend({
   providerConfigId: z.string(),
 })
 
+export const zMacCmsSeasonProviderIds = z.object({})
+
+export const zMacCmsSeasonV1 = zBaseSeasonV1.extend({
+  provider: z.literal(DanmakuSourceType.MacCMS),
+  providerIds: zMacCmsSeasonProviderIds,
+  providerConfigId: z.string(),
+})
+
 export const zSeasonInsertV1 = z.discriminatedUnion('provider', [
   zDanDanPlaySeasonV1,
   zBilibiliSeasonV1,
   zTencentSeasonV1,
+  zMacCmsSeasonV1,
 ])
 
 export type SeasonInsertV1 = z.infer<typeof zSeasonInsertV1>

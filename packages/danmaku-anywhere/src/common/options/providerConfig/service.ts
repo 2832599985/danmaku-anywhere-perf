@@ -108,7 +108,8 @@ export class ProviderConfigService implements IStoreService {
     return (
       config.impl === DanmakuSourceType.DanDanPlay ||
       config.impl === DanmakuSourceType.Bilibili ||
-      config.impl === DanmakuSourceType.Tencent
+      config.impl === DanmakuSourceType.Tencent ||
+      config.impl === DanmakuSourceType.MacCMS
     )
   }
 

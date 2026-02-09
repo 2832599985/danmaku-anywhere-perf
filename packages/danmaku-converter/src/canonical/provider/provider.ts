@@ -18,7 +18,7 @@ export const PROVIDER_TO_BUILTIN_ID = {
 
 export type RemoteDanmakuSourceType = Exclude<
   DanmakuSourceType,
-  DanmakuSourceType.MacCMS | DanmakuSourceType.Custom
+  DanmakuSourceType.Custom
 >
 
 export type ByProvider<T, P extends DanmakuSourceType> = Extract<

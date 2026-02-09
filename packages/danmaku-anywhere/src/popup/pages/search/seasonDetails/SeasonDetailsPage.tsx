@@ -1,7 +1,6 @@
-﻿import {
-  DanmakuSourceType,
-  type EpisodeMeta,
-  type WithSeason,
+import type {
+  EpisodeMeta,
+  WithSeason,
 } from '@danmaku-anywhere/danmaku-converter'
 import {
   Button,
@@ -16,16 +15,12 @@ import { ErrorBoundary } from 'react-error-boundary'
 import { useTranslation } from 'react-i18next'
 import { BaseEpisodeListItem } from '@/common/components/EpisodeList/BaseEpisodeListItem'
 import { EpisodeSearchList } from '@/common/components/EpisodeList/EpisodeSearchList'
-import { MacCmsEpisodeListItem } from '@/common/components/EpisodeList/MacCmsEpisodeListItem'
 import { ErrorMessage } from '@/common/components/ErrorMessage'
 import { TabLayout } from '@/common/components/layout/TabLayout'
 import { TabToolbar } from '@/common/components/layout/TabToolbar'
 import { useToast } from '@/common/components/Toast/toastStore'
 import { resolveBatchDownloadOutcome } from '@/common/danmaku/batchDownloadOutcome'
 import { useFetchDanmakuLite } from '@/common/danmaku/queries/useFetchDanmakuLite'
-import { useFetchGenericDanmaku } from '@/common/danmaku/queries/useFetchGenericDanmaku'
-import { isNotCustom } from '@/common/danmaku/utils'
-import { assertProviderConfigImpl } from '@/common/options/providerConfig/utils'
 import { episodeQueryKeys, seasonQueryKeys } from '@/common/queries/queryKeys'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { useGoBack } from '@/popup/hooks/useGoBack'
@@ -40,23 +35,21 @@ export const SeasonDetailsPage = () => {
   const toast = useToast.use.toast()
   const queryClient = useQueryClient()
 
-  const { season, provider } = useStore.use.search()
+  const { season } = useStore.use.search()
 
   const goBack = useGoBack()
 
-  const isCustomSeason = season ? !isNotCustom(season) : true
-  const seasonId = season && isNotCustom(season) ? season.id : 0
   const episodesQuery = useQuery({
-    enabled: !!season && !!provider && !isCustomSeason,
-    queryKey: seasonQueryKeys.episodes(seasonId),
-    queryFn: () => chromeRpcClient.episodeFetchBySeason({ seasonId }),
+    enabled: !!season,
+    queryKey: seasonQueryKeys.episodes(season?.id ?? 0),
+    queryFn: () =>
+      chromeRpcClient.episodeFetchBySeason({ seasonId: season?.id }),
     select: (res) => res.data,
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,
   })
 
   const { mutateAsync: load, isPending, variables } = useFetchDanmakuLite()
-  const genericMutation = useFetchGenericDanmaku()
 
   const [isSelectMode, setIsSelectMode] = useState(false)
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
@@ -69,12 +62,11 @@ export const SeasonDetailsPage = () => {
   const allEpisodes = episodesQuery.data ?? []
 
   const selectedEpisodes = useMemo(() => {
-    if (isCustomSeason) return []
     if (selectedKeys.size === 0) return []
     return allEpisodes.filter((ep) => selectedKeys.has(buildEpisodeKey(ep)))
-  }, [allEpisodes, isCustomSeason, selectedKeys])
+  }, [allEpisodes, selectedKeys])
 
-  if (!season || !provider) return null
+  if (!season) return null
 
   const selectedCount = selectedKeys.size
   const isBatchDownloading = batchProgress !== null
@@ -102,13 +94,11 @@ export const SeasonDetailsPage = () => {
   }
 
   const handleSelectAll = () => {
-    if (isCustomSeason) return
     if (allEpisodes.length === 0) return
     setSelectedKeys(new Set(allEpisodes.map(buildEpisodeKey)))
   }
 
   const handleBatchDownload = async () => {
-    if (isCustomSeason) return
     if (selectedEpisodes.length === 0) return
     if (isBatchDownloading) return
 
@@ -196,63 +186,61 @@ export const SeasonDetailsPage = () => {
   return (
     <TabLayout>
       <TabToolbar title={season.title} showBackButton onGoBack={goBack}>
-        {!isCustomSeason && (
-          <Stack direction="row" gap={1} alignItems="center">
-            {isSelectMode ? (
-              <>
+        <Stack direction="row" gap={1} alignItems="center">
+          {isSelectMode ? (
+            <>
+              <Button
+                size="small"
+                onClick={handleSelectAll}
+                disabled={isBatchDownloading || allEpisodes.length === 0}
+              >
+                {t('common.selectAll')}
+              </Button>
+              <Button
+                size="small"
+                onClick={() => clearSelection()}
+                disabled={isBatchDownloading || selectedCount === 0}
+              >
+                {t('common.clear')}
+              </Button>
+              <Button
+                size="small"
+                color="primary"
+                variant="contained"
+                onClick={handleBatchDownload}
+                disabled={isBatchDownloading || selectedCount === 0}
+              >
+                {t('searchPage.batchDownload.download', {
+                  count: selectedCount,
+                })}
+              </Button>
+              {isBatchDownloading && (
                 <Button
                   size="small"
-                  onClick={handleSelectAll}
-                  disabled={isBatchDownloading || allEpisodes.length === 0}
+                  color="warning"
+                  onClick={handleCancelBatch}
                 >
-                  {t('common.selectAll')}
+                  {t('common.cancel')}
                 </Button>
-                <Button
-                  size="small"
-                  onClick={() => clearSelection()}
-                  disabled={isBatchDownloading || selectedCount === 0}
-                >
-                  {t('common.clear')}
-                </Button>
-                <Button
-                  size="small"
-                  color="primary"
-                  variant="contained"
-                  onClick={handleBatchDownload}
-                  disabled={isBatchDownloading || selectedCount === 0}
-                >
-                  {t('searchPage.batchDownload.download', {
-                    count: selectedCount,
-                  })}
-                </Button>
-                {isBatchDownloading && (
-                  <Button
-                    size="small"
-                    color="warning"
-                    onClick={handleCancelBatch}
-                  >
-                    {t('common.cancel')}
-                  </Button>
-                )}
-                <Button
-                  size="small"
-                  onClick={toggleSelectMode}
-                  disabled={isBatchDownloading}
-                >
-                  {t('common.done')}
-                </Button>
-              </>
-            ) : (
+              )}
               <Button
                 size="small"
                 onClick={toggleSelectMode}
-                disabled={isPending}
+                disabled={isBatchDownloading}
               >
-                {t('searchPage.batchDownload.enable')}
+                {t('common.done')}
               </Button>
-            )}
-          </Stack>
-        )}
+            </>
+          ) : (
+            <Button
+              size="small"
+              onClick={toggleSelectMode}
+              disabled={isPending}
+            >
+              {t('searchPage.batchDownload.enable')}
+            </Button>
+          )}
+        </Stack>
       </TabToolbar>
       {batchProgress && (
         <Stack px={2} py={1} gap={1}>
@@ -321,23 +309,6 @@ export const SeasonDetailsPage = () => {
                       />
                     )
                   }}
-                />
-              )
-            }}
-            renderCustomEpisode={(data) => {
-              assertProviderConfigImpl(provider, DanmakuSourceType.MacCMS)
-
-              return (
-                <MacCmsEpisodeListItem
-                  onClick={() =>
-                    genericMutation.mutate({
-                      ...data.episode,
-                      providerConfigId: provider.id,
-                    })
-                  }
-                  isLoading={genericMutation.isPending}
-                  episode={data.episode}
-                  danmaku={genericMutation.data}
                 />
               )
             }}

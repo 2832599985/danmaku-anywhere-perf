@@ -1,13 +1,8 @@
-import {
-  DanmakuSourceType,
-  type Season,
-  type SeasonInsert,
-} from '@danmaku-anywhere/danmaku-converter'
+import type { Season } from '@danmaku-anywhere/danmaku-converter'
 import { inject, injectable } from 'inversify'
 import { SeasonService } from '@/background/services/persistence/SeasonService'
 import { TitleMappingService } from '@/background/services/persistence/TitleMappingService'
 import type { MatchEpisodeInput, MatchEpisodeResult } from '@/common/anime/dto'
-import { isNotCustom, isProvider } from '@/common/danmaku/utils'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import { ProviderConfigService } from '@/common/options/providerConfig/service'
 import { SeasonMap } from '@/common/seasonMap/SeasonMap'
@@ -53,17 +48,9 @@ export class SearchMatchingStrategy implements IMatchingStrategy {
     const service = this.danmakuProviderFactory(autoProvider)
 
     this.logger.debug(`Searching for season: ${title}`)
-    const foundSeasonInserts = (await service.search({
+    const foundSeasonInserts = await service.search({
       keyword: title,
-    })) as SeasonInsert[] // TODO: technically unsafe, fix by folding custom season into season
-
-    if (
-      foundSeasonInserts[0] &&
-      isProvider(foundSeasonInserts[0], DanmakuSourceType.MacCMS)
-    ) {
-      // should not be reached
-      throw new Error('Custom season found, but not supported')
-    }
+    })
 
     const foundSeasons = await this.seasonService.bulkUpsert(foundSeasonInserts)
 
@@ -108,7 +95,7 @@ export class SearchMatchingStrategy implements IMatchingStrategy {
 
     return {
       status: 'disambiguation',
-      data: foundSeasons.filter(isNotCustom),
+      data: foundSeasons,
       metadata: { strategy: 'search', providerConfig: autoProvider },
     }
   }

@@ -1,10 +1,8 @@
 import type {
   ByProvider,
-  CustomSeason,
   Episode,
   EpisodeMeta,
   Season,
-  SeasonInsert,
   WithSeason,
 } from '@danmaku-anywhere/danmaku-converter'
 import { inject, injectable } from 'inversify'
@@ -13,7 +11,7 @@ import { SeasonService } from '@/background/services/persistence/SeasonService'
 import type { SeasonQueryFilter, SeasonSearchRequest } from '@/common/anime/dto'
 import type { DanmakuFetchRequest } from '@/common/danmaku/dto'
 import { DanmakuSourceType } from '@/common/danmaku/enums'
-import { assertProviderType, isProvider } from '@/common/danmaku/utils'
+import { assertProviderType } from '@/common/danmaku/utils'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import type { ProviderConfig } from '@/common/options/providerConfig/schema'
 import { ProviderConfigService } from '@/common/options/providerConfig/service'
@@ -73,9 +71,7 @@ export class ProviderService {
     }
   }
 
-  async searchSeason(
-    params: SeasonSearchRequest
-  ): Promise<Season[] | CustomSeason[]> {
+  async searchSeason(params: SeasonSearchRequest): Promise<Season[]> {
     const providerConfig = await this.providerConfigService.mustGet(
       params.providerConfigId
     )
@@ -83,14 +79,7 @@ export class ProviderService {
     const service = this.danmakuProviderFactory(providerConfig)
 
     const seasonInserts = await service.search(params)
-    // TODO: fix this once we fold custom seasons into the season insert
-    if (
-      seasonInserts[0] &&
-      isProvider(seasonInserts[0], DanmakuSourceType.MacCMS)
-    ) {
-      return seasonInserts as CustomSeason[]
-    }
-    return this.seasonService.bulkUpsert(seasonInserts as SeasonInsert[])
+    return this.seasonService.bulkUpsert(seasonInserts)
   }
 
   async fetchEpisodesBySeason(
@@ -127,7 +116,9 @@ export class ProviderService {
         return enrichEpisodes(episodes, season)
       }
       case DanmakuSourceType.MacCMS: {
-        throw new Error('MacCMS does not support fetching episodes')
+        assertProviderType(season, DanmakuSourceType.MacCMS)
+        const episodes = await service.getEpisodesByIndexedId(season.indexedId)
+        return enrichEpisodes(episodes, season) as WithSeason<EpisodeMeta>[]
       }
     }
   }

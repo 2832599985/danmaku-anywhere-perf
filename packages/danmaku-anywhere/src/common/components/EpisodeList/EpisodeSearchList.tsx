@@ -1,34 +1,18 @@
-import type { CustomSeason, Season } from '@danmaku-anywhere/danmaku-converter'
-import type { MacCmsParsedPlayUrl } from '@danmaku-anywhere/danmaku-provider/maccms'
+import type { Season } from '@danmaku-anywhere/danmaku-converter'
 import { List, ListItem, ListItemText, Skeleton } from '@mui/material'
 import { useSuspenseQueries } from '@tanstack/react-query'
 import { Suspense } from 'react'
 import { ErrorBoundary } from 'react-error-boundary'
-import type {
-  RenderCustomEpisode,
-  RenderEpisode,
-} from '@/common/components/EpisodeList/types'
+import type { RenderEpisode } from '@/common/components/EpisodeList/types'
 import { ErrorMessage } from '@/common/components/ErrorMessage'
 import type { EpisodeQueryFilter } from '@/common/danmaku/dto'
 import { useSearchEpisode } from '@/common/danmaku/queries/useSearchEpisode'
-import { isNotCustom } from '@/common/danmaku/utils'
 import { episodeQueryKeys } from '@/common/queries/queryKeys'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
 
-interface NormalSeasonListItemProps {
+interface SeasonListItemProps {
   season: Season
   renderEpisode: RenderEpisode
-}
-
-interface CustomSeasonListItemProps {
-  season: CustomSeason
-  renderEpisode: RenderCustomEpisode
-}
-
-interface SeasonListItemProps {
-  season: Season | CustomSeason
-  renderEpisode: RenderEpisode
-  renderCustomEpisode: RenderCustomEpisode
 }
 
 const EpisodeSkeleton = () => {
@@ -49,10 +33,7 @@ const FallbackEpisodeList = () => {
   )
 }
 
-const EpisodeListInner = ({
-  season,
-  renderEpisode,
-}: NormalSeasonListItemProps) => {
+const EpisodeListInner = ({ season, renderEpisode }: SeasonListItemProps) => {
   const { data: episodes } = useSearchEpisode(season.id)
 
   const danmakuResults = useSuspenseQueries({
@@ -100,52 +81,16 @@ const EpisodeListInner = ({
   )
 }
 
-const CustomEpisodeListInner = ({
-  season,
-  renderEpisode,
-}: CustomSeasonListItemProps) => {
-  // TODO: Add MacCms as a provider type
-  // biome-ignore lint/suspicious/noExplicitAny: temporary
-  const episodes = (season as any).episodes as MacCmsParsedPlayUrl[]
-
-  return (
-    <List dense disablePadding>
-      {episodes.map((episode, i) => {
-        return (
-          <ErrorBoundary
-            fallback={<ListItemText primary="An error occurred" />}
-            key={episode.url}
-          >
-            <Suspense fallback={<EpisodeSkeleton />}>
-              {renderEpisode({
-                episode,
-              })}
-            </Suspense>
-          </ErrorBoundary>
-        )
-      })}
-    </List>
-  )
-}
-
 export const EpisodeSearchList = ({
   season,
   renderEpisode,
-  renderCustomEpisode,
 }: SeasonListItemProps) => {
   return (
     <ErrorBoundary
       fallbackRender={({ error }) => <ErrorMessage message={error.message} />}
     >
       <Suspense fallback={<FallbackEpisodeList />}>
-        {isNotCustom(season) ? (
-          <EpisodeListInner season={season} renderEpisode={renderEpisode} />
-        ) : (
-          <CustomEpisodeListInner
-            season={season}
-            renderEpisode={renderCustomEpisode}
-          />
-        )}
+        <EpisodeListInner season={season} renderEpisode={renderEpisode} />
       </Suspense>
     </ErrorBoundary>
   )

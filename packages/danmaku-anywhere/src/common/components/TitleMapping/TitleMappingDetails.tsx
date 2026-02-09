@@ -3,10 +3,7 @@ import { Autocomplete, Box, styled, TextField, Typography } from '@mui/material'
 import { Fragment, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useGetAllSeasonsSuspense } from '@/common/anime/queries/useGetAllSeasonsSuspense'
-import {
-  DanmakuSourceType,
-  localizedDanmakuSourceType,
-} from '@/common/danmaku/enums'
+import { localizedDanmakuSourceType } from '@/common/danmaku/enums'
 import { useProviderConfig } from '@/common/options/providerConfig/useProviderConfig'
 import { useSeasonMapMutations } from '@/common/seasonMap/queries/useAllSeasonMap'
 import type { SeasonMap } from '@/common/seasonMap/SeasonMap'
@@ -28,15 +25,7 @@ type TitleMappingDetailsProps = {
 
 export const TitleMappingDetails = ({ map }: TitleMappingDetailsProps) => {
   const { t } = useTranslation()
-  const { configs: allConfigs } = useProviderConfig()
-
-  // MacCMS providers use a separate storage model (customEpisode table)
-  // and don't have seasons, so they can't participate in title mapping.
-  const configs = useMemo(
-    () =>
-      allConfigs.filter((config) => config.impl !== DanmakuSourceType.MacCMS),
-    [allConfigs]
-  )
+  const { configs } = useProviderConfig()
   const mutations = useSeasonMapMutations()
 
   const { data: allSeasons } = useGetAllSeasonsSuspense({ includeEmpty: true })
