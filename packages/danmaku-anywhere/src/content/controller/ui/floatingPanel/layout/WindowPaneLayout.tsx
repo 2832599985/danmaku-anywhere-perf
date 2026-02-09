@@ -26,6 +26,7 @@ export const WindowPaneLayout = (props: WindowPaneLayoutProps) => {
 
   return (
     <Paper
+      elevation={0}
       sx={{
         padding: 0,
         width: sm ? '100%' : width,
@@ -35,6 +36,11 @@ export const WindowPaneLayout = (props: WindowPaneLayoutProps) => {
         display: 'flex',
         flexDirection: 'column',
         touchAction: 'manipulation',
+        background: 'rgba(15, 23, 42, 0.7)',
+        backdropFilter: 'blur(12px)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: '16px',
+        color: '#fff',
       }}
       ref={ref}
       {...props.paperProps}

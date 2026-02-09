@@ -15,6 +15,38 @@ import { tryCatchSync } from '@/common/utils/tryCatch'
 const defaultThemeOptions: ThemeOptions = {
   palette: {
     mode: 'dark',
+    primary: {
+      main: '#8b5cf6', // Violet
+    },
+    secondary: {
+      main: '#d946ef', // Pink/Fuchsia
+    },
+    background: {
+      default: '#0f172a', // Deep Slate
+      paper: '#0f172a', // Deep Slate (base for glass)
+    },
+  },
+  shape: {
+    borderRadius: 16,
+  },
+  components: {
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+          backgroundColor: 'rgba(15, 23, 42, 0.7)',
+          backdropFilter: 'blur(12px)',
+          backgroundImage: 'none',
+        },
+      },
+    },
+    MuiButton: {
+      styleOverrides: {
+        root: {
+          borderRadius: 16,
+          textTransform: 'none',
+        },
+      },
+    },
   },
 }
 

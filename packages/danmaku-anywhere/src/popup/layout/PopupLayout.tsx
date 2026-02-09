@@ -21,10 +21,13 @@ export const PopupLayout = ({ children }: PropsWithChildren<{}>) => {
       fixed
     >
       <Paper
+        elevation={0}
         sx={{
           height: 1,
           overflow: 'hidden',
           position: 'relative',
+          background: '#0f172a',
+          color: '#fff',
         }}
       >
         {children}
