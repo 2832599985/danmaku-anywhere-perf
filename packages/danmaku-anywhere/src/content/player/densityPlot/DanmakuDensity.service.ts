@@ -61,10 +61,6 @@ export class DanmakuDensityService {
     this.boundHandleResize = debounce(this.handleResize.bind(this), 100)
     this.chart = new DanmakuDensityChart(this.layoutService.wrapper, {
       height: this.chartHeight,
-      colors: {
-        unplayed: 'rgba(255,255,255,0.25)',
-        played: 'rgba(255, 255, 255, 0.45)',
-      },
     })
 
     const extensionOptionsService = uiContainer.get(ExtensionOptionsService)

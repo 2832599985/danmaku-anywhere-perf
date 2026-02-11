@@ -75,6 +75,11 @@ export class DanmakuDensityChart {
     }
   }
 
+  private getCssVar(name: string, fallback: string): string {
+    const value = getComputedStyle(this.wrapper).getPropertyValue(name).trim()
+    return value || fallback
+  }
+
   setup() {
     if (this.svg) {
       return
@@ -100,13 +105,20 @@ export class DanmakuDensityChart {
     // Skip region overlays (rendered below density paths)
     const skipRegionGroup = svg.append('g').classed('da-skip-regions', true)
 
-    const pathUnplayed = svg
-      .append('path')
-      .attr('fill', this.options.colors.unplayed)
+    const unplayedColor = this.getCssVar(
+      '--da-density-unplayed',
+      this.options.colors.unplayed
+    )
+    const playedColor = this.getCssVar(
+      '--da-density-played',
+      this.options.colors.played
+    )
+
+    const pathUnplayed = svg.append('path').attr('fill', unplayedColor)
 
     const pathPlayed = svg
       .append('path')
-      .attr('fill', this.options.colors.played)
+      .attr('fill', playedColor)
       .attr('clip-path', `url(#${this.clipId})`)
 
     // Legend group (rendered on top)
@@ -254,10 +266,22 @@ export class DanmakuDensityChart {
     const { width, height } = this.getSvgSize()
     if (width <= 0) return
 
-    const opColor = 'rgba(96, 165, 250, 0.35)'
-    const edColor = 'rgba(251, 113, 133, 0.35)'
-    const opBorderColor = 'rgba(96, 165, 250, 0.7)'
-    const edBorderColor = 'rgba(251, 113, 133, 0.7)'
+    const opColor = this.getCssVar(
+      '--da-region-op-fill',
+      'rgba(96, 165, 250, 0.35)'
+    )
+    const edColor = this.getCssVar(
+      '--da-region-ed-fill',
+      'rgba(251, 113, 133, 0.35)'
+    )
+    const opBorderColor = this.getCssVar(
+      '--da-region-op-border',
+      'rgba(96, 165, 250, 0.7)'
+    )
+    const edBorderColor = this.getCssVar(
+      '--da-region-ed-border',
+      'rgba(251, 113, 133, 0.7)'
+    )
 
     for (const region of this.skipRegions) {
       const x1 = Math.max(0, (region.startTime / this.duration) * width)
@@ -291,10 +315,7 @@ export class DanmakuDensityChart {
           .attr('y', height / 2)
           .attr('text-anchor', 'middle')
           .attr('dominant-baseline', 'central')
-          .attr(
-            'fill',
-            isOp ? 'rgba(96, 165, 250, 0.9)' : 'rgba(251, 113, 133, 0.9)'
-          )
+          .attr('fill', isOp ? opBorderColor : edBorderColor)
           .attr('font-size', '10px')
           .attr('font-family', 'sans-serif')
           .attr('pointer-events', 'none')
@@ -315,8 +336,22 @@ export class DanmakuDensityChart {
     if (!hasOp && !hasEd) return
 
     const items: Array<{ label: string; color: string }> = []
-    if (hasOp) items.push({ label: 'OP', color: 'rgba(96, 165, 250, 0.7)' })
-    if (hasEd) items.push({ label: 'ED', color: 'rgba(251, 113, 133, 0.7)' })
+    if (hasOp)
+      items.push({
+        label: 'OP',
+        color: this.getCssVar(
+          '--da-region-op-border',
+          'rgba(96, 165, 250, 0.7)'
+        ),
+      })
+    if (hasEd)
+      items.push({
+        label: 'ED',
+        color: this.getCssVar(
+          '--da-region-ed-border',
+          'rgba(251, 113, 133, 0.7)'
+        ),
+      })
 
     const itemWidth = 30
     const totalWidth = items.length * itemWidth

@@ -12,6 +12,8 @@ import { forwardRef, useRef, useState } from 'react'
 import { useAnyLoading } from '@/common/hooks/useAnyLoading'
 import { useMergeRefs } from '@/common/hooks/useMergeRefs'
 import { isConfigIncomplete } from '@/common/options/mountConfig/isPermissive'
+import { useThemeContext } from '@/common/theme/Theme'
+import type { ThemePalette } from '@/common/theme/themes'
 import { createVirtualElement } from '@/common/utils/utils'
 import { useActiveConfig } from '@/content/controller/common/context/useActiveConfig'
 import { useStore } from '@/content/controller/store/store'
@@ -27,20 +29,20 @@ interface FloatingButtonProps extends FabProps {
 }
 
 const StyledFab = styled(Fab, {
-  shouldForwardProp: (prop) => prop !== 'hover',
-})<{ hover: boolean }>(({ hover }) => {
+  shouldForwardProp: (prop) => prop !== 'hover' && prop !== 'palette',
+})<{ hover: boolean; palette: ThemePalette }>(({ hover, palette }) => {
   return {
     transition: 'all 0.2s ease-in-out',
     transform: hover ? 'rotate(45deg)' : 'rotate(0deg)',
     touchAction: 'none',
-    background: 'rgba(15, 23, 42, 0.7) !important',
-    backdropFilter: 'blur(12px)',
-    border: '1px solid rgba(255, 255, 255, 0.1)',
+    background: `${palette.glass.base} !important`,
+    backdropFilter: palette.glass.blur,
+    border: `1px solid ${palette.glass.border}`,
     boxShadow:
       '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
     color: '#fff',
     '&:hover': {
-      background: 'rgba(30, 41, 59, 0.8) !important',
+      background: `${palette.glass.hover} !important`,
     },
   }
 })
@@ -60,6 +62,7 @@ export const FloatingButton = forwardRef<
   const isLoading = useAnyLoading()
 
   const showFab = useShowFab()
+  const { palette } = useThemeContext()
 
   const [contextMenuAnchor, setContextMenuAnchor] =
     useState<PopoverVirtualElement | null>(null)
@@ -154,6 +157,7 @@ export const FloatingButton = forwardRef<
                       ref={mergedFabRefs}
                       color={dialColor}
                       hover={fabHover}
+                      palette={palette}
                       onMouseOver={() => setFabHover(true)}
                       onMouseOut={() => setFabHover(false)}
                     >

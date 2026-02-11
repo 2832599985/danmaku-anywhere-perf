@@ -702,6 +702,13 @@
     "totalCount": "总数",
     "typeDistribution": "类型分布"
   },
+  "theme": {
+    "neonViolet": "霓虹紫",
+    "emberGlow": "琥珀焰",
+    "oceanDepth": "深海蓝",
+    "sakuraNoir": "樱花黑",
+    "selectTheme": "选择主题"
+  },
   "tabs": {
     "aiProviders": "AI源",
     "config": "装填配置",

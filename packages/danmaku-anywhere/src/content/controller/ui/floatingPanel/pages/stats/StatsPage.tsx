@@ -12,6 +12,7 @@ import { ScrollBox } from '@/common/components/layout/ScrollBox'
 import { TabLayout } from '@/common/components/layout/TabLayout'
 import { TabToolbar } from '@/common/components/layout/TabToolbar'
 import { NothingHere } from '@/common/components/NothingHere'
+import { useThemeContext } from '@/common/theme/Theme'
 import { useStore } from '@/content/controller/store/store'
 import { computeStats } from './computeStats'
 
@@ -21,11 +22,22 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+/**
+ * Convert a hex color (e.g. '#8b5cf6') to an rgba string with the given alpha.
+ */
+function withAlpha(hex: string, alpha: number): string {
+  const r = Number.parseInt(hex.slice(1, 3), 16)
+  const g = Number.parseInt(hex.slice(3, 5), 16)
+  const b = Number.parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
 const DensityChart = ({
   buckets,
 }: {
   buckets: { time: number; count: number }[]
 }) => {
+  const { palette } = useThemeContext()
   const maxCount = useMemo(
     () => buckets.reduce((max, b) => Math.max(max, b.count), 1),
     [buckets]
@@ -56,8 +68,7 @@ const DensityChart = ({
               maxWidth: 12,
               height: `${heightPercent}%`,
               minHeight: 1,
-              background:
-                'linear-gradient(to top, rgba(139, 92, 246, 0.6), rgba(217, 70, 239, 0.6))',
+              background: `linear-gradient(to top, ${withAlpha(palette.primary, 0.6)}, ${withAlpha(palette.secondary, 0.6)})`,
               borderRadius: '2px 2px 0 0',
               transition: 'opacity 0.2s',
               '&:hover': {
@@ -79,6 +90,7 @@ const TypeDistributionBar = ({
   total: number
 }) => {
   const { t } = useTranslation()
+  const { palette } = useThemeContext()
 
   if (items.length === 0 || total === 0) return null
 
@@ -114,10 +126,10 @@ const TypeDistributionBar = ({
               sx={{
                 height: 6,
                 borderRadius: 3,
-                backgroundColor: 'rgba(139, 92, 246, 0.15)',
+                backgroundColor: withAlpha(palette.primary, 0.15),
                 '& .MuiLinearProgress-bar': {
                   borderRadius: 3,
-                  background: 'linear-gradient(90deg, #8b5cf6, #d946ef)',
+                  background: `linear-gradient(90deg, ${palette.primary}, ${palette.secondary})`,
                 },
               }}
             />
@@ -134,30 +146,35 @@ const StatCard = ({
 }: {
   label: string
   value: string | number
-}) => (
-  <Box
-    sx={{
-      flex: '1 1 0',
-      minWidth: 100,
-      p: 1.5,
-      borderRadius: 2,
-      backgroundColor: 'rgba(139, 92, 246, 0.08)',
-      border: '1px solid rgba(139, 92, 246, 0.15)',
-      textAlign: 'center',
-    }}
-  >
-    <Typography variant="h6" fontSize={20} fontWeight={600}>
-      {value}
-    </Typography>
-    <Typography variant="caption" color="text.secondary">
-      {label}
-    </Typography>
-  </Box>
-)
+}) => {
+  const { palette } = useThemeContext()
+
+  return (
+    <Box
+      sx={{
+        flex: '1 1 0',
+        minWidth: 100,
+        p: 1.5,
+        borderRadius: 2,
+        backgroundColor: withAlpha(palette.primary, 0.08),
+        border: `1px solid ${withAlpha(palette.primary, 0.15)}`,
+        textAlign: 'center',
+      }}
+    >
+      <Typography variant="h6" fontSize={20} fontWeight={600}>
+        {value}
+      </Typography>
+      <Typography variant="caption" color="text.secondary">
+        {label}
+      </Typography>
+    </Box>
+  )
+}
 
 export const StatsPage = () => {
   const { t } = useTranslation()
   const { comments, episodes } = useStore.use.danmaku()
+  const { palette } = useThemeContext()
 
   const stats = useMemo(() => computeStats(comments), [comments])
 
@@ -212,8 +229,8 @@ export const StatsPage = () => {
                 sx={{
                   p: 1.5,
                   borderRadius: 2,
-                  backgroundColor: 'rgba(139, 92, 246, 0.05)',
-                  border: '1px solid rgba(139, 92, 246, 0.1)',
+                  backgroundColor: withAlpha(palette.primary, 0.05),
+                  border: `1px solid ${withAlpha(palette.primary, 0.1)}`,
                 }}
               >
                 <DensityChart buckets={stats.densityBuckets} />
@@ -266,7 +283,7 @@ export const StatsPage = () => {
                     size="small"
                     variant="outlined"
                     sx={{
-                      borderColor: 'rgba(139, 92, 246, 0.3)',
+                      borderColor: withAlpha(palette.primary, 0.3),
                       color: 'text.secondary',
                       fontSize: 12,
                     }}

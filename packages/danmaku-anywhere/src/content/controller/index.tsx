@@ -22,9 +22,14 @@ const { data: frameId } = await chromeRpcClient.getFrameId()
 
 Logger.debug(`Controller script loaded in frame ${frameId}`)
 
-const { shadowRoot, shadowStyle } = createPopoverRoot({
+const { shadowRoot, shadowStyle, shadowContainer } = createPopoverRoot({
   id: CONTROLLER_ROOT_ID,
 })
+
+// Create a dedicated style element for theme CSS variables
+const themeStyleEl = document.createElement('style')
+shadowContainer.appendChild(themeStyleEl)
+
 // try to get the html font size for rem unit
 // if it fails, use 16 as default
 const htmlFontSize =
@@ -82,7 +87,7 @@ ReactDOM.createRoot(shadowRoot).render(
             type: 'controller',
           }}
         >
-          <Theme options={themeOptions}>
+          <Theme options={themeOptions} themeStyleEl={themeStyleEl}>
             <App />
           </Theme>
         </EnvironmentContext>

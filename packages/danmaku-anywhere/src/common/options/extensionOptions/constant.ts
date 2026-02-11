@@ -41,6 +41,7 @@ export const defaultExtensionOptions: ExtensionOptions = {
   },
   theme: {
     colorMode: ColorMode.System,
+    themeId: 'neon-violet',
   },
   matchLocalDanmaku: true,
   hotkeys: defaultKeymap,

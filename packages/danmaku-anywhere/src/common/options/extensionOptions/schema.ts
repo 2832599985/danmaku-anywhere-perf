@@ -81,6 +81,7 @@ export const retentionPolicySchema = z.object({
 
 const userThemeSchema = z.object({
   colorMode: z.enum(ColorMode),
+  themeId: z.string().default('neon-violet'),
 })
 
 const hotkeySchema = z.object({

@@ -10,10 +10,20 @@ import {
 } from '@mui/material'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useThemeContext } from '@/common/theme/Theme'
 import type { DanmakuSource } from '@/content/controller/store/store'
 import { useStore } from '@/content/controller/store/store'
 
+function withAlpha(hex: string, alpha: number): string {
+  const r = Number.parseInt(hex.slice(1, 3), 16)
+  const g = Number.parseInt(hex.slice(3, 5), 16)
+  const b = Number.parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
 const SourceItem = ({ source }: { source: DanmakuSource }) => {
+  const { palette } = useThemeContext()
+
   return (
     <Box
       display="flex"
@@ -36,7 +46,7 @@ const SourceItem = ({ source }: { source: DanmakuSource }) => {
         variant="outlined"
         sx={{
           flexShrink: 0,
-          borderColor: 'rgba(139, 92, 246, 0.3)',
+          borderColor: withAlpha(palette.primary, 0.3),
           color: 'text.secondary',
           fontSize: 11,
           height: 20,
@@ -50,6 +60,7 @@ export const MergeSourcesPanel = () => {
   const { t } = useTranslation()
   const { sources, comments } = useStore.use.danmaku()
   const [expanded, setExpanded] = useState(false)
+  const { palette } = useThemeContext()
 
   // Only show when there are multiple merged sources
   if (sources.length <= 1) return null
@@ -57,7 +68,7 @@ export const MergeSourcesPanel = () => {
   return (
     <Box
       sx={{
-        backgroundColor: 'rgba(139, 92, 246, 0.05)',
+        backgroundColor: withAlpha(palette.primary, 0.05),
         borderBottom: '1px solid',
         borderColor: 'divider',
       }}
@@ -77,7 +88,7 @@ export const MergeSourcesPanel = () => {
         >
           <MergeType
             fontSize="small"
-            sx={{ color: 'rgba(139, 92, 246, 0.7)', mr: 0.5 }}
+            sx={{ color: withAlpha(palette.primary, 0.7), mr: 0.5 }}
           />
         </Tooltip>
         <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>

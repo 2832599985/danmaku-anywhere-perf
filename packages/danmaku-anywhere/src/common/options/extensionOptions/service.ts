@@ -306,6 +306,13 @@ export class ExtensionOptionsService implements IStoreService {
           })
         },
       })
+      .version(28, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            draft.theme.themeId ??= 'neon-violet'
+          })
+        },
+      })
   }
 
   async get() {

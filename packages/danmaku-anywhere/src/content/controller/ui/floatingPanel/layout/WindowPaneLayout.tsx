@@ -2,6 +2,7 @@ import type { PaperProps } from '@mui/material'
 import { Paper } from '@mui/material'
 import type { ReactNode, Ref } from 'react'
 
+import { useThemeContext } from '@/common/theme/Theme'
 import { useIsSmallScreen } from '@/content/controller/common/hooks/useIsSmallScreen'
 import {
   CONTROLLER_WINDOW_DEFAULT_WIDTH,
@@ -23,6 +24,7 @@ export const WindowPaneLayout = (props: WindowPaneLayoutProps) => {
     height = CONTROLLER_WINDOW_MIN_HEIGHT,
   } = props
   const sm = useIsSmallScreen()
+  const { palette } = useThemeContext()
 
   return (
     <Paper
@@ -36,9 +38,9 @@ export const WindowPaneLayout = (props: WindowPaneLayoutProps) => {
         display: 'flex',
         flexDirection: 'column',
         touchAction: 'manipulation',
-        background: 'rgba(15, 23, 42, 0.7)',
-        backdropFilter: 'blur(12px)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
+        background: palette.glass.base,
+        backdropFilter: palette.glass.blur,
+        border: `1px solid ${palette.glass.border}`,
         borderRadius: '16px',
         color: '#fff',
       }}

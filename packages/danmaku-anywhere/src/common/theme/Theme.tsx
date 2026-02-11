@@ -9,28 +9,35 @@ import {
   type PropsWithChildren,
   use,
   useCallback,
+  useEffect,
   useMemo,
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { UserTheme } from '@/common/options/extensionOptions/schema'
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
 import { ColorMode } from '@/common/theme/enums'
+import type { ThemePalette } from '@/common/theme/themes'
+import { getThemePalette } from '@/common/theme/themes'
+import { getThemeCssVarsString } from '@/common/theme/themeVars'
 
 import { tryCatchSync } from '@/common/utils/tryCatch'
 
-const getDefaultThemeOptions = (mode: 'dark' | 'light'): ThemeOptions => ({
+const getDefaultThemeOptions = (
+  mode: 'dark' | 'light',
+  palette: ThemePalette
+): ThemeOptions => ({
   palette: {
     mode,
     primary: {
-      main: '#8b5cf6', // Violet
+      main: palette.primary,
     },
     secondary: {
-      main: '#d946ef', // Pink/Fuchsia
+      main: palette.secondary,
     },
     ...(mode === 'dark' && {
       background: {
-        default: '#0f172a', // Deep Slate
-        paper: '#0f172a', // Deep Slate (base for glass)
+        default: palette.darkBg,
+        paper: palette.darkBg,
       },
     }),
   },
@@ -42,8 +49,8 @@ const getDefaultThemeOptions = (mode: 'dark' | 'light'): ThemeOptions => ({
       MuiPaper: {
         styleOverrides: {
           root: {
-            backgroundColor: 'rgba(15, 23, 42, 0.7)',
-            backdropFilter: 'blur(12px)',
+            backgroundColor: palette.glass.base,
+            backdropFilter: palette.glass.blur,
             backgroundImage: 'none',
           },
         },
@@ -62,20 +69,30 @@ const getDefaultThemeOptions = (mode: 'dark' | 'light'): ThemeOptions => ({
 
 type ThemeContext = UserTheme & {
   setColorMode: (colorScheme: ColorMode) => void
+  setThemeId: (id: string) => void
   colorScheme: 'dark' | 'light'
+  palette: ThemePalette
 }
 
 const context = createContext<ThemeContext>({
   colorMode: ColorMode.System,
   colorScheme: 'dark',
+  themeId: 'neon-violet',
   setColorMode: () => void 0,
+  setThemeId: () => void 0,
+  palette: getThemePalette('neon-violet'),
 })
 
 interface ThemeProps extends PropsWithChildren {
   options?: ThemeOptions
+  /**
+   * Optional style element in the shadow DOM for injecting theme CSS variables.
+   * When provided, CSS vars are written to this element via textContent.
+   */
+  themeStyleEl?: HTMLStyleElement
 }
 
-export const Theme = ({ children, options = {} }: ThemeProps) => {
+export const Theme = ({ children, options = {}, themeStyleEl }: ThemeProps) => {
   // TODO: for some reason, useMediaQuery crashes in Firefox so we wrap it in a try-catch
   // probably for the same reason as https://github.com/facebook/react/issues/16606
   const [prefersDarkMode] = tryCatchSync(() =>
@@ -97,7 +114,28 @@ export const Theme = ({ children, options = {} }: ThemeProps) => {
     [data, partialUpdate]
   )
 
+  const setThemeId = useCallback(
+    async (id: string) => {
+      await partialUpdate(
+        produce(data, (draft) => {
+          draft.theme.themeId = id
+        })
+      )
+    },
+    [data, partialUpdate]
+  )
+
   const colorMode = data.theme.colorMode
+  const themeId = data.theme.themeId
+  const currentPalette = useMemo(() => getThemePalette(themeId), [themeId])
+
+  // Sync theme CSS variables to the shadow DOM style element
+  useEffect(() => {
+    if (themeStyleEl) {
+      themeStyleEl.textContent = getThemeCssVarsString(currentPalette)
+    }
+  }, [themeStyleEl, currentPalette])
+
   const preferredColorScheme = (prefersDarkMode ?? true) ? 'dark' : 'light'
   const colorScheme: 'dark' | 'light' =
     colorMode === 'system' ? preferredColorScheme : colorMode
@@ -108,7 +146,7 @@ export const Theme = ({ children, options = {} }: ThemeProps) => {
       en: enUS,
     }
 
-    const base = getDefaultThemeOptions(colorScheme)
+    const base = getDefaultThemeOptions(colorScheme, currentPalette)
     return createTheme(
       produce(base, (draft) => {
         Object.assign(draft, options)
@@ -117,15 +155,18 @@ export const Theme = ({ children, options = {} }: ThemeProps) => {
       }),
       languageMap[i18n.language]
     )
-  }, [colorScheme, options, i18n.language])
+  }, [colorScheme, options, i18n.language, currentPalette])
 
   const themeContextValue = useMemo(
     () => ({
       colorMode,
       colorScheme,
+      themeId,
       setColorMode,
+      setThemeId,
+      palette: currentPalette,
     }),
-    [colorScheme, colorMode, setColorMode]
+    [colorScheme, colorMode, themeId, setColorMode, setThemeId, currentPalette]
   )
 
   return (

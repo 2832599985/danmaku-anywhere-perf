@@ -9,6 +9,8 @@ import {
 } from '@/common/rpcClient/background/client'
 import type { PlayerRelayCommands } from '@/common/rpcClient/background/types'
 import { getTrackingService } from '@/common/telemetry/getTrackingService'
+import { getThemePalette } from '@/common/theme/themes'
+import { getThemeCssVarsString } from '@/common/theme/themeVars'
 import { createPopoverRoot } from '@/content/common/host/createPopoverRoot'
 import { injectCss } from '@/content/common/injectCss'
 import danmakuComponentCss from '@/content/player/components/DanmakuComponent.css?inline'
@@ -39,9 +41,13 @@ const videoSkipService = uiContainer.get(VideoSkipService)
 const fixedSkipService = uiContainer.get(FixedSkipService)
 const danmakuDensityService = uiContainer.get(DanmakuDensityService)
 
-const { shadowRoot, root } = createPopoverRoot({
+const { shadowRoot, shadowContainer, root } = createPopoverRoot({
   id: PLAYER_ROOT_ID,
 })
+
+// Create a style element for theme CSS variables
+const themeStyleEl = document.createElement('style')
+shadowContainer.appendChild(themeStyleEl)
 
 // Give shadowRoot proper dimensions so absolutely positioned children can reference it
 shadowRoot.style.position = 'fixed'
@@ -259,6 +265,10 @@ const extensionOptionsService = uiContainer.get(ExtensionOptionsService)
 const applyPlayerOptions = (
   options: Awaited<ReturnType<typeof extensionOptionsService.get>>
 ) => {
+  // Apply theme CSS variables
+  const palette = getThemePalette(options.theme.themeId)
+  themeStyleEl.textContent = getThemeCssVarsString(palette)
+
   autoNextEpisodeEnabled = options.playerOptions.autoNextEpisode
   if (autoNextEpisodeEnabled) {
     startUrlChangePolling()

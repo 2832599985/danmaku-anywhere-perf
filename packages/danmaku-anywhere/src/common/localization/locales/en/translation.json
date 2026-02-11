@@ -702,6 +702,13 @@
     "totalCount": "Total",
     "typeDistribution": "Type Distribution"
   },
+  "theme": {
+    "neonViolet": "Neon Violet",
+    "emberGlow": "Ember Glow",
+    "oceanDepth": "Ocean Depth",
+    "sakuraNoir": "Sakura Noir",
+    "selectTheme": "Select Theme"
+  },
   "tabs": {
     "aiProviders": "AI Providers",
     "config": "Config",
