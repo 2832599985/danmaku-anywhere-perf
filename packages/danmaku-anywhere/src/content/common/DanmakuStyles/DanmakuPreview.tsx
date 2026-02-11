@@ -16,7 +16,7 @@ interface SampleComment {
 }
 
 // Height of the preview container in pixels
-const PREVIEW_HEIGHT = 120
+const PREVIEW_HEIGHT = 200
 const ANIMATION_DURATION = 6000
 
 const sampleComments: SampleComment[] = [
@@ -147,11 +147,10 @@ export const DanmakuPreview = ({ config }: DanmakuPreviewProps) => {
           <Box
             sx={{
               position: 'absolute',
-              top: '50%',
+              top: `${config.area.yStart}%`,
+              bottom: `${100 - config.area.yEnd}%`,
               left: 0,
               right: 0,
-              transform: 'translateY(-50%)',
-              height: `${config.area.yEnd - config.area.yStart}%`,
               overflow: 'hidden',
             }}
           >
