@@ -11,6 +11,17 @@ export type DanmakuOptionsOptions = Options<DanmakuOptions>
 
 export const defaultDanmakuOptions: DanmakuOptions = {
   filters: [],
+  modeFilter: {
+    rtl: true,
+    ltr: true,
+    top: true,
+    bottom: true,
+  },
+  colorFilter: {
+    enabled: false,
+    onlyWhite: false,
+    blacklist: [],
+  },
   trackHeight: 32,
   allowOverlap: false,
   overlap: 100,

@@ -36,6 +36,8 @@ export const defaultExtensionOptions: ExtensionOptions = {
     showDanmakuTimeline: true,
     enableFixedSkip: false,
     fixedSkipSeconds: 90,
+    autoDensity: false,
+    autoNextEpisode: true,
   },
   theme: {
     colorMode: ColorMode.System,

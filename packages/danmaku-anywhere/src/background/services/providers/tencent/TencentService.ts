@@ -188,6 +188,26 @@ export class TencentService implements IDanmakuProvider {
     return this.fetchDanmaku(meta.providerIds.vid)
   }
 
+  async preloadNextEpisode(request: DanmakuFetchRequest): Promise<void> {
+    const { meta } = request
+    assertProviderType(meta, DanmakuSourceType.Tencent)
+
+    const episodes = await this.getEpisodes(meta.season.providerIds)
+    const currentIndex = episodes.findIndex(
+      (e) => e.indexedId === meta.indexedId
+    )
+
+    if (currentIndex === -1 || currentIndex >= episodes.length - 1) {
+      this.logger.debug('Next episode not found for preload')
+      return
+    }
+
+    const nextEpisode = episodes[currentIndex + 1]
+
+    // Pre-fetch the danmaku so it gets cached
+    await this.fetchDanmaku(nextEpisode.providerIds.vid)
+  }
+
   private async fetchDanmaku(vid: string) {
     return runWithDnr(defaultTencentSpec)(async () => {
       const result = await tencent.getDanmaku(vid)

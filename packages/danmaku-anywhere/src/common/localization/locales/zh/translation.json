@@ -151,7 +151,18 @@
     "importShareCode": "导入分享码",
     "importShareCodePlaceholder": "粘贴分享码",
     "name": "装填配置",
-    "noConfigs": "这里还没有配置..."
+    "noConfigs": "这里还没有配置...",
+    "templates": {
+      "alreadyImported": "已导入",
+      "browse": "浏览模板",
+      "categoryChinese": "国内站点",
+      "categoryInternational": "国际站点",
+      "categorySelfHosted": "自建服务",
+      "description": "导入常用视频站点的预配置模板。自建服务需要在导入后手动设置URL模式。",
+      "importError": "导入模板失败",
+      "imported": "已导入模板：{{name}}",
+      "title": "站点模板"
+    }
   },
   "configs": {
     "alert": {
@@ -173,12 +184,18 @@
       "mounted_other": "弹幕已装填：{{name}} ({{count}})",
       "mountedMultiple_one": "已装填{{count}}个多选弹幕",
       "mountedMultiple_other": "已装填{{count}}个多选弹幕",
+      "merged_one": "弹幕已合并：{{name}} (总计: {{count}})",
+      "merged_other": "弹幕已合并：{{name}} (总计: {{count}})",
+      "mergedMultiple_one": "已合并{{count}}个来源 (总计: {{total}})",
+      "mergedMultiple_other": "已合并{{count}}个来源 (总计: {{total}})",
       "mountError": "装填弹幕失败：{{message}}",
       "multipleFrames": "检测到多个含有视频的Frame",
       "refreshed_one": "弹幕已刷新：{{name}} ({{count}})",
       "refreshed_other": "弹幕已刷新：{{name}} ({{count}})",
       "refreshingDanmaku": "正在刷新弹幕",
       "unmounted": "弹幕已卸载",
+      "nextEpisodePreloaded": "下一集弹幕已预加载",
+      "nextEpisodeReady": "下一集弹幕已就绪",
       "xmlExported": "导出XML成功",
       "xmlExportError": "导出XML失败：{{message}}"
     },
@@ -191,6 +208,13 @@
     "exportBackup": "导出备份",
     "exportXml": "导出XML",
     "local": "本地弹幕",
+    "merge": {
+      "mergeWithCurrent": "合并到当前弹幕",
+      "sourceCount_one": "已加载{{count}}个弹幕来源",
+      "sourceCount_other": "已加载{{count}}个弹幕来源",
+      "sources": "已合并来源",
+      "totalMerged": "总计: {{count}}条弹幕"
+    },
     "mountShort": "装填",
     "noComments": "弹幕列表为空",
     "refresh": "刷新弹幕",
@@ -206,7 +230,7 @@
   "danmakuFilter": {
     "activeFilters": "生效的屏蔽词",
     "addFilterPattern": "添加屏蔽词",
-    "description": "通过关键字或正则屏蔽不需要的弹幕",
+    "description": "通过关键字、正则、弹幕类型或颜色屏蔽不需要的弹幕",
     "enterFilterPattern": "输入屏蔽词，正则以 \"/\" 开头和结尾",
     "enterFilterPatternPlaceholder": "输入屏蔽词",
     "enterTestText": "输入测试文本",
@@ -216,9 +240,26 @@
     "testResultInclude": "这段文本不会被过滤",
     "validation": {
       "duplicate": "重复的屏蔽词",
+      "invalidColor": "无效的颜色格式，请使用十六进制如 #ff0000",
       "invalidRegex": "无效的正则 {{message}}",
       "patternEmpty": "屏蔽词不能为空"
-    }
+    },
+    "colorFilter": {
+      "addColor": "添加",
+      "blacklistColors": "屏蔽的颜色",
+      "enabled": "启用颜色过滤",
+      "noColors": "没有屏蔽的颜色",
+      "onlyWhite": "仅显示白色弹幕",
+      "title": "颜色过滤"
+    },
+    "modeFilter": {
+      "bottom": "底部",
+      "ltr": "从左到右",
+      "rtl": "从右到左 (滚动)",
+      "title": "弹幕类型过滤",
+      "top": "顶部"
+    },
+    "textFilter": "文字过滤"
   },
   "danmakuPage": {
     "animeList": "剧集列表",
@@ -288,6 +329,18 @@
       }
     },
     "manualModeEnabled": "已启用手动模式，如需自动请切换至其他模式",
+    "matchResult": {
+      "cause": "原因",
+      "createMapping": "标题映射",
+      "detectedMedia": "检测到的媒体",
+      "manualSearch": "手动搜索",
+      "matched": "剧集匹配成功",
+      "noMatch": "未匹配",
+      "retry": "重试",
+      "skipped": "已跳过",
+      "strategiesTried": "尝试的匹配策略",
+      "title": "剧集匹配失败"
+    },
     "mode": {
       "ai": {
         "description": "让AI自动解析视频信息并自动装填弹幕",
@@ -315,6 +368,9 @@
       "configAvailablePass": "自动化配置可用",
       "enableAi": "启用AI",
       "enableAiPass": "AI已启用",
+      "episodeMatch": "剧集匹配",
+      "episodeMatchFail": "剧集匹配失败",
+      "episodeMatchPass": "剧集匹配成功",
       "integrationEnabled": "启用自动模式",
       "integrationEnabledFail": "未启用自动模式",
       "integrationEnabledPass": "自动模式已启用",
@@ -423,7 +479,16 @@
       "refreshComments": "刷新弹幕",
       "toggleEnableDanmaku": "显示/隐藏弹幕",
       "togglePip": "画中画（实验）",
-      "unmountComments": "卸载弹幕"
+      "unmountComments": "卸载弹幕",
+      "increaseOpacity": "增加不透明度 (+10%)",
+      "decreaseOpacity": "减少不透明度 (-10%)",
+      "increaseFontSize": "增大字体 (+2px)",
+      "decreaseFontSize": "减小字体 (-2px)",
+      "skipOp": "跳过OP",
+      "toggleStylePanel": "切换样式面板",
+      "conflict": "与以下快捷键冲突：{{actions}}",
+      "opacityChanged": "不透明度：{{value}}%",
+      "fontSizeChanged": "字体大小：{{value}}px"
     },
     "language": "语言",
     "matchLocalDanmaku": "匹配本地弹幕",
@@ -442,7 +507,12 @@
       "autoSkipOp": "自动跳过片头（OP）",
       "enableFixedSkip": "显示固定时间跳过按钮",
       "fixedSkipSeconds": "跳过秒数",
-      "fixedSkip": "跳过 {{seconds}} 秒"
+      "fixedSkip": "跳过 {{seconds}} 秒",
+      "autoDensity": "自动调整弹幕密度",
+      "autoNextEpisode": "自动加载下一集弹幕",
+      "densityOpLabel": "片头（OP）",
+      "densityEdLabel": "片尾（ED）",
+      "densitySkipRegionTooltip": "检测到的OP/ED区域会在弹幕密度时间轴上高亮显示"
     },
     "restrictInitiatorDomain": "限制DNR至发起自扩展的请求",
     "retentionPolicy": {
@@ -537,6 +607,16 @@
       "cancelled": "批量下载已停止：已完成 {{done}}/{{total}}",
       "failed": "批量下载失败：{{message}}"
     },
+    "favorites": {
+      "add": "添加收藏",
+      "empty": "暂无收藏",
+      "remove": "取消收藏",
+      "title": "收藏"
+    },
+    "history": {
+      "clear": "清除搜索历史",
+      "title": "最近搜索"
+    },
     "retrySearch": "重试",
     "search": "搜索",
     "searchPlaceholder": "番剧标题...",
@@ -564,6 +644,14 @@
     "opacity": "不透明度",
     "orderDistribution": "顺序",
     "overlap": "重叠比例",
+    "preset": {
+      "balanced": "均衡",
+      "custom": "自定义",
+      "eyeCare": "护眼",
+      "immersive": "沉浸",
+      "label": "预设",
+      "minimal": "精简"
+    },
     "randomDistribution": "均匀",
     "safeZone": {
       "y": "Y轴显示范围"
@@ -593,6 +681,20 @@
     "trackHeight": "弹幕行高",
     "useCustomCss": "使用自定义 CSS"
   },
+  "statsPage": {
+    "avgLength": "平均长度",
+    "densityTimeline": "密度时间线",
+    "modeBottom": "底部",
+    "modeLtr": "逆向",
+    "modeRtl": "滚动",
+    "modeTop": "顶部",
+    "noData": "装填弹幕后查看统计",
+    "peakTime": "峰值时间",
+    "title": "统计",
+    "topKeywords": "热门关键词",
+    "totalCount": "总数",
+    "typeDistribution": "类型分布"
+  },
   "tabs": {
     "aiProviders": "AI源",
     "config": "装填配置",
@@ -604,6 +706,7 @@
     "providers": "弹幕源",
     "search": "搜索番剧",
     "selector": "选择",
+    "stats": "统计",
     "style": "弹幕设置",
     "titleMapping": "标题映射"
   },

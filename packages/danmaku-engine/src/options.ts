@@ -4,6 +4,21 @@ export interface DanmakuFilter {
   enabled: boolean
 }
 
+export type DanmakuMode = 'rtl' | 'ltr' | 'top' | 'bottom'
+
+export interface DanmakuModeFilter {
+  readonly rtl: boolean
+  readonly ltr: boolean
+  readonly top: boolean
+  readonly bottom: boolean
+}
+
+export interface DanmakuColorFilter {
+  readonly enabled: boolean
+  readonly onlyWhite: boolean
+  readonly blacklist: readonly string[]
+}
+
 export interface DanmakuStyle {
   opacity: number
   fontSize: number
@@ -22,6 +37,8 @@ export interface DanmakuOptions {
    */
   readonly allowOverlap: boolean
   readonly filters: DanmakuFilter[]
+  readonly modeFilter: DanmakuModeFilter
+  readonly colorFilter: DanmakuColorFilter
   readonly distribution: 'random' | 'order'
   /**
    * The maximum number of comments to show on the screen at the same time
@@ -70,6 +87,17 @@ export const DEFAULT_DANMAKU_OPTIONS: DanmakuOptions = {
   overlap: 0,
   trackHeight: 32,
   filters: [],
+  modeFilter: {
+    rtl: true,
+    ltr: true,
+    top: true,
+    bottom: true,
+  },
+  colorFilter: {
+    enabled: false,
+    onlyWhite: false,
+    blacklist: [],
+  },
   speed: 1,
   interval: 500,
   maxOnScreen: 500,

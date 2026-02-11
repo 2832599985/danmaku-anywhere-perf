@@ -9,3 +9,11 @@
 .da-density-chart-visible {
   opacity: 1;
 }
+
+.da-skip-region {
+  pointer-events: none;
+}
+
+.da-skip-legend {
+  pointer-events: none;
+}

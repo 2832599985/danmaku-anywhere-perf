@@ -1,5 +1,5 @@
 import { useEventCallback } from '@mui/material'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '@/common/components/Toast/toastStore'
 import { IS_STANDALONE_RUNTIME } from '@/common/environment/isStandalone'
@@ -32,6 +32,9 @@ export const FrameManager = () => {
   const unmountDanmaku = useUnmountDanmaku()
   const { preloadNext, canLoadNext } = usePreloadNextEpisode()
 
+  // Track whether next episode danmaku has been preloaded
+  const nextEpisodePreloadedRef = useRef(false)
+
   useEffect(() => {
     frameInjector.start()
     return () => {
@@ -43,6 +46,8 @@ export const FrameManager = () => {
 
   const videoChangeHandler = useEventCallback((frameId: number) => {
     setVideoId(`${frameId}-${Date.now()}`)
+    // Reset preload state when a new video is detected
+    nextEpisodePreloadedRef.current = false
     /**
      * If there is already an active frame, and it has video,
      * it means there are multiple frames with video.
@@ -82,11 +87,41 @@ export const FrameManager = () => {
     if (frameId !== currentActiveFrame?.frameId || !canLoadNext()) {
       return
     }
+    if (nextEpisodePreloadedRef.current) {
+      return
+    }
     preloadNext.mutate(undefined, {
+      onSuccess: () => {
+        nextEpisodePreloadedRef.current = true
+        toast.info(
+          t(
+            'danmaku.alert.nextEpisodePreloaded',
+            'Next episode danmaku preloaded'
+          )
+        )
+      },
       onError: (err) => {
-        toast.error('Failed to preload next episode: ' + err.message)
+        logger.debug('Failed to preload next episode:', err.message)
       },
     })
+  })
+
+  const handleVideoEnded = useEventCallback((frameId: number) => {
+    const currentActiveFrame = useStore.getState().frame.activeFrame
+    if (frameId !== currentActiveFrame?.frameId) {
+      return
+    }
+
+    if (nextEpisodePreloadedRef.current) {
+      toast.success(
+        t('danmaku.alert.nextEpisodeReady', 'Next episode danmaku is ready')
+      )
+    }
+
+    // Update videoId to trigger the integration observer to re-run,
+    // which will detect new media info and re-match the next episode
+    logger.debug('Video ended or URL changed, triggering re-match')
+    setVideoId(`${frameId}-${Date.now()}`)
   })
 
   useEffect(() => {
@@ -107,6 +142,9 @@ export const FrameManager = () => {
         },
         'relay:event:preloadNextEpisode': async ({ frameId }) => {
           handlePreloadNext(frameId)
+        },
+        'relay:event:videoEnded': async ({ frameId }) => {
+          handleVideoEnded(frameId)
         },
         'relay:event:showPopover': async () => {
           const root: HTMLDivElement | null = document.querySelector(

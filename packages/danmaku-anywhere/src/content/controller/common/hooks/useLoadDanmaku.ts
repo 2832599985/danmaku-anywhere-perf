@@ -16,7 +16,7 @@ import { Logger } from '@/common/Logger'
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
 import { playerRpcClient } from '@/common/rpcClient/background/client'
 import { PerfTimer } from '@/common/utils/perf'
-import { concatArr, dedupeComments } from '@/common/utils/utils'
+import { concatArr, dedupeComments, mergeComments } from '@/common/utils/utils'
 import { useStore } from '@/content/controller/store/store'
 
 const useMountDanmaku = () => {
@@ -75,6 +75,66 @@ const useMountDanmaku = () => {
   })
 }
 
+const useMergeMountDanmaku = () => {
+  const { toast } = useToast()
+  const { data: options } = useExtensionOptions()
+  const perfRef = useRef<PerfTimer>()
+
+  if (!perfRef.current) {
+    perfRef.current = new PerfTimer(
+      Logger.sub('[useMergeDanmaku]'),
+      'merge',
+      options?.debug ?? false
+    )
+  }
+
+  useEffect(() => {
+    perfRef.current?.setEnabled(options?.debug ?? false)
+  }, [options?.debug])
+
+  const { mustGetActiveFrame } = useStore.use.frame()
+  const { mergeMount } = useStore.use.danmaku()
+
+  return useMutation({
+    mutationFn: async (episodes: GenericEpisode[]) => {
+      perfRef.current?.mark('merge_start')
+      const rawComments: CommentEntity[] =
+        episodes.length === 1
+          ? episodes[0].comments
+          : episodes.reduce<CommentEntity[]>((acc, episode) => {
+              concatArr(acc, episode.comments)
+              return acc
+            }, [])
+
+      const incoming = dedupeComments(rawComments)
+
+      // Merge with existing comments, deduplicating across sources
+      const merged = mergeComments(
+        useStore.getState().danmaku.comments,
+        incoming
+      )
+
+      perfRef.current?.mark('merge_comments_ready')
+      const res = await playerRpcClient.player['relay:command:mount']({
+        frameId: mustGetActiveFrame().frameId,
+        data: merged,
+      })
+      perfRef.current?.mark('merge_rpc_done')
+      perfRef.current?.summary('merge')
+
+      if (!res.data) {
+        throw new Error('Failed to merge danmaku')
+      }
+    },
+    onSuccess: (_, danmaku) => {
+      mergeMount(danmaku)
+    },
+    onError: (err) => {
+      toast.error(err.message)
+    },
+  })
+}
+
 // Wrapper around useFetchDanmaku and useMountDanmaku
 export const useLoadDanmaku = () => {
   const { t } = useTranslation()
@@ -86,6 +146,9 @@ export const useLoadDanmaku = () => {
   const fetchMutation = useFetchDanmaku()
   const fetchGenericMutation = useFetchGenericDanmaku()
   const mountMutation = useMountDanmaku()
+  const mergeMountMutation = useMergeMountDanmaku()
+
+  const { isMounted } = useStore.use.danmaku()
 
   const canRefresh =
     !!episodes &&
@@ -147,6 +210,46 @@ export const useLoadDanmaku = () => {
     },
   })
 
+  const mergeDanmaku = useEventCallback((episodes: GenericEpisode[]) => {
+    return mergeMountMutation.mutateAsync(episodes, {
+      onSuccess: () => {
+        const totalComments = useStore.getState().danmaku.comments.length
+        if (episodes.length === 1) {
+          const episode = episodes[0]
+          toast.success(
+            t(
+              'danmaku.alert.merged',
+              'Danmaku Merged: {{name}} (total: {{count}})',
+              {
+                name: episodeToString(episode),
+                count: totalComments,
+              }
+            )
+          )
+        } else {
+          toast.success(
+            t(
+              'danmaku.alert.mergedMultiple',
+              'Merged {{count}} sources (total: {{total}})',
+              {
+                count: episodes.length,
+                total: totalComments,
+              }
+            )
+          )
+        }
+      },
+    })
+  })
+
+  const mergeLoadMutation = useMutation({
+    mutationFn: async (data: DanmakuFetchDto) => {
+      const cache = await fetchMutation.mutateAsync(data)
+      await mergeDanmaku([cache])
+      return cache
+    },
+  })
+
   const refreshComments = useEventCallback(async () => {
     if (!canRefresh) return
     const episode = episodes[0]
@@ -176,8 +279,11 @@ export const useLoadDanmaku = () => {
   return {
     loadMutation,
     loadGenericMutation,
+    mergeLoadMutation,
     refreshComments,
     canRefresh,
+    canMerge: isMounted,
     mountDanmaku,
+    mergeDanmaku,
   }
 }

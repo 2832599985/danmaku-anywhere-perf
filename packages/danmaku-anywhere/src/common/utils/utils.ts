@@ -202,6 +202,20 @@ export const concatArr = <T>(a: T[], b: T[]): T[] => {
 }
 
 /**
+ * Build a stable dedup key for a comment.
+ * Prefer `cid` when available, fallback to `p+m` composite key.
+ */
+export const commentKey = (comment: {
+  cid?: number
+  p: string
+  m: string
+}): string => {
+  return comment.cid !== undefined
+    ? `cid:${comment.cid}`
+    : `pt:${comment.p}|${comment.m}`
+}
+
+/**
  * 弹幕去重：优先使用 cid，fallback 到 content+time 组合
  */
 export const dedupeComments = <
@@ -211,11 +225,7 @@ export const dedupeComments = <
 ): T[] => {
   const seen = new Set<string>()
   return comments.filter((comment) => {
-    // 优先使用 cid 去重
-    const key =
-      comment.cid !== undefined
-        ? `cid:${comment.cid}`
-        : `pt:${comment.p}|${comment.m}`
+    const key = commentKey(comment)
 
     if (seen.has(key)) {
       return false
@@ -223,4 +233,34 @@ export const dedupeComments = <
     seen.add(key)
     return true
   })
+}
+
+/**
+ * Merge new comments into an existing array, deduplicating using `p+m` composite key.
+ * Returns a new array containing all unique comments from both sources.
+ */
+export const mergeComments = <T extends { cid?: number; p: string; m: string }>(
+  existing: T[],
+  incoming: T[]
+): T[] => {
+  const seen = new Set<string>()
+  const result: T[] = []
+
+  for (const comment of existing) {
+    const key = commentKey(comment)
+    if (!seen.has(key)) {
+      seen.add(key)
+      result.push(comment)
+    }
+  }
+
+  for (const comment of incoming) {
+    const key = commentKey(comment)
+    if (!seen.has(key)) {
+      seen.add(key)
+      result.push(comment)
+    }
+  }
+
+  return result
 }

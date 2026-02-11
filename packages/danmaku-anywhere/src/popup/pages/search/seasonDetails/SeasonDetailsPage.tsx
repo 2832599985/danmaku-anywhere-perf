@@ -2,11 +2,14 @@ import type {
   EpisodeMeta,
   WithSeason,
 } from '@danmaku-anywhere/danmaku-converter'
+import { Star, StarBorder } from '@mui/icons-material'
 import {
   Button,
   Checkbox,
+  IconButton,
   LinearProgress,
   Stack,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -21,6 +24,7 @@ import { TabToolbar } from '@/common/components/layout/TabToolbar'
 import { useToast } from '@/common/components/Toast/toastStore'
 import { resolveBatchDownloadOutcome } from '@/common/danmaku/batchDownloadOutcome'
 import { useFetchDanmakuLite } from '@/common/danmaku/queries/useFetchDanmakuLite'
+import { useFavorites } from '@/common/hooks/useFavorites'
 import { episodeQueryKeys, seasonQueryKeys } from '@/common/queries/queryKeys'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { useGoBack } from '@/popup/hooks/useGoBack'
@@ -36,6 +40,7 @@ export const SeasonDetailsPage = () => {
   const queryClient = useQueryClient()
 
   const { season } = useStore.use.search()
+  const { isFavorite, toggleFavorite } = useFavorites()
 
   const goBack = useGoBack()
 
@@ -187,6 +192,25 @@ export const SeasonDetailsPage = () => {
     <TabLayout>
       <TabToolbar title={season.title} showBackButton onGoBack={goBack}>
         <Stack direction="row" gap={1} alignItems="center">
+          <Tooltip
+            title={
+              isFavorite(season.id)
+                ? t('searchPage.favorites.remove')
+                : t('searchPage.favorites.add')
+            }
+          >
+            <IconButton
+              size="small"
+              onClick={() => toggleFavorite(season)}
+              color={isFavorite(season.id) ? 'warning' : 'default'}
+            >
+              {isFavorite(season.id) ? (
+                <Star fontSize="small" />
+              ) : (
+                <StarBorder fontSize="small" />
+              )}
+            </IconButton>
+          </Tooltip>
           {isSelectMode ? (
             <>
               <Button

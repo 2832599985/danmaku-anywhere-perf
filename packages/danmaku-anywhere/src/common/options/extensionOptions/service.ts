@@ -258,6 +258,8 @@ export class ExtensionOptionsService implements IStoreService {
                 showDanmakuTimeline: true,
                 enableFixedSkip: false,
                 fixedSkipSeconds: 90,
+                autoDensity: false,
+                autoNextEpisode: true,
               }
               return
             }
@@ -272,6 +274,35 @@ export class ExtensionOptionsService implements IStoreService {
               draft.playerOptions.enableFixedSkip ??= false
               draft.playerOptions.fixedSkipSeconds ??= 90
             }
+          })
+        },
+      })
+      .version(25, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            if (draft.playerOptions) {
+              draft.playerOptions.autoDensity ??= false
+            }
+          })
+        },
+      })
+      .version(26, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            // Add new hotkey actions with empty defaults
+            draft.hotkeys.increaseOpacity ??= { key: '', enabled: true }
+            draft.hotkeys.decreaseOpacity ??= { key: '', enabled: true }
+            draft.hotkeys.increaseFontSize ??= { key: '', enabled: true }
+            draft.hotkeys.decreaseFontSize ??= { key: '', enabled: true }
+            draft.hotkeys.skipOp ??= { key: '', enabled: true }
+            draft.hotkeys.toggleStylePanel ??= { key: '', enabled: true }
+          })
+        },
+      })
+      .version(27, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            draft.playerOptions.autoNextEpisode ??= true
           })
         },
       })

@@ -6,10 +6,19 @@ import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
 import { PerfTimer } from '@/common/utils/perf'
 import { DanmakuLayoutService } from '@/content/player/danmakuLayout/DanmakuLayout.service'
+import {
+  filterByAdaptiveDensity,
+  getAdaptiveBinSize,
+} from '@/content/player/densityPlot/adaptiveDensity'
 import { computeDensityBins } from '@/content/player/densityPlot/computeDensityBins'
 import { DanmakuDensityChart } from '@/content/player/densityPlot/DanmakuDensityChart'
-import type { DensityPoint } from '@/content/player/densityPlot/types'
+import type {
+  DensityPoint,
+  SkipRegion,
+} from '@/content/player/densityPlot/types'
 import { VideoEventService } from '@/content/player/videoEvent/VideoEvent.service'
+
+export type DensityFilterCallback = (filtered: CommentEntity[]) => void
 
 @injectable('Singleton')
 export class DanmakuDensityService {
@@ -19,9 +28,9 @@ export class DanmakuDensityService {
 
   private chart: DanmakuDensityChart
   private enabled = false
+  private autoDensityEnabled = false
 
   private data: DensityPoint[] = []
-  private binSizeSec = 10
   private chartHeight = 28
   private computeTimer: number | null = null
   private perfEnabled = false
@@ -29,6 +38,8 @@ export class DanmakuDensityService {
 
   private showChartTimeout: ReturnType<typeof setTimeout> | null = null
   private resizeObserver: ResizeObserver | null = null
+
+  private densityFilterCallback: DensityFilterCallback | null = null
 
   private readonly boundHandleTimeUpdate: (event: Event) => void
   private readonly boundHandleSeeked: () => void
@@ -96,18 +107,74 @@ export class DanmakuDensityService {
     this.cleanup()
   }
 
+  setAutoDensity(enabled: boolean) {
+    if (this.autoDensityEnabled === enabled) return
+    this.autoDensityEnabled = enabled
+    this.logger.debug(`Auto density: ${enabled}`)
+    // Re-filter when toggled while comments are loaded
+    if (this.comments.length > 0) {
+      this.applyDensityFilter()
+    }
+  }
+
+  /**
+   * Register a callback to receive density-filtered comments.
+   * Called whenever comments change or auto-density is toggled.
+   */
+  onDensityFilter(callback: DensityFilterCallback | null) {
+    this.densityFilterCallback = callback
+  }
+
   setComments(comments: CommentEntity[]) {
     this.comments = comments
     if (!this.enabled) {
+      // Even if chart is disabled, still apply density filter if auto-density is on
+      this.applyDensityFilter()
       return
     }
     this.scheduleCompute()
+    this.applyDensityFilter()
   }
 
   clear() {
     this.comments = []
     this.data = []
     this.chart.updateData([], 0)
+    this.chart.updateSkipRegions([])
+  }
+
+  /**
+   * Update the OP/ED skip region overlays on the density chart.
+   */
+  updateSkipRegions(regions: SkipRegion[]) {
+    this.chart.updateSkipRegions(regions)
+  }
+
+  private applyDensityFilter() {
+    if (!this.densityFilterCallback) return
+
+    if (!this.autoDensityEnabled) {
+      // Pass through all comments when disabled
+      this.densityFilterCallback(this.comments)
+      return
+    }
+
+    const duration = this.currentVideo?.duration ?? 0
+    if (!Number.isFinite(duration) || duration <= 0) {
+      this.densityFilterCallback(this.comments)
+      return
+    }
+
+    const binSize = getAdaptiveBinSize(duration)
+    const filtered = filterByAdaptiveDensity(this.comments, duration, binSize)
+
+    if (this.perfEnabled) {
+      this.logger.debug(
+        `Auto density: ${this.comments.length} -> ${filtered.length} comments (${Math.round((1 - filtered.length / this.comments.length) * 100)}% filtered)`
+      )
+    }
+
+    this.densityFilterCallback(filtered)
   }
 
   private setupEventListeners() {
@@ -151,12 +218,14 @@ export class DanmakuDensityService {
 
   private computeBins(duration: number) {
     const start = performance.now()
-    this.data = computeDensityBins(this.comments, duration, this.binSizeSec)
+    const binSize = getAdaptiveBinSize(duration)
+    this.data = computeDensityBins(this.comments, duration, binSize)
     const elapsed = performance.now() - start
     if (this.perfEnabled) {
       this.perfTimer.measure('density_compute_ms', elapsed, {
         comments: this.comments.length,
         bins: this.data.length,
+        binSize,
       })
     }
   }

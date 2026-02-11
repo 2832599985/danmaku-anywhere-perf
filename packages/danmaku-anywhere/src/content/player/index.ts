@@ -18,10 +18,12 @@ import { PLAYER_ROOT_ID } from '@/content/player/constants/rootId'
 import { DanmakuManagerService } from '@/content/player/danmakuManager/DanmakuManager.service'
 import { DanmakuDensityService } from '@/content/player/densityPlot/DanmakuDensity.service'
 import densityPlotCss from '@/content/player/densityPlot/DanmakuDensityChart.css?inline'
+import type { SkipRegion } from '@/content/player/densityPlot/types'
 import { FixedSkipService } from '@/content/player/fixedSkip/FixedSkip.service'
 import { createPipWindow, moveElement } from '@/content/player/pipUtils'
 import { VideoEventService } from '@/content/player/videoEvent/VideoEvent.service'
 import { VideoNodeObserverService } from '@/content/player/videoObserver/VideoNodeObserver.service'
+import type { SkipTarget } from '@/content/player/videoSkip/SkipTarget'
 import { VideoSkipService } from '@/content/player/videoSkip/VideoSkip.service'
 
 const { data: frameId } = await chromeRpcClient.getFrameId()
@@ -74,6 +76,32 @@ injectCss(shadowRoot, [
 
 let pipWindow: Window | undefined
 
+// When auto-density filters comments, re-mount with the filtered set
+danmakuDensityService.onDensityFilter((filtered) => {
+  if (managerService.isMounted) {
+    managerService.mount(filtered)
+  }
+})
+
+/**
+ * Convert VideoSkip jump targets to SkipRegion overlays for the density chart.
+ * Heuristic: regions starting before 5 minutes (300s) are labeled OP, others ED.
+ */
+const OP_THRESHOLD_SECONDS = 300
+
+function convertTargetsToSkipRegions(targets: SkipTarget[]): SkipRegion[] {
+  return targets.map((t) => ({
+    startTime: t.startTime,
+    endTime: t.endTime,
+    type: t.startTime < OP_THRESHOLD_SECONDS ? 'op' : 'ed',
+  }))
+}
+
+// Forward OP/ED regions from VideoSkipService to the density chart
+videoSkipService.onTargetsChange((targets) => {
+  danmakuDensityService.updateSkipRegions(convertTargetsToSkipRegions(targets))
+})
+
 const playerRpcServer = createRpcServer<PlayerRelayCommands>(
   {
     'relay:command:mount': async ({ data: comments }) => {
@@ -100,6 +128,9 @@ const playerRpcServer = createRpcServer<PlayerRelayCommands>(
       } else {
         managerService.hide()
       }
+    },
+    'relay:command:skipOp': async () => {
+      videoSkipService.skipOpNow()
     },
     'relay:command:enterPip': async () => {
       // TODO: https://github.com/WICG/document-picture-in-picture/issues/97
@@ -170,9 +201,32 @@ videoNodeObserverService.addEventListener('videoNodeRemove', () => {
   playerRpcClient.controller['relay:event:videoRemoved']({ frameId })
 })
 
-videoEventService.onTimeEvent(0.5, () => {
+// Track auto next episode option state
+let autoNextEpisodeEnabled = true
+
+videoEventService.onTimeEvent(0.8, () => {
+  if (!autoNextEpisodeEnabled) return
   playerRpcClient.controller['relay:event:preloadNextEpisode']({ frameId })
 })
+
+// Detect video ended to trigger re-matching for next episode
+videoEventService.addVideoEventListener('ended', () => {
+  if (!autoNextEpisodeEnabled) return
+  Logger.debug('Video ended, notifying controller for next episode')
+  playerRpcClient.controller['relay:event:videoEnded']({ frameId })
+})
+
+// Detect SPA URL changes to trigger re-matching for next episode
+let lastUrl = location.href
+const urlChangeCheckInterval = setInterval(() => {
+  if (location.href !== lastUrl) {
+    Logger.debug('URL changed:', lastUrl, '->', location.href)
+    lastUrl = location.href
+    if (autoNextEpisodeEnabled) {
+      playerRpcClient.controller['relay:event:videoEnded']({ frameId })
+    }
+  }
+}, 1000)
 
 /**
  * Storage events
@@ -191,6 +245,7 @@ const extensionOptionsService = uiContainer.get(ExtensionOptionsService)
 const applyPlayerOptions = (
   options: Awaited<ReturnType<typeof extensionOptionsService.get>>
 ) => {
+  autoNextEpisodeEnabled = options.playerOptions.autoNextEpisode
   videoSkipService.setPlayerOptions(options.playerOptions)
   if (
     options.playerOptions.showSkipButton ||
@@ -205,6 +260,7 @@ const applyPlayerOptions = (
   } else {
     danmakuDensityService.disable()
   }
+  danmakuDensityService.setAutoDensity(options.playerOptions.autoDensity)
   fixedSkipService.setOptions({
     fixedSkipSeconds: options.playerOptions.fixedSkipSeconds,
   })
@@ -241,6 +297,7 @@ playerRpcServer.listen(chrome.runtime.onMessage)
 
 window.addEventListener('pagehide', () => {
   document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  clearInterval(urlChangeCheckInterval)
   playerRpcServer.unlisten(chrome.runtime.onMessage)
   managerService.stop()
   videoSkipService.disable()

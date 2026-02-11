@@ -4,7 +4,11 @@ import {
   parseCommentGradient,
 } from '@danmaku-anywhere/danmaku-converter'
 
-import type { DanmakuFilter } from './options'
+import type {
+  DanmakuColorFilter,
+  DanmakuFilter,
+  DanmakuModeFilter,
+} from './options'
 
 // copied from danmaku
 export interface ParsedComment {
@@ -94,10 +98,26 @@ export const transformComment = (
   return parsed
 }
 
-const regexCache = new Map<string, RegExp | null>()
+const regexCache = new Map<string, { regex: RegExp | null; lastUsed: number }>()
+
+const REGEX_CACHE_TTL_MS = 5 * 60 * 1000
+
+let lastCacheCleanup = Date.now()
+
+const cleanRegexCache = () => {
+  const now = Date.now()
+  if (now - lastCacheCleanup < REGEX_CACHE_TTL_MS) return
+  lastCacheCleanup = now
+  for (const [key, entry] of regexCache) {
+    if (now - entry.lastUsed > REGEX_CACHE_TTL_MS) {
+      regexCache.delete(key)
+    }
+  }
+}
 
 // returns true if the comment should be filtered out
 export const applyFilter = (comment: string, filters: DanmakuFilter[]) => {
+  cleanRegexCache()
   return filters.some(({ type, value, enabled }) => {
     if (!enabled) return false
 
@@ -105,19 +125,45 @@ export const applyFilter = (comment: string, filters: DanmakuFilter[]) => {
       case 'text':
         return comment.includes(value)
       case 'regex': {
-        if (!regexCache.has(value)) {
+        const now = Date.now()
+        let entry = regexCache.get(value)
+        if (!entry) {
           try {
-            regexCache.set(value, new RegExp(value))
+            entry = { regex: new RegExp(value), lastUsed: now }
           } catch {
-            regexCache.set(value, null)
+            entry = { regex: null, lastUsed: now }
           }
+          regexCache.set(value, entry)
+        } else {
+          entry.lastUsed = now
         }
-        const regex = regexCache.get(value)
-        if (!regex) return false
-        return regex.test(comment)
+        if (!entry.regex) return false
+        return entry.regex.test(comment)
       }
     }
   })
+}
+
+const WHITE_COLOR = '#ffffff'
+
+export const applyModeFilter = (
+  mode: ParsedComment['mode'],
+  modeFilter: DanmakuModeFilter
+): boolean => {
+  return !modeFilter[mode]
+}
+
+export const applyColorFilter = (
+  color: string,
+  colorFilter: DanmakuColorFilter
+): boolean => {
+  if (!colorFilter.enabled) return false
+  if (colorFilter.onlyWhite && color.toLowerCase() !== WHITE_COLOR) return true
+  if (colorFilter.blacklist.length > 0) {
+    const lowerColor = color.toLowerCase()
+    return colorFilter.blacklist.some((c) => c.toLowerCase() === lowerColor)
+  }
+  return false
 }
 
 export const filterComments = (

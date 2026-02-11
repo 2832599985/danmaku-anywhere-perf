@@ -146,6 +146,37 @@ const playerSettings: SettingConfig<ExtensionOptions>[] = [
       },
     }),
   },
+  {
+    id: 'toggle.player.autoDensity',
+    label: () =>
+      i18n.t('optionsPage.player.autoDensity', 'Auto-adjust danmaku density'),
+    category: 'player',
+    type: 'toggle',
+    getValue: (options) => options.playerOptions.autoDensity,
+    createUpdate: (options, newValue) => ({
+      playerOptions: {
+        ...options.playerOptions,
+        autoDensity: newValue,
+      },
+    }),
+  },
+  {
+    id: 'toggle.player.autoNextEpisode',
+    label: () =>
+      i18n.t(
+        'optionsPage.player.autoNextEpisode',
+        'Auto load next episode danmaku'
+      ),
+    category: 'player',
+    type: 'toggle',
+    getValue: (options) => options.playerOptions.autoNextEpisode,
+    createUpdate: (options, newValue) => ({
+      playerOptions: {
+        ...options.playerOptions,
+        autoNextEpisode: newValue,
+      },
+    }),
+  },
 ]
 
 export const UPLOAD_DEBUG_DATA_BUTTON: ButtonSettingConfig = {

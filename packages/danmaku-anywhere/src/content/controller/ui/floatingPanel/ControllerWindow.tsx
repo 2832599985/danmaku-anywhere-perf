@@ -7,6 +7,7 @@ import { usePopup } from '@/content/controller/store/popupStore'
 import { CONTROLLER_WINDOW_CONTENT_HEIGHT } from '@/content/controller/ui/constants/size'
 import { ControllerToolbar } from '@/content/controller/ui/floatingPanel/components/ControllerToolbar'
 import { InfoBar } from '@/content/controller/ui/floatingPanel/components/InfoBar'
+import { MergeSourcesPanel } from '@/content/controller/ui/floatingPanel/components/MergeSourcesPanel'
 import { PanelTabs } from '@/content/controller/ui/floatingPanel/components/PanelTabs'
 import { Window } from '@/content/controller/ui/floatingPanel/components/Window'
 import { routes } from '@/content/controller/ui/router/routes'
@@ -40,6 +41,7 @@ export const ControllerWindow = ({
       toolbar={<ControllerToolbar />}
     >
       <InfoBar />
+      <MergeSourcesPanel />
       <Box
         display="flex"
         position="relative"

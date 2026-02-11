@@ -5,9 +5,29 @@ import type {
 import { enableMapSet } from 'immer'
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
+import type { MatchEpisodeResult } from '@/common/anime/dto'
+import { localizedDanmakuSourceType } from '@/common/danmaku/enums'
 import { playerRpcClient } from '@/common/rpcClient/background/client'
 import { createSelectors } from '@/common/utils/createSelectors'
+import { mergeComments } from '@/common/utils/utils'
 import type { MediaInfo } from '@/content/controller/danmaku/integration/models/MediaInfo'
+
+export interface DanmakuSource {
+  label: string
+  commentCount: number
+}
+
+/**
+ * Build a human-readable source label that includes the provider name.
+ * e.g. "Bilibili - Episode Title" or "DanDanPlay - 3 episodes"
+ */
+const buildSourceLabel = (episodes: GenericEpisode[]): string => {
+  // All episodes in a single load share the same provider
+  const providerName = localizedDanmakuSourceType(episodes[0].provider)
+  const title =
+    episodes.length === 1 ? episodes[0].title : `${episodes.length} episodes`
+  return `${providerName} - ${title}`
+}
 
 enableMapSet()
 
@@ -40,6 +60,10 @@ interface StoreState {
     setFilter: (filter: string) => void
 
     mount: (episodes: GenericEpisode[]) => void
+    /**
+     * Merge new episodes into the currently mounted danmaku, deduplicating comments.
+     */
+    mergeMount: (episodes: GenericEpisode[]) => void
     unmount: () => void
 
     /**
@@ -65,6 +89,11 @@ interface StoreState {
      */
     isManual: boolean
     toggleManualMode: (manual?: boolean) => void
+
+    /**
+     * Loaded danmaku sources for multi-source merging
+     */
+    sources: DanmakuSource[]
   }
 
   seekToTime: (time: number) => void
@@ -82,6 +111,8 @@ interface StoreState {
     setErrorMessage: (errMessage?: string) => void
     mediaInfo?: MediaInfo
     setMediaInfo: (mediaInfo: MediaInfo) => void
+    matchResult?: MatchEpisodeResult
+    setMatchResult: (result?: MatchEpisodeResult) => void
     resetIntegration: () => void
   }
 
@@ -150,6 +181,31 @@ const useStoreBase = create<StoreState>()(
               : episodes.flatMap((episode) => {
                   return episode.comments
                 })
+          // Reset sources on fresh mount
+          const totalComments = state.danmaku.comments.length
+          const label = buildSourceLabel(episodes)
+          state.danmaku.sources = [{ label, commentCount: totalComments }]
+        })
+      },
+      mergeMount: (episodes) => {
+        set((state) => {
+          const incoming: CommentEntity[] =
+            episodes.length === 1
+              ? episodes[0].comments
+              : episodes.flatMap((episode) => episode.comments)
+          const merged = mergeComments(state.danmaku.comments, incoming)
+          state.danmaku.comments = merged
+
+          // Append episodes to the existing list
+          const existingEpisodes = state.danmaku.episodes ?? []
+          state.danmaku.episodes = [...existingEpisodes, ...episodes]
+
+          // Track the new source
+          const label = buildSourceLabel(episodes)
+          state.danmaku.sources.push({
+            label,
+            commentCount: incoming.length,
+          })
         })
       },
       unmount: () => {
@@ -157,6 +213,7 @@ const useStoreBase = create<StoreState>()(
           state.danmaku.isMounted = false
           state.danmaku.episodes = undefined
           state.danmaku.comments = []
+          state.danmaku.sources = []
         })
       },
       isVisible: true,
@@ -192,6 +249,8 @@ const useStoreBase = create<StoreState>()(
           })
         }
       },
+
+      sources: [],
     },
 
     seekToTime: (time) => {
@@ -228,11 +287,17 @@ const useStoreBase = create<StoreState>()(
         set((state) => {
           state.integration.mediaInfo = mediaInfo
         }),
+      matchResult: undefined,
+      setMatchResult: (result) =>
+        set((state) => {
+          state.integration.matchResult = result
+        }),
       resetIntegration: () =>
         set((state) => {
           state.integration.mediaInfo = undefined
           state.integration.foundElements = false
           state.integration.errorMessage = undefined
+          state.integration.matchResult = undefined
         }),
     },
 

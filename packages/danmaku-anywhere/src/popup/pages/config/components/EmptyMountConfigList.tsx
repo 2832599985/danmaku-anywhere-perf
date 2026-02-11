@@ -1,8 +1,10 @@
 import { Box, Button, Stack, Typography } from '@mui/material'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SuspenseImage } from '@/common/components/image/SuspenseImage'
 
 import { IMAGE_ASSETS } from '@/images/ImageAssets'
+import { TemplatePickerDialog } from './TemplatePickerDialog'
 
 interface EmptyMountConfigListProps {
   onCreate: () => void
@@ -12,6 +14,8 @@ export const EmptyMountConfigList = ({
   onCreate,
 }: EmptyMountConfigListProps) => {
   const { t } = useTranslation()
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
+
   return (
     <Box>
       <Stack p={2} pt={8} alignItems="center" zIndex={2} position="relative">
@@ -25,6 +29,13 @@ export const EmptyMountConfigList = ({
         >
           {t('configPage.goCreate', 'Go create one')}
         </Button>
+        <Button
+          onClick={() => setTemplateDialogOpen(true)}
+          variant="text"
+          sx={{ textTransform: 'none' }}
+        >
+          {t('configPage.templates.browse', 'Browse Templates')}
+        </Button>
       </Stack>
       <SuspenseImage
         src={IMAGE_ASSETS.DrawCircle}
@@ -36,6 +47,10 @@ export const EmptyMountConfigList = ({
         }}
         height={300}
         cache={false}
+      />
+      <TemplatePickerDialog
+        open={templateDialogOpen}
+        onClose={() => setTemplateDialogOpen(false)}
       />
     </Box>
   )

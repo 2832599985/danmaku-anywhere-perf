@@ -176,6 +176,7 @@ export type PlayerRelayCommands = {
   'relay:command:seek': RPCDef<InputWithFrameId<number>, void, FrameContext>
   'relay:command:enterPip': RPCDef<InputWithFrameId<void>, void, FrameContext>
   'relay:command:show': RPCDef<InputWithFrameId<boolean>, void, FrameContext>
+  'relay:command:skipOp': RPCDef<InputWithFrameId<void>, void, FrameContext>
 }
 
 // Player -> Controller communication
@@ -185,5 +186,6 @@ export type PlayerRelayEvents = {
   'relay:event:videoChange': RPCDef<InputWithFrameId<void>, void>
   'relay:event:videoRemoved': RPCDef<InputWithFrameId<void>, void>
   'relay:event:preloadNextEpisode': RPCDef<InputWithFrameId<void>, void>
+  'relay:event:videoEnded': RPCDef<InputWithFrameId<void>, void>
   'relay:event:showPopover': RPCDef<InputWithFrameId<void>, void>
 }

@@ -7,6 +7,7 @@ import { MountPage } from '@/content/controller/ui/floatingPanel/pages/mount/Mou
 import { SelectorPage } from '@/content/controller/ui/floatingPanel/pages/SelectorPage'
 import { StylesPage } from '@/content/controller/ui/floatingPanel/pages/StylesPage'
 import { SearchPage } from '@/content/controller/ui/floatingPanel/pages/search/SearchPage'
+import { StatsPage } from '@/content/controller/ui/floatingPanel/pages/stats/StatsPage'
 import { FilterPage } from '../floatingPanel/pages/FilterPage'
 import { TitleMappingPage } from '../floatingPanel/pages/titleMapping/TitleMappingPage'
 
@@ -30,6 +31,11 @@ export const routes = [
     tab: PopupTab.Comments,
     name: () => i18n.t('tabs.danmaku', 'Danmaku'),
     element: <CommentsPage />,
+  },
+  {
+    tab: PopupTab.Stats,
+    name: () => i18n.t('tabs.stats', 'Stats'),
+    element: <StatsPage />,
   },
   {
     tab: PopupTab.Styles,

@@ -8,6 +8,13 @@ import type { DanmakuSourceType } from '@/common/danmaku/enums'
 import type { ProviderConfig } from '@/common/options/providerConfig/schema'
 import type { MatchingStrategyType } from './MatchingStrategyType'
 
+export interface StrategyAttempt {
+  strategy: MatchingStrategyType
+  tried: boolean
+  skipped: boolean
+  reason?: string
+}
+
 export interface SeasonSearchRequest {
   keyword: string
   episode?: string
@@ -55,6 +62,7 @@ export type MatchEpisodeResult =
       status: 'notFound'
       data: null
       cause: string
+      strategyAttempts?: StrategyAttempt[]
     }
 
 export interface GenericVodSearchData {

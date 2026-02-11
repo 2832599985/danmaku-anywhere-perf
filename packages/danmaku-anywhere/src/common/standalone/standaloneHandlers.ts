@@ -146,6 +146,7 @@ export const standalonePlayerCommandHandlers: StandaloneRpcHandlers<PlayerRelayC
     'relay:command:seek': () => undefined,
     'relay:command:enterPip': () => undefined,
     'relay:command:show': () => undefined,
+    'relay:command:skipOp': () => undefined,
   }
 
 export const standalonePlayerEventHandlers: StandaloneRpcHandlers<PlayerRelayEvents> =
@@ -154,5 +155,6 @@ export const standalonePlayerEventHandlers: StandaloneRpcHandlers<PlayerRelayEve
     'relay:event:videoChange': () => undefined,
     'relay:event:videoRemoved': () => undefined,
     'relay:event:preloadNextEpisode': () => undefined,
+    'relay:event:videoEnded': () => undefined,
     'relay:event:showPopover': () => undefined,
   }

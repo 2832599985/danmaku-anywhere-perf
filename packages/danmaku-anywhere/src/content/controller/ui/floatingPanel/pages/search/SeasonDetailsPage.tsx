@@ -1,13 +1,17 @@
-﻿import type {
+import type {
   EpisodeMeta,
   Season,
   WithSeason,
 } from '@danmaku-anywhere/danmaku-converter'
+import { MergeType, Star, StarBorder } from '@mui/icons-material'
 import {
+  Badge,
   Button,
   Checkbox,
+  IconButton,
   LinearProgress,
   Stack,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import { useQuery } from '@tanstack/react-query'
@@ -22,9 +26,11 @@ import { TabToolbar } from '@/common/components/layout/TabToolbar'
 import { useToast } from '@/common/components/Toast/toastStore'
 import { resolveBatchDownloadOutcome } from '@/common/danmaku/batchDownloadOutcome'
 import { useFetchDanmakuLite } from '@/common/danmaku/queries/useFetchDanmakuLite'
+import { useFavorites } from '@/common/hooks/useFavorites'
 import { seasonQueryKeys } from '@/common/queries/queryKeys'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { useLoadDanmaku } from '@/content/controller/common/hooks/useLoadDanmaku'
+import { useStore } from '@/content/controller/store/store'
 
 type SeasonDetailsPageProps = {
   season: Season
@@ -41,10 +47,12 @@ export const SeasonDetailsPage = ({
 }: SeasonDetailsPageProps) => {
   const { t } = useTranslation()
   const toast = useToast.use.toast()
+  const { isFavorite, toggleFavorite } = useFavorites()
 
-  const { loadMutation } = useLoadDanmaku()
+  const { loadMutation, mergeLoadMutation, canMerge } = useLoadDanmaku()
   const { mutateAsync: download, isPending: isDownloading } =
     useFetchDanmakuLite()
+  const { sources } = useStore.use.danmaku()
 
   // Share cache with `EpisodeSearchList` (which uses Suspense), but keep this non-suspense so
   // the toolbar can render immediately and we can implement "select all" without reaching into the list.
@@ -183,6 +191,51 @@ export const SeasonDetailsPage = ({
     <TabLayout>
       <TabToolbar showBackButton onGoBack={onGoBack} title={season.title}>
         <Stack direction="row" gap={1} alignItems="center">
+          <Tooltip
+            title={
+              isFavorite(season.id)
+                ? t('searchPage.favorites.remove')
+                : t('searchPage.favorites.add')
+            }
+          >
+            <IconButton
+              size="small"
+              onClick={() => toggleFavorite(season)}
+              color={isFavorite(season.id) ? 'warning' : 'default'}
+            >
+              {isFavorite(season.id) ? (
+                <Star fontSize="small" />
+              ) : (
+                <StarBorder fontSize="small" />
+              )}
+            </IconButton>
+          </Tooltip>
+          {sources.length > 0 && (
+            <Tooltip
+              title={
+                <div>
+                  <div>
+                    {t('danmaku.merge.sourceCount', {
+                      count: sources.length,
+                    })}
+                  </div>
+                  {sources.map((source, index) => (
+                    <div key={`${source.label}-${index}`}>
+                      {source.label}: {source.commentCount.toLocaleString()}
+                    </div>
+                  ))}
+                </div>
+              }
+            >
+              <Badge
+                badgeContent={sources.length}
+                color="secondary"
+                sx={{ mr: 1 }}
+              >
+                <MergeType fontSize="small" />
+              </Badge>
+            </Tooltip>
+          )}
           {isSelectMode ? (
             <>
               <Button
@@ -281,14 +334,26 @@ export const SeasonDetailsPage = ({
                 })
               }
 
+              const handleMergeDanmaku = async (
+                meta: WithSeason<EpisodeMeta>
+              ) => {
+                await mergeLoadMutation.mutateAsync({
+                  type: 'by-meta',
+                  meta,
+                  options: {
+                    forceUpdate: true,
+                  },
+                })
+              }
+
               const isLoadingThisEpisode =
-                loadMutation.isPending &&
-                loadMutation.variables?.type === 'by-meta' &&
-                loadMutation.variables.meta.indexedId ===
-                  data.episode.indexedId &&
-                loadMutation.variables.meta.provider ===
-                  data.episode.provider &&
-                loadMutation.variables.meta.seasonId === data.episode.seasonId
+                (loadMutation.isPending || mergeLoadMutation.isPending) &&
+                (loadMutation.variables?.type === 'by-meta' ||
+                  mergeLoadMutation.variables?.type === 'by-meta') &&
+                (loadMutation.variables?.meta?.indexedId ===
+                  data.episode.indexedId ||
+                  mergeLoadMutation.variables?.meta?.indexedId ===
+                    data.episode.indexedId)
 
               const key = buildEpisodeKey(data.episode)
 
@@ -308,20 +373,44 @@ export const SeasonDetailsPage = ({
                   }}
                   disabled={
                     loadMutation.isPending ||
+                    mergeLoadMutation.isPending ||
                     isBatchDownloading ||
                     isDownloading
                   }
                   renderSecondaryAction={() => {
-                    if (!isSelectMode) return null
-                    return (
-                      <Checkbox
-                        edge="end"
-                        checked={selectedKeys.has(key)}
-                        disabled={isBatchDownloading}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={() => toggleSelectedKey(key)}
-                      />
-                    )
+                    if (isSelectMode) {
+                      return (
+                        <Checkbox
+                          edge="end"
+                          checked={selectedKeys.has(key)}
+                          disabled={isBatchDownloading}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => toggleSelectedKey(key)}
+                        />
+                      )
+                    }
+                    if (canMerge) {
+                      return (
+                        <Tooltip title={t('danmaku.merge.mergeWithCurrent')}>
+                          <IconButton
+                            edge="end"
+                            size="small"
+                            disabled={
+                              loadMutation.isPending ||
+                              mergeLoadMutation.isPending ||
+                              isDownloading
+                            }
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              await handleMergeDanmaku(data.episode)
+                            }}
+                          >
+                            <MergeType fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )
+                    }
+                    return null
                   }}
                 />
               )

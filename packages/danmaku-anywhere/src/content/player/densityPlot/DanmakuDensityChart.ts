@@ -1,6 +1,9 @@
 import * as d3 from 'd3'
 import { buildDensityAreaPath } from '@/content/player/densityPlot/buildDensityAreaPath'
-import type { DensityPoint } from '@/content/player/densityPlot/types'
+import type {
+  DensityPoint,
+  SkipRegion,
+} from '@/content/player/densityPlot/types'
 
 export interface DanmakuDensityChartOptions {
   height?: number
@@ -42,10 +45,23 @@ export class DanmakuDensityChart {
     null,
     undefined
   > | null = null
+  private skipRegionGroup: d3.Selection<
+    SVGGElement,
+    unknown,
+    null,
+    undefined
+  > | null = null
+  private legendGroup: d3.Selection<
+    SVGGElement,
+    unknown,
+    null,
+    undefined
+  > | null = null
 
   private data: DensityPoint[] = []
   private duration = 0
   private lastCurrentTime = 0
+  private skipRegions: SkipRegion[] = []
 
   private readonly boundResize: () => void
 
@@ -84,6 +100,9 @@ export class DanmakuDensityChart {
       .attr('width', 0)
       .attr('height', this.options.height)
 
+    // Skip region overlays (rendered below density paths)
+    const skipRegionGroup = svg.append('g').classed('da-skip-regions', true)
+
     const pathUnplayed = svg
       .append('path')
       .attr('fill', this.options.colors.unplayed)
@@ -93,10 +112,15 @@ export class DanmakuDensityChart {
       .attr('fill', this.options.colors.played)
       .attr('clip-path', `url(#${this.clipId})`)
 
+    // Legend group (rendered on top)
+    const legendGroup = svg.append('g').classed('da-skip-legend', true)
+
     this.svg = svg
     this.pathUnplayed = pathUnplayed
     this.pathPlayed = pathPlayed
     this.clipRect = clipRect
+    this.skipRegionGroup = skipRegionGroup
+    this.legendGroup = legendGroup
 
     window.addEventListener('resize', this.boundResize)
   }
@@ -108,6 +132,8 @@ export class DanmakuDensityChart {
     this.pathUnplayed = null
     this.pathPlayed = null
     this.clipRect = null
+    this.skipRegionGroup = null
+    this.legendGroup = null
   }
 
   setOptions(options: DanmakuDensityChartOptions) {
@@ -147,6 +173,11 @@ export class DanmakuDensityChart {
     this.data = data
     this.duration = duration
     this.redraw()
+  }
+
+  updateSkipRegions(regions: SkipRegion[]) {
+    this.skipRegions = regions
+    this.drawSkipRegions()
   }
 
   updateProgress(currentTime: number) {
@@ -205,6 +236,122 @@ export class DanmakuDensityChart {
     this.pathUnplayed.attr('d', d)
     this.pathPlayed.attr('d', d)
 
+    this.drawSkipRegions()
     this.updateProgress(this.lastCurrentTime)
+  }
+
+  private drawSkipRegions() {
+    if (!this.skipRegionGroup || !this.legendGroup || !this.svg) {
+      return
+    }
+
+    // Clear previous regions and legend
+    this.skipRegionGroup.selectAll('*').remove()
+    this.legendGroup.selectAll('*').remove()
+
+    if (
+      this.skipRegions.length === 0 ||
+      !Number.isFinite(this.duration) ||
+      this.duration <= 0
+    ) {
+      return
+    }
+
+    const { width, height } = this.getSvgSize()
+    if (width <= 0) return
+
+    const opColor = 'rgba(96, 165, 250, 0.35)'
+    const edColor = 'rgba(251, 113, 133, 0.35)'
+    const opBorderColor = 'rgba(96, 165, 250, 0.7)'
+    const edBorderColor = 'rgba(251, 113, 133, 0.7)'
+
+    for (const region of this.skipRegions) {
+      const x1 = Math.max(0, (region.startTime / this.duration) * width)
+      const x2 = Math.min(width, (region.endTime / this.duration) * width)
+      const regionWidth = x2 - x1
+
+      if (regionWidth < 1) continue
+
+      const isOp = region.type === 'op'
+      const fillColor = isOp ? opColor : edColor
+      const borderColor = isOp ? opBorderColor : edBorderColor
+
+      // Overlay rectangle
+      this.skipRegionGroup
+        .append('rect')
+        .attr('x', x1)
+        .attr('y', 0)
+        .attr('width', regionWidth)
+        .attr('height', height)
+        .attr('fill', fillColor)
+        .attr('stroke', borderColor)
+        .attr('stroke-width', 1)
+        .classed('da-skip-region', true)
+        .classed(isOp ? 'da-skip-region-op' : 'da-skip-region-ed', true)
+
+      // Label inside region (only if wide enough)
+      if (regionWidth > 24) {
+        this.skipRegionGroup
+          .append('text')
+          .attr('x', x1 + regionWidth / 2)
+          .attr('y', height / 2)
+          .attr('text-anchor', 'middle')
+          .attr('dominant-baseline', 'central')
+          .attr(
+            'fill',
+            isOp ? 'rgba(96, 165, 250, 0.9)' : 'rgba(251, 113, 133, 0.9)'
+          )
+          .attr('font-size', '10px')
+          .attr('font-family', 'sans-serif')
+          .attr('pointer-events', 'none')
+          .text(isOp ? 'OP' : 'ED')
+      }
+    }
+
+    // Draw legend in top-right corner
+    this.drawLegend(width)
+  }
+
+  private drawLegend(svgWidth: number) {
+    if (!this.legendGroup || this.skipRegions.length === 0) return
+
+    const hasOp = this.skipRegions.some((r) => r.type === 'op')
+    const hasEd = this.skipRegions.some((r) => r.type === 'ed')
+
+    if (!hasOp && !hasEd) return
+
+    const items: Array<{ label: string; color: string }> = []
+    if (hasOp) items.push({ label: 'OP', color: 'rgba(96, 165, 250, 0.7)' })
+    if (hasEd) items.push({ label: 'ED', color: 'rgba(251, 113, 133, 0.7)' })
+
+    const itemWidth = 30
+    const totalWidth = items.length * itemWidth
+    const startX = svgWidth - totalWidth - 4
+    const y = 4
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      const x = startX + i * itemWidth
+
+      this.legendGroup
+        .append('rect')
+        .attr('x', x)
+        .attr('y', y)
+        .attr('width', 8)
+        .attr('height', 8)
+        .attr('rx', 1)
+        .attr('fill', item.color)
+
+      this.legendGroup
+        .append('text')
+        .attr('x', x + 11)
+        .attr('y', y + 4)
+        .attr('dominant-baseline', 'central')
+        .attr('fill', 'rgba(255, 255, 255, 0.8)')
+        .attr('font-size', '9px')
+        .attr('font-family', 'sans-serif')
+        .attr('pointer-events', 'none')
+        .text(item.label)
+    }
   }
 }

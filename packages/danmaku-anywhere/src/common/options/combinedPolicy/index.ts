@@ -66,6 +66,45 @@ export class CombinedPolicyService {
     return imported.id
   }
 
+  async exportSingle(id: string): Promise<CombinedPolicy> {
+    const config = await this.configService.get(id)
+
+    if (!config) {
+      throw new Error(`Config not found: "${id}"`)
+    }
+
+    const integration = config.integration
+      ? await this.integrationService.get(config.integration)
+      : undefined
+
+    return {
+      ...config,
+      integration,
+    }
+  }
+
+  async importFromFile(data: unknown): Promise<string> {
+    const parseResult = await zCombinedPolicy.safeParseAsync(data)
+
+    if (!parseResult.success) {
+      throw new Error('Invalid config file format')
+    }
+
+    const combinedConfig = parseResult.data
+    const integration = combinedConfig.integration
+
+    const importedIntegration = integration
+      ? await this.integrationService.import(integration)
+      : undefined
+
+    const imported = await this.configService.import({
+      ...combinedConfig,
+      integration: importedIntegration?.id,
+    })
+
+    return imported.id
+  }
+
   async exportShareCode(id: string): Promise<string> {
     const config = await this.configService.get(id)
 

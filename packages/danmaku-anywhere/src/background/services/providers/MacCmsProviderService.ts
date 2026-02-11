@@ -173,6 +173,39 @@ export class MacCmsProviderService implements IDanmakuProvider {
     return commentsResult.data
   }
 
+  async preloadNextEpisode(request: DanmakuFetchRequest): Promise<void> {
+    assertProviderType(request.meta, DanmakuSourceType.MacCMS)
+
+    const { meta } = request
+    const episodes = await this.getEpisodesByIndexedId(
+      meta.season.indexedId,
+      meta.season.title
+    )
+
+    const currentIndex = episodes.findIndex(
+      (e) => e.indexedId === meta.indexedId
+    )
+
+    if (currentIndex === -1 || currentIndex >= episodes.length - 1) {
+      this.logger.debug('Next episode not found for preload')
+      return
+    }
+
+    const nextEpisode = episodes[currentIndex + 1]
+    assertProviderType(nextEpisode, DanmakuSourceType.MacCMS)
+
+    // Pre-fetch the danmaku so it gets cached
+    const commentsResult = await fetchDanmuIcuComments(
+      this.config.options.danmuicuBaseUrl,
+      nextEpisode.providerIds.url,
+      this.config.options.stripColor
+    )
+
+    if (!commentsResult.success) {
+      throw commentsResult.error
+    }
+  }
+
   /**
    * Legacy static search for the `genericVodSearch` RPC.
    * Returns the old CustomSeason format with embedded episodes.

@@ -1,6 +1,5 @@
-import { DanmakuSourceType } from '@danmaku-anywhere/danmaku-converter'
 import { useMutation } from '@tanstack/react-query'
-import { isProvider } from '@/common/danmaku/utils'
+import { isNotCustom } from '@/common/danmaku/utils'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { useStore } from '@/content/controller/store/store'
 
@@ -9,7 +8,9 @@ export const usePreloadNextEpisode = () => {
 
   return {
     canLoadNext: () => {
-      return episodes?.length === 1
+      if (!episodes || episodes.length !== 1) return false
+      // Only provider-backed episodes (with a season) can be preloaded
+      return isNotCustom(episodes[0])
     },
     preloadNext: useMutation({
       mutationFn: async () => {
@@ -19,14 +20,14 @@ export const usePreloadNextEpisode = () => {
 
         const episode = episodes[0]
 
-        if (isProvider(episode, DanmakuSourceType.DanDanPlay)) {
-          return chromeRpcClient.episodePreloadNext({
-            type: 'by-meta',
-            meta: episode,
-          })
+        if (!isNotCustom(episode)) {
+          return null
         }
 
-        return null
+        return chromeRpcClient.episodePreloadNext({
+          type: 'by-meta',
+          meta: episode,
+        })
       },
     }),
   }

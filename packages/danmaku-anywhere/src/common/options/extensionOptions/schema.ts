@@ -54,6 +54,15 @@ export const playerOptionsSchema = z.object({
   showDanmakuTimeline: z.boolean(),
   enableFixedSkip: z.boolean(),
   fixedSkipSeconds: z.number().int().positive().default(90),
+  /**
+   * When enabled, automatically reduce danmaku in high-density segments
+   */
+  autoDensity: z.boolean(),
+  /**
+   * When enabled, automatically load danmaku for the next episode
+   * when the current episode reaches 80% playback
+   */
+  autoNextEpisode: z.boolean(),
 })
 
 export const retentionPolicySchema = z.object({

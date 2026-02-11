@@ -169,6 +169,29 @@ export class BilibiliService implements IDanmakuProvider {
     return this.getDanmakuInternal(meta)
   }
 
+  async preloadNextEpisode(request: DanmakuFetchRequest): Promise<void> {
+    const { meta } = request
+    assertProviderType(meta, DanmakuSourceType.Bilibili)
+
+    const episodes = await this.getEpisodes(meta.season.providerIds)
+    const currentIndex = episodes.findIndex(
+      (e) => e.indexedId === meta.indexedId
+    )
+
+    if (currentIndex === -1 || currentIndex >= episodes.length - 1) {
+      this.logger.debug('Next episode not found for preload')
+      return
+    }
+
+    const nextEpisode = episodes[currentIndex + 1]
+
+    // Pre-fetch the danmaku so it gets cached
+    await this.fetchDanmaku({
+      cid: nextEpisode.providerIds.cid,
+      aid: nextEpisode.providerIds.aid,
+    })
+  }
+
   async getSeason(
     seasonRemoteIds: BilibiliOf<Season>['providerIds']
   ): Promise<SeasonInsert | null> {

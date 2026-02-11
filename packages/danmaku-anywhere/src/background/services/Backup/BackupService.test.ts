@@ -36,7 +36,7 @@ describe('BackupService', () => {
   })
 
   it('should delegate importAll to ConfigStateService', async () => {
-    const mockData = { meta: { version: 1 } } as any
+    const mockData = { meta: { version: 1 }, services: {} } as any
     const mockResult = { success: true, details: {} }
     mockConfigStateService.restoreState.mockResolvedValue(mockResult)
 

@@ -1,4 +1,5 @@
-import { Box, Stack, Typography } from '@mui/material'
+import type { DanmakuModeFilter } from '@danmaku-anywhere/danmaku-engine'
+import { Box, Divider, Stack, Typography } from '@mui/material'
 import type { Draft } from 'immer'
 import { produce } from 'immer'
 import { useState } from 'react'
@@ -9,6 +10,8 @@ import { useDanmakuOptions } from '@/common/options/danmakuOptions/useDanmakuOpt
 import { TabToolbar } from '../layout/TabToolbar'
 import { ActiveFilterList } from './ActiveFilterList'
 import { AddFilter } from './AddFilter'
+import { ColorFilter } from './ColorFilter'
+import { ModeFilter } from './ModeFilter'
 import { TestFilter } from './TestFilter'
 import { isRegex, validatePattern, validateRegex } from './utils'
 
@@ -74,6 +77,39 @@ export const FilterPageCore = ({
     })
   }
 
+  const handleModeFilterChange = (
+    mode: keyof DanmakuModeFilter,
+    checked: boolean
+  ) => {
+    handleUpdate((draft) => {
+      draft.modeFilter[mode] = checked
+    })
+  }
+
+  const handleColorFilterToggleEnabled = (enabled: boolean) => {
+    handleUpdate((draft) => {
+      draft.colorFilter.enabled = enabled
+    })
+  }
+
+  const handleColorFilterToggleOnlyWhite = (onlyWhite: boolean) => {
+    handleUpdate((draft) => {
+      draft.colorFilter.onlyWhite = onlyWhite
+    })
+  }
+
+  const handleAddBlacklistColor = (color: string) => {
+    handleUpdate((draft) => {
+      ;(draft.colorFilter.blacklist as string[]).push(color)
+    })
+  }
+
+  const handleRemoveBlacklistColor = (index: number) => {
+    handleUpdate((draft) => {
+      ;(draft.colorFilter.blacklist as string[]).splice(index, 1)
+    })
+  }
+
   return (
     <TabLayout>
       <TabToolbar
@@ -85,6 +121,27 @@ export const FilterPageCore = ({
         <Stack spacing={3}>
           <Typography variant="body1" color="text.secondary">
             {t('danmakuFilter.description')}
+          </Typography>
+
+          <ModeFilter
+            modeFilter={config.modeFilter}
+            onChange={handleModeFilterChange}
+          />
+
+          <Divider />
+
+          <ColorFilter
+            colorFilter={config.colorFilter}
+            onToggleEnabled={handleColorFilterToggleEnabled}
+            onToggleOnlyWhite={handleColorFilterToggleOnlyWhite}
+            onAddBlacklistColor={handleAddBlacklistColor}
+            onRemoveBlacklistColor={handleRemoveBlacklistColor}
+          />
+
+          <Divider />
+
+          <Typography variant="subtitle2">
+            {t('danmakuFilter.textFilter')}
           </Typography>
 
           <AddFilter

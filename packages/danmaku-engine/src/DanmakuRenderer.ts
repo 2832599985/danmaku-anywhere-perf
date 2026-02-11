@@ -5,7 +5,9 @@ import {
 import { create, type Manager } from '@mr-quin/danmu'
 import { type DanmakuOptions, DEFAULT_DANMAKU_OPTIONS } from './options'
 import {
+  applyColorFilter,
   applyFilter,
+  applyModeFilter,
   type ParsedComment,
   type TimedComment,
   transformComment,
@@ -227,7 +229,12 @@ export class DanmakuRenderer {
           })
         },
         willRender: (ref) => {
-          if (applyFilter(ref.danmaku.data.text, this.config.filters)) {
+          const data = ref.danmaku.data
+          if (
+            applyFilter(data.text, this.config.filters) ||
+            applyModeFilter(data.mode, this.config.modeFilter) ||
+            applyColorFilter(data.color, this.config.colorFilter)
+          ) {
             ref.prevent = true
           }
           return ref
@@ -322,7 +329,17 @@ export class DanmakuRenderer {
       ...this.config.specialComments,
       ...config.specialComments,
     }
-    return { ...this.config, ...config, style, area, specialComments }
+    const modeFilter = { ...this.config.modeFilter, ...config.modeFilter }
+    const colorFilter = { ...this.config.colorFilter, ...config.colorFilter }
+    return {
+      ...this.config,
+      ...config,
+      style,
+      area,
+      specialComments,
+      modeFilter,
+      colorFilter,
+    }
   }
 
   destroy(): void {

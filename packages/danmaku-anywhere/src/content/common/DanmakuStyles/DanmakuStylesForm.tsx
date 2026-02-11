@@ -10,7 +10,7 @@ import {
   ToggleButtonGroup,
   Typography,
 } from '@mui/material'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { DocIcon } from '@/common/components/DocIcon'
@@ -19,10 +19,17 @@ import { IS_CHROME } from '@/common/constants'
 import { usePlatformInfo } from '@/common/hooks/usePlatformInfo'
 import { useResetForm } from '@/common/hooks/useResetForm'
 import type { DanmakuOptions } from '@/common/options/danmakuOptions/constant'
+import type { DanmakuPresetId } from '@/common/options/danmakuOptions/presets'
+import { danmakuPresetsMap } from '@/common/options/danmakuOptions/presets'
 import { useDanmakuOptions } from '@/common/options/danmakuOptions/useDanmakuOptions'
 import { withStopPropagation } from '@/common/utils/withStopPropagation'
+import { DanmakuPreview } from '@/content/common/DanmakuStyles/DanmakuPreview'
 import { FontSelector } from '@/content/common/DanmakuStyles/FontSelector'
 import { LabeledSwitch } from '@/content/common/DanmakuStyles/LabeledSwitch'
+import {
+  detectActivePreset,
+  PresetSelector,
+} from '@/content/common/DanmakuStyles/PresetSelector'
 import { LabeledSlider } from './LabeledSlider'
 
 const opacityMarks = [
@@ -236,6 +243,30 @@ export const DanmakuStylesForm = ({
     data: config,
   })
 
+  const activePreset = useMemo(() => detectActivePreset(config), [config])
+
+  const handlePresetSelect = useCallback(
+    (presetId: DanmakuPresetId) => {
+      const preset = danmakuPresetsMap[presetId]
+      const current = getValues()
+      const updated: DanmakuOptions = {
+        ...current,
+        ...preset.values,
+        style: {
+          ...current.style,
+          ...preset.values.style,
+        },
+        area: {
+          ...current.area,
+          ...preset.values.area,
+        },
+      }
+      form.reset(updated, { keepDefaultValues: true })
+      handleSubmit(onSave)()
+    },
+    [form, getValues, handleSubmit]
+  )
+
   useEffect(() => {
     const debouncedSave = debounce(() => {
       handleSubmit(onSave)()
@@ -260,12 +291,24 @@ export const DanmakuStylesForm = ({
     }
   }, [subscribe])
 
+  const formValues = watch()
   const yStart = watch('area.yStart', config.area.yStart)
   const yEnd = watch('area.yEnd', config.area.yEnd)
   const useCustomCss = watch('useCustomCss', config.useCustomCss)
 
   return (
     <>
+      <Stack spacing={1} mt={2}>
+        <PresetSelector
+          activePreset={activePreset}
+          onSelect={handlePresetSelect}
+        />
+      </Stack>
+
+      <Stack spacing={1} mt={2}>
+        <DanmakuPreview config={formValues as DanmakuOptions} />
+      </Stack>
+
       <Stack spacing={1} mt={2}>
         <Typography variant="h6" fontSize={18} component="div">
           {t('stylePage.style', 'Style')}

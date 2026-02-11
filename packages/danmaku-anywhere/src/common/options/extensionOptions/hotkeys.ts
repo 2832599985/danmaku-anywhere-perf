@@ -14,6 +14,12 @@ export const ALL_HOTKEYS = [
   'togglePip',
   'refreshComments',
   'unmountComments',
+  'increaseOpacity',
+  'decreaseOpacity',
+  'increaseFontSize',
+  'decreaseFontSize',
+  'skipOp',
+  'toggleStylePanel',
 ] as const
 
 export type AllHotkeys = (typeof ALL_HOTKEYS)[number]
@@ -27,6 +33,17 @@ export const HOTKEY_LABELS = createLocalizationMap<AllHotkeys>({
     i18n.t('optionsPage.hotkeys.refreshComments', 'Refresh comments'),
   unmountComments: () =>
     i18n.t('optionsPage.hotkeys.unmountComments', 'Unmount comments'),
+  increaseOpacity: () =>
+    i18n.t('optionsPage.hotkeys.increaseOpacity', 'Increase opacity (+10%)'),
+  decreaseOpacity: () =>
+    i18n.t('optionsPage.hotkeys.decreaseOpacity', 'Decrease opacity (-10%)'),
+  increaseFontSize: () =>
+    i18n.t('optionsPage.hotkeys.increaseFontSize', 'Increase font size (+2px)'),
+  decreaseFontSize: () =>
+    i18n.t('optionsPage.hotkeys.decreaseFontSize', 'Decrease font size (-2px)'),
+  skipOp: () => i18n.t('optionsPage.hotkeys.skipOp', 'Skip OP'),
+  toggleStylePanel: () =>
+    i18n.t('optionsPage.hotkeys.toggleStylePanel', 'Toggle style panel'),
 })
 
 export type Keymap = Record<AllHotkeys, Hotkey>
@@ -36,7 +53,43 @@ export const defaultKeymap: Keymap = {
   refreshComments: createHotkey('shift+r'),
   unmountComments: createHotkey('shift+u'),
   togglePip: createHotkey('shift+p'),
+  increaseOpacity: createHotkey(''),
+  decreaseOpacity: createHotkey(''),
+  increaseFontSize: createHotkey(''),
+  decreaseFontSize: createHotkey(''),
+  skipOp: createHotkey(''),
+  toggleStylePanel: createHotkey(''),
 } as const
+
+/**
+ * Detects conflicts in the keymap.
+ * Returns a map from hotkey name to array of conflicting hotkey names.
+ */
+export const detectHotkeyConflicts = (
+  keymap: Partial<Keymap>
+): Map<AllHotkeys, AllHotkeys[]> => {
+  const conflicts = new Map<AllHotkeys, AllHotkeys[]>()
+  const keyToActions = new Map<string, AllHotkeys[]>()
+
+  for (const [action, hotkey] of Object.entries(keymap)) {
+    if (!hotkey?.key || !hotkey.enabled) continue
+    const normalizedKey = hotkey.key.toLowerCase()
+    const existing = keyToActions.get(normalizedKey) ?? []
+    existing.push(action as AllHotkeys)
+    keyToActions.set(normalizedKey, existing)
+  }
+
+  for (const actions of keyToActions.values()) {
+    if (actions.length > 1) {
+      for (const action of actions) {
+        const others = actions.filter((a) => a !== action)
+        conflicts.set(action, others)
+      }
+    }
+  }
+
+  return conflicts
+}
 
 const macModifierSymbols: Record<string, string> = {
   ctrl: '⌃',

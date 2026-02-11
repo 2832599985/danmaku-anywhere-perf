@@ -17,6 +17,7 @@ export enum PopupTab {
   Import = 'import',
   Filter = 'filter',
   TitleMapping = 'titleMapping',
+  Stats = 'stats',
 }
 
 interface PopupStoreState {

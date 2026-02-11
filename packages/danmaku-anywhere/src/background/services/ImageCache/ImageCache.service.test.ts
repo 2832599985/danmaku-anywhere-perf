@@ -29,6 +29,7 @@ describe('ImageCacheService', () => {
 
     vi.mocked(global.fetch).mockReset()
     vi.mocked(global.fetch).mockResolvedValue({
+      ok: true,
       blob: () => Promise.resolve(new Blob(['mock'])),
     } as Response)
   })
@@ -79,6 +80,7 @@ describe('ImageCacheService', () => {
 
     // fetch returns new blob
     vi.mocked(global.fetch).mockResolvedValue({
+      ok: true,
       blob: () => Promise.resolve(new Blob(['new'])),
     } as Response)
 
