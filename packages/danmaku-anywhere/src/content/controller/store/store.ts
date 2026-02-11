@@ -7,6 +7,7 @@ import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import type { MatchEpisodeResult } from '@/common/anime/dto'
 import { localizedDanmakuSourceType } from '@/common/danmaku/enums'
+import { i18n } from '@/common/localization/i18n'
 import { playerRpcClient } from '@/common/rpcClient/background/client'
 import { createSelectors } from '@/common/utils/createSelectors'
 import { mergeComments } from '@/common/utils/utils'
@@ -22,10 +23,16 @@ export interface DanmakuSource {
  * e.g. "Bilibili - Episode Title" or "DanDanPlay - 3 episodes"
  */
 const buildSourceLabel = (episodes: GenericEpisode[]): string => {
+  if (episodes.length === 0) return ''
   // All episodes in a single load share the same provider
   const providerName = localizedDanmakuSourceType(episodes[0].provider)
   const title =
-    episodes.length === 1 ? episodes[0].title : `${episodes.length} episodes`
+    episodes.length === 1
+      ? episodes[0].title
+      : i18n.t('danmaku.commentCountedEpisodes', {
+          count: episodes.length,
+          defaultValue: '{{count}} episodes',
+        })
   return `${providerName} - ${title}`
 }
 

@@ -3,7 +3,7 @@ import type {
   DanmakuSourceType,
   Season,
 } from '@danmaku-anywhere/danmaku-converter'
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import { useExtStorage } from '@/common/storage/hooks/useExtStorage'
 
 export interface FavoriteSeason {
@@ -15,6 +15,7 @@ export interface FavoriteSeason {
 }
 
 const FAVORITES_KEY = 'favoriteSeasons'
+const MAX_FAVORITES_SIZE = 50
 
 export const useFavorites = () => {
   const storage = useExtStorage<FavoriteSeason[]>(FAVORITES_KEY, {
@@ -26,16 +27,16 @@ export const useFavorites = () => {
 
   const favorites = storage.data ?? []
 
-  const isFavorite = useCallback(
-    (seasonId: number) => {
-      return favorites.some((f) => f.seasonId === seasonId)
-    },
-    [favorites]
-  )
+  const dataRef = useRef(favorites)
+  dataRef.current = favorites
+
+  const isFavorite = useCallback((seasonId: number) => {
+    return dataRef.current.some((f) => f.seasonId === seasonId)
+  }, [])
 
   const toggleFavorite = useCallback(
     (season: Season | CustomSeason) => {
-      const current = storage.data ?? []
+      const current = dataRef.current
       const exists = current.some((f) => f.seasonId === season.id)
       if (exists) {
         const updated = current.filter((f) => f.seasonId !== season.id)
@@ -48,19 +49,19 @@ export const useFavorites = () => {
           providerConfigId: season.providerConfigId,
           imageUrl: season.imageUrl,
         }
-        storage.update.mutate([entry, ...current])
+        storage.update.mutate([entry, ...current].slice(0, MAX_FAVORITES_SIZE))
       }
     },
-    [storage.data, storage.update]
+    [storage.update]
   )
 
   const removeFavorite = useCallback(
     (seasonId: number) => {
-      const current = storage.data ?? []
+      const current = dataRef.current
       const updated = current.filter((f) => f.seasonId !== seasonId)
       storage.update.mutate(updated)
     },
-    [storage.data, storage.update]
+    [storage.update]
   )
 
   const clearFavorites = useCallback(() => {

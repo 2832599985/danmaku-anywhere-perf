@@ -27,7 +27,7 @@ const DensityChart = ({
   buckets: { time: number; count: number }[]
 }) => {
   const maxCount = useMemo(
-    () => Math.max(...buckets.map((b) => b.count), 1),
+    () => buckets.reduce((max, b) => Math.max(max, b.count), 1),
     [buckets]
   )
 

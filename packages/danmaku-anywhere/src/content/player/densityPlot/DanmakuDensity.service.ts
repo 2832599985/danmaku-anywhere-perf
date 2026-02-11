@@ -310,6 +310,10 @@ export class DanmakuDensityService {
   }
 
   private cleanup() {
+    if (this.showChartTimeout) {
+      clearTimeout(this.showChartTimeout)
+      this.showChartTimeout = null
+    }
     this.removeEventListeners()
     this.chart.teardown()
   }

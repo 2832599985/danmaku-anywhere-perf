@@ -9,8 +9,10 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Typography,
+  useEventCallback,
 } from '@mui/material'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { ControllerRenderProps } from 'react-hook-form'
 import { Controller, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { DocIcon } from '@/common/components/DocIcon'
@@ -212,6 +214,87 @@ const convertDisplaySpeedToActual = (displaySpeed: number) => {
 
 export type SaveStatus = 'idle' | 'saving' | 'saved'
 
+const OffsetSlider = ({
+  field,
+}: {
+  field: ControllerRenderProps<DanmakuOptions, 'offset'>
+}) => {
+  const { t } = useTranslation()
+  const [isEditingOffset, setIsEditingOffset] = useState(false)
+  const [editOffsetValue, setEditOffsetValue] = useState<string>(
+    field.value.toString()
+  )
+
+  useEffect(() => {
+    if (!isEditingOffset) {
+      setEditOffsetValue(field.value.toString())
+    }
+  }, [field.value, isEditingOffset])
+
+  const handleOffsetBlur = () => {
+    setIsEditingOffset(false)
+    let numericValue = Number.parseInt(editOffsetValue, 10)
+    if (isNaN(numericValue)) {
+      numericValue = field.value ?? 0
+    }
+    if (numericValue !== field.value) {
+      field.onChange(numericValue)
+    }
+    setEditOffsetValue(numericValue.toString())
+  }
+
+  return (
+    <LabeledSlider
+      label={t('stylePage.offset', 'Time Offset (milliseconds)')}
+      tooltip={t(
+        'stylePage.tooltip.offset',
+        'How earlier danmaku appears. Positive values make danmaku appear later, negative values make danmaku appear earlier.'
+      )}
+      value={field.value}
+      onChange={(_e, newValue) => {
+        const numericValue = newValue as number
+        field.onChange(numericValue)
+        if (!isEditingOffset) {
+          setEditOffsetValue(numericValue.toString())
+        }
+      }}
+      gridSize={8}
+      step={10}
+      min={-5000}
+      max={5000}
+      size="small"
+      valueLabelDisplay="auto"
+      valueLabelFormat={offsetValueLabelFormat}
+    >
+      <Grid size={4}>
+        <Input
+          value={isEditingOffset ? editOffsetValue : field.value}
+          size="small"
+          {...withStopPropagation()}
+          onFocus={() => {
+            setIsEditingOffset(true)
+            setEditOffsetValue(field.value.toString())
+          }}
+          onBlur={handleOffsetBlur}
+          onChange={(e) => {
+            setEditOffsetValue(e.target.value)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              handleOffsetBlur()
+              ;(e.target as HTMLInputElement).blur()
+            }
+          }}
+          inputProps={{
+            step: 1,
+            type: 'number',
+          }}
+        />
+      </Grid>
+    </LabeledSlider>
+  )
+}
+
 export type DanmakuStylesFormProps = {
   onSaveStatusChange?: (status: SaveStatus) => void
 }
@@ -230,13 +313,13 @@ export const DanmakuStylesForm = ({
 
   const { control, setValue, getValues, watch, handleSubmit, subscribe } = form
 
-  const onSave = async (formData: DanmakuOptions) => {
+  const onSave = useEventCallback(async (formData: DanmakuOptions) => {
     onSaveStatusChange?.('saving')
 
     await partialUpdate(formData)
 
     onSaveStatusChange?.('saved')
-  }
+  })
 
   const resetFlag = useResetForm({
     form,
@@ -245,31 +328,36 @@ export const DanmakuStylesForm = ({
 
   const activePreset = useMemo(() => detectActivePreset(config), [config])
 
-  const handlePresetSelect = useCallback(
-    (presetId: DanmakuPresetId) => {
-      const preset = danmakuPresetsMap[presetId]
-      const current = getValues()
-      const updated: DanmakuOptions = {
-        ...current,
-        ...preset.values,
-        style: {
-          ...current.style,
-          ...preset.values.style,
-        },
-        area: {
-          ...current.area,
-          ...preset.values.area,
-        },
-      }
-      form.reset(updated, { keepDefaultValues: true })
-      handleSubmit(onSave)()
-    },
-    [form, getValues, handleSubmit]
-  )
+  const handlePresetSelect = useEventCallback((presetId: DanmakuPresetId) => {
+    const preset = danmakuPresetsMap[presetId]
+    const current = getValues()
+    const updated: DanmakuOptions = {
+      ...current,
+      ...preset.values,
+      style: {
+        ...current.style,
+        ...preset.values.style,
+      },
+      area: {
+        ...current.area,
+        ...preset.values.area,
+      },
+    }
+    form.reset(updated, { keepDefaultValues: true })
+    handleSubmit(onSave)()
+  })
+
+  const handleDebouncedSave = useEventCallback(() => {
+    handleSubmit(onSave)()
+  })
+
+  const handleSavingStatus = useEventCallback(() => {
+    onSaveStatusChange?.('saving')
+  })
 
   useEffect(() => {
     const debouncedSave = debounce(() => {
-      handleSubmit(onSave)()
+      handleDebouncedSave()
     }, 500)
 
     const unsubscribe = subscribe({
@@ -281,7 +369,7 @@ export const DanmakuStylesForm = ({
         if (!isDirty || resetFlag.current) {
           return
         }
-        onSaveStatusChange?.('saving')
+        handleSavingStatus()
         debouncedSave()
       },
     })
@@ -289,7 +377,7 @@ export const DanmakuStylesForm = ({
     return () => {
       unsubscribe()
     }
-  }, [subscribe])
+  }, [subscribe, resetFlag, handleDebouncedSave, handleSavingStatus])
 
   const formValues = watch()
   const yStart = watch('area.yStart', config.area.yStart)
@@ -306,7 +394,7 @@ export const DanmakuStylesForm = ({
       </Stack>
 
       <Stack spacing={1} mt={2}>
-        <DanmakuPreview config={formValues as DanmakuOptions} />
+        <DanmakuPreview config={formValues} />
       </Stack>
 
       <Stack spacing={1} mt={2}>
@@ -447,81 +535,7 @@ export const DanmakuStylesForm = ({
         <Controller
           name="offset"
           control={control}
-          render={({ field }) => {
-            const [isEditingOffset, setIsEditingOffset] = useState(false)
-            const [editOffsetValue, setEditOffsetValue] = useState<string>(
-              field.value.toString()
-            )
-
-            useEffect(() => {
-              if (!isEditingOffset) {
-                setEditOffsetValue(field.value.toString())
-              }
-            }, [field.value, isEditingOffset])
-
-            const handleOffsetBlur = () => {
-              setIsEditingOffset(false)
-              let numericValue = Number.parseInt(editOffsetValue, 10)
-              if (isNaN(numericValue)) {
-                numericValue = field.value ?? 0
-              }
-              if (numericValue !== field.value) {
-                field.onChange(numericValue)
-              }
-              setEditOffsetValue(numericValue.toString())
-            }
-
-            return (
-              <LabeledSlider
-                label={t('stylePage.offset', 'Time Offset (milliseconds)')}
-                tooltip={t(
-                  'stylePage.tooltip.offset',
-                  'How earlier danmaku appears. Positive values make danmaku appear later, negative values make danmaku appear earlier.'
-                )}
-                value={field.value}
-                onChange={(_e, newValue) => {
-                  const numericValue = newValue as number
-                  field.onChange(numericValue)
-                  if (!isEditingOffset) {
-                    setEditOffsetValue(numericValue.toString())
-                  }
-                }}
-                gridSize={8}
-                step={10}
-                min={-5000}
-                max={5000}
-                size="small"
-                valueLabelDisplay="auto"
-                valueLabelFormat={offsetValueLabelFormat}
-              >
-                <Grid size={4}>
-                  <Input
-                    value={isEditingOffset ? editOffsetValue : field.value}
-                    size="small"
-                    {...withStopPropagation()}
-                    onFocus={() => {
-                      setIsEditingOffset(true)
-                      setEditOffsetValue(field.value.toString())
-                    }}
-                    onBlur={handleOffsetBlur}
-                    onChange={(e) => {
-                      setEditOffsetValue(e.target.value)
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        handleOffsetBlur()
-                        ;(e.target as HTMLInputElement).blur()
-                      }
-                    }}
-                    inputProps={{
-                      step: 1,
-                      type: 'number',
-                    }}
-                  />
-                </Grid>
-              </LabeledSlider>
-            )
-          }}
+          render={({ field }) => <OffsetSlider field={field} />}
         />
         <Controller
           name="interval"

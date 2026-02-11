@@ -100,12 +100,14 @@ export const FilterPageCore = ({
 
   const handleAddBlacklistColor = (color: string) => {
     handleUpdate((draft) => {
+      // Cast needed: Immer's WritableDraft makes arrays readonly
       ;(draft.colorFilter.blacklist as string[]).push(color)
     })
   }
 
   const handleRemoveBlacklistColor = (index: number) => {
     handleUpdate((draft) => {
+      // Cast needed: Immer's WritableDraft makes arrays readonly
       ;(draft.colorFilter.blacklist as string[]).splice(index, 1)
     })
   }

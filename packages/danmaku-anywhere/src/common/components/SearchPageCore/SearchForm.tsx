@@ -124,9 +124,9 @@ export const SearchForm = ({
               </IconButton>
             </Stack>
             <Stack direction="row" flexWrap="wrap" gap={0.5}>
-              {history.map((keyword) => (
+              {history.map((keyword, index) => (
                 <Chip
-                  key={keyword}
+                  key={`${index}-${keyword}`}
                   label={keyword}
                   size="small"
                   variant="outlined"

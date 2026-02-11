@@ -90,9 +90,10 @@ export const FrameManager = () => {
     if (nextEpisodePreloadedRef.current) {
       return
     }
+    // Set flag before mutate to prevent rapid calls from triggering multiple mutations
+    nextEpisodePreloadedRef.current = true
     preloadNext.mutate(undefined, {
       onSuccess: () => {
-        nextEpisodePreloadedRef.current = true
         toast.info(
           t(
             'danmaku.alert.nextEpisodePreloaded',
@@ -101,6 +102,8 @@ export const FrameManager = () => {
         )
       },
       onError: (err) => {
+        // Reset flag so preload can be retried
+        nextEpisodePreloadedRef.current = false
         logger.debug('Failed to preload next episode:', err.message)
       },
     })

@@ -51,8 +51,6 @@ export function filterByAdaptiveDensity(
   for (const c of comments) {
     const t = parseCommentEntityTime(c.p)
     if (!Number.isFinite(t) || t < 0 || t > durationSec) {
-      // Keep comments with invalid times unfiltered
-      bins[0].push(c)
       continue
     }
     const idx = Math.min(binCount - 1, Math.floor(t / binSize))
@@ -108,5 +106,5 @@ function simpleHash(s: string): number {
     h = Math.imul(h, 0x01000193)
   }
   // Convert to unsigned 32-bit, then normalize to [0, 1)
-  return ((h >>> 0) & 0x7fffffff) / 0x7fffffff
+  return ((h >>> 0) & 0x7fffffff) / 0x80000000
 }

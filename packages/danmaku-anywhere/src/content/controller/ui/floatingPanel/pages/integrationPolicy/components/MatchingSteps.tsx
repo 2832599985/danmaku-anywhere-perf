@@ -290,7 +290,6 @@ export const MatchingSteps = () => {
     videoId,
     activeConfig,
     active,
-    isConfigPermissive,
     mediaInfo,
     foundElements,
     errorMessage,

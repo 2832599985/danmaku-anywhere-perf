@@ -90,6 +90,10 @@ const hotkeySchema = z.object({
 
 export type Hotkey = z.infer<typeof hotkeySchema>
 
+// Uses z.record instead of z.object for forward-compatibility:
+// new hotkey actions can be added in future versions, and the migration
+// logic merges them via ??= without needing schema changes.
+// A strict z.object would reject unknown keys from newer versions.
 const hotkeys = z.record(z.string(), hotkeySchema)
 
 export const extensionOptionsSchema = z.object({

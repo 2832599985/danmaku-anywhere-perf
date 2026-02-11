@@ -1,3 +1,4 @@
+import { useEventCallback } from '@mui/material'
 import { produce } from 'immer'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { useTranslation } from 'react-i18next'
@@ -21,7 +22,7 @@ export const GlobalHotkeyActions = () => {
   const { toggleOpen, setTab, isOpen, tab } = usePopup()
   const { activeFrame } = useStore.use.frame()
 
-  const adjustOpacity = (delta: number) => {
+  const adjustOpacity = useEventCallback((delta: number) => {
     const updated = produce(danmakuOptions, (draft: DanmakuOptions) => {
       const current = draft.style.opacity
       draft.style.opacity =
@@ -33,9 +34,9 @@ export const GlobalHotkeyActions = () => {
         value: Math.round(updated.style.opacity * 100),
       })
     )
-  }
+  })
 
-  const adjustFontSize = (delta: number) => {
+  const adjustFontSize = useEventCallback((delta: number) => {
     const updated = produce(danmakuOptions, (draft: DanmakuOptions) => {
       const current = draft.style.fontSize
       draft.style.fontSize = Math.min(48, Math.max(4, current + delta))
@@ -46,7 +47,7 @@ export const GlobalHotkeyActions = () => {
         value: updated.style.fontSize,
       })
     )
-  }
+  })
 
   const toggleStylePanel = () => {
     if (isOpen && tab === PopupTab.Styles) {

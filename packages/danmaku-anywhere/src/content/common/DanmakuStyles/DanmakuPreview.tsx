@@ -15,6 +15,7 @@ interface SampleComment {
   track: number
 }
 
+// Height of the preview container in pixels
 const PREVIEW_HEIGHT = 120
 const ANIMATION_DURATION = 6000
 
@@ -49,6 +50,7 @@ const ScrollingComment = ({
   opacity: number
   fontFamily: string
 }) => {
+  // Scale down font size for the compact preview area
   const scaledSize = fontSize * 0.6
 
   if (comment.mode === 'top' || comment.mode === 'bottom') {
@@ -152,9 +154,9 @@ export const DanmakuPreview = ({ config }: DanmakuPreviewProps) => {
               overflow: 'hidden',
             }}
           >
-            {sampleComments.map((comment, i) => (
+            {sampleComments.map((comment) => (
               <ScrollingComment
-                key={i}
+                key={comment.text}
                 comment={comment}
                 fontSize={fontSize}
                 opacity={opacity}

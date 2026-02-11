@@ -63,8 +63,6 @@ export class DanmakuDensityChart {
   private lastCurrentTime = 0
   private skipRegions: SkipRegion[] = []
 
-  private readonly boundResize: () => void
-
   constructor(wrapper: HTMLElement, options: DanmakuDensityChartOptions = {}) {
     this.wrapper = wrapper
     this.options = {
@@ -75,7 +73,6 @@ export class DanmakuDensityChart {
       },
       opacity: options.opacity ?? 1,
     }
-    this.boundResize = this.redraw.bind(this)
   }
 
   setup() {
@@ -121,12 +118,9 @@ export class DanmakuDensityChart {
     this.clipRect = clipRect
     this.skipRegionGroup = skipRegionGroup
     this.legendGroup = legendGroup
-
-    window.addEventListener('resize', this.boundResize)
   }
 
   teardown() {
-    window.removeEventListener('resize', this.boundResize)
     this.svg?.remove()
     this.svg = null
     this.pathUnplayed = null

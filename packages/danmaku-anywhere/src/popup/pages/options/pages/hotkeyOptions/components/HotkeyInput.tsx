@@ -87,6 +87,7 @@ export const HotkeyInput = ({ onKeyChange, value }: HotkeyInputProps) => {
       onKeyDown={handleKeyDown}
       placeholder={t('optionsPage.hotkeys.enterKey', 'Enter key')}
       autoComplete="off"
+      autoFocus={editing}
       size="small"
       slotProps={{
         input: {

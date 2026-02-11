@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import { useExtStorage } from '@/common/storage/hooks/useExtStorage'
 
 const SEARCH_HISTORY_KEY = 'searchHistory'
@@ -14,25 +14,28 @@ export const useSearchHistory = () => {
 
   const history = storage.data ?? []
 
+  const dataRef = useRef(history)
+  dataRef.current = history
+
   const addEntry = useCallback(
     (keyword: string) => {
       const trimmed = keyword.trim()
       if (!trimmed) return
-      const current = storage.data ?? []
+      const current = dataRef.current
       const filtered = current.filter((item) => item !== trimmed)
       const updated = [trimmed, ...filtered].slice(0, MAX_HISTORY_SIZE)
       storage.update.mutate(updated)
     },
-    [storage.data, storage.update]
+    [storage.update]
   )
 
   const removeEntry = useCallback(
     (keyword: string) => {
-      const current = storage.data ?? []
+      const current = dataRef.current
       const updated = current.filter((item) => item !== keyword)
       storage.update.mutate(updated)
     },
-    [storage.data, storage.update]
+    [storage.update]
   )
 
   const clearHistory = useCallback(() => {

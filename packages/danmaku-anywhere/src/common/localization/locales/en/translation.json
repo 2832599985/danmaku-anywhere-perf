@@ -203,6 +203,8 @@
     "commentContent": "Comment",
     "commentCounted_one": "{{count}} comment",
     "commentCounted_other": "{{count}} comments",
+    "commentCountedEpisodes_one": "{{count}} episode",
+    "commentCountedEpisodes_other": "{{count}} episodes",
     "disable": "Hide Danmaku",
     "enable": "Show Danmaku",
     "exportBackup": "Export Backup",
@@ -240,6 +242,7 @@
     "testResultInclude": "This text will not be filtered out",
     "validation": {
       "duplicate": "Pattern already exists",
+      "invalidColor": "Invalid color format, use hex like #ff0000",
       "invalidRegex": "Invalid regex {{message}}",
       "patternEmpty": "Pattern cannot be empty"
     },
@@ -650,6 +653,11 @@
       "immersive": "Immersive",
       "label": "Presets",
       "minimal": "Minimal"
+    },
+    "preview": {
+      "hide": "Hide",
+      "label": "Preview",
+      "show": "Show"
     },
     "randomDistribution": "Random",
     "safeZone": {

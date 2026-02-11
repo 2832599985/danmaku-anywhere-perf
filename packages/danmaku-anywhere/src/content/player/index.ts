@@ -218,15 +218,29 @@ videoEventService.addVideoEventListener('ended', () => {
 
 // Detect SPA URL changes to trigger re-matching for next episode
 let lastUrl = location.href
-const urlChangeCheckInterval = setInterval(() => {
-  if (location.href !== lastUrl) {
-    Logger.debug('URL changed:', lastUrl, '->', location.href)
-    lastUrl = location.href
-    if (autoNextEpisodeEnabled) {
+let urlChangeCheckInterval: ReturnType<typeof setInterval> | undefined
+
+function startUrlChangePolling() {
+  if (urlChangeCheckInterval !== undefined) return
+  urlChangeCheckInterval = setInterval(() => {
+    if (location.href !== lastUrl) {
+      Logger.debug('URL changed:', lastUrl, '->', location.href)
+      lastUrl = location.href
       playerRpcClient.controller['relay:event:videoEnded']({ frameId })
     }
+  }, 1000)
+}
+
+function stopUrlChangePolling() {
+  if (urlChangeCheckInterval !== undefined) {
+    clearInterval(urlChangeCheckInterval)
+    urlChangeCheckInterval = undefined
   }
-}, 1000)
+}
+
+if (autoNextEpisodeEnabled) {
+  startUrlChangePolling()
+}
 
 /**
  * Storage events
@@ -246,6 +260,11 @@ const applyPlayerOptions = (
   options: Awaited<ReturnType<typeof extensionOptionsService.get>>
 ) => {
   autoNextEpisodeEnabled = options.playerOptions.autoNextEpisode
+  if (autoNextEpisodeEnabled) {
+    startUrlChangePolling()
+  } else {
+    stopUrlChangePolling()
+  }
   videoSkipService.setPlayerOptions(options.playerOptions)
   if (
     options.playerOptions.showSkipButton ||
@@ -297,7 +316,7 @@ playerRpcServer.listen(chrome.runtime.onMessage)
 
 window.addEventListener('pagehide', () => {
   document.removeEventListener('fullscreenchange', handleFullscreenChange)
-  clearInterval(urlChangeCheckInterval)
+  stopUrlChangePolling()
   playerRpcServer.unlisten(chrome.runtime.onMessage)
   managerService.stop()
   videoSkipService.disable()

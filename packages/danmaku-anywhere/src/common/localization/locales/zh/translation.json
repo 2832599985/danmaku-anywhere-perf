@@ -203,6 +203,8 @@
     "commentContent": "弹幕内容",
     "commentCounted_one": "{{count}}条弹幕",
     "commentCounted_other": "{{count}}条弹幕",
+    "commentCountedEpisodes_one": "{{count}}集",
+    "commentCountedEpisodes_other": "{{count}}集",
     "disable": "隐藏弹幕",
     "enable": "显示弹幕",
     "exportBackup": "导出备份",
@@ -651,6 +653,11 @@
       "immersive": "沉浸",
       "label": "预设",
       "minimal": "精简"
+    },
+    "preview": {
+      "hide": "隐藏",
+      "label": "预览",
+      "show": "显示"
     },
     "randomDistribution": "均匀",
     "safeZone": {
