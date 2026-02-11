@@ -13,6 +13,7 @@ import {
 } from '../../providers/ProviderFactory'
 import { EpisodeResolutionService } from '../EpisodeResolutionService'
 import type { IMatchingStrategy } from './IMatchingStrategy'
+import { findBestMatchingSeason } from './titleMatch'
 
 @injectable()
 export class SearchMatchingStrategy implements IMatchingStrategy {
@@ -66,12 +67,25 @@ export class SearchMatchingStrategy implements IMatchingStrategy {
           continue
         }
 
-        if (foundSeasons.length === 1) {
-          const firstSeason = foundSeasons[0] as Season
-          this.logger.debug('Single season found, auto-mapping', firstSeason)
+        // Try to find a single best match: either only one result, or best title match
+        let bestSeason: Season | null = null
 
+        if (foundSeasons.length === 1) {
+          bestSeason = foundSeasons[0] as Season
+          this.logger.debug('Single season found, auto-mapping', bestSeason)
+        } else {
+          bestSeason = findBestMatchingSeason(foundSeasons, title)
+          if (bestSeason) {
+            this.logger.debug(
+              'Multiple seasons found, best title match selected',
+              bestSeason
+            )
+          }
+        }
+
+        if (bestSeason) {
           await this.titleMappingService.add(
-            SeasonMap.fromSeason(mapKey, firstSeason)
+            SeasonMap.fromSeason(mapKey, bestSeason)
           )
 
           if (episodeNumber === undefined) {
@@ -84,7 +98,7 @@ export class SearchMatchingStrategy implements IMatchingStrategy {
 
           try {
             const data = await this.episodeResolver.resolveEpisode(
-              firstSeason,
+              bestSeason,
               episodeNumber
             )
             return {
@@ -101,7 +115,7 @@ export class SearchMatchingStrategy implements IMatchingStrategy {
           }
         }
 
-        // Multiple results found, return disambiguation
+        // No best match found, return disambiguation for user selection
         return {
           status: 'disambiguation',
           data: foundSeasons,
