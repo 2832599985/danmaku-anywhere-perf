@@ -147,9 +147,10 @@ export const DanmakuPreview = ({ config }: DanmakuPreviewProps) => {
           <Box
             sx={{
               position: 'absolute',
-              top: `${config.area.yStart}%`,
+              top: '50%',
               left: 0,
               right: 0,
+              transform: 'translateY(-50%)',
               height: `${config.area.yEnd - config.area.yStart}%`,
               overflow: 'hidden',
             }}
