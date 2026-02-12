@@ -42,7 +42,7 @@ export const DanmakuComponent = ({
         } as CSSProperties
       }
       className={`da-danmaku da-danmaku-${mode} da-danmaku-text-shadow ${getGradientClass(gradient)}`}
-      data-text={text} // for custom css that want to access the text
+      data-text={text}
     >
       {text}
     </div>

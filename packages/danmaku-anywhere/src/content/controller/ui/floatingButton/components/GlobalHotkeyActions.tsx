@@ -13,6 +13,9 @@ import { useStore } from '@/content/controller/store/store'
 
 const OPACITY_STEP = 0.1
 const FONT_SIZE_STEP = 2
+const TIME_OFFSET_STEP = 0.5
+const DENSITY_PRESETS = [100, 200, 500, 1000] as const
+const SPEED_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const
 
 export const GlobalHotkeyActions = () => {
   const { t } = useTranslation()
@@ -65,6 +68,59 @@ export const GlobalHotkeyActions = () => {
     })
   }
 
+  const adjustTimeOffset = useEventCallback((delta: number) => {
+    const updated = produce(danmakuOptions, (draft: DanmakuOptions) => {
+      draft.offset = Math.round((draft.offset + delta) * 10) / 10
+    })
+    partialUpdate(updated)
+    toast.info(
+      t('optionsPage.hotkeys.timeOffsetChanged', {
+        defaultValue: 'Time offset: {{value}}s',
+        value: updated.offset >= 0 ? `+${updated.offset}` : updated.offset,
+      })
+    )
+  })
+
+  const toggleDensity = useEventCallback(() => {
+    const currentDensity = danmakuOptions.maxOnScreen
+    const currentIndex = DENSITY_PRESETS.indexOf(
+      currentDensity as (typeof DENSITY_PRESETS)[number]
+    )
+    const nextIndex =
+      currentIndex === -1 ? 0 : (currentIndex + 1) % DENSITY_PRESETS.length
+    const nextDensity = DENSITY_PRESETS[nextIndex]
+    const updated = produce(danmakuOptions, (draft: DanmakuOptions) => {
+      draft.maxOnScreen = nextDensity
+    })
+    partialUpdate(updated)
+    toast.info(
+      t('optionsPage.hotkeys.densityChanged', {
+        defaultValue: 'Danmaku density: {{value}}',
+        value: nextDensity,
+      })
+    )
+  })
+
+  const toggleSpeed = useEventCallback(() => {
+    const currentSpeed = danmakuOptions.speed
+    const currentIndex = SPEED_PRESETS.indexOf(
+      currentSpeed as (typeof SPEED_PRESETS)[number]
+    )
+    const nextIndex =
+      currentIndex === -1 ? 0 : (currentIndex + 1) % SPEED_PRESETS.length
+    const nextSpeed = SPEED_PRESETS[nextIndex]
+    const updated = produce(danmakuOptions, (draft: DanmakuOptions) => {
+      draft.speed = nextSpeed
+    })
+    partialUpdate(updated)
+    toast.info(
+      t('optionsPage.hotkeys.speedChanged', {
+        defaultValue: 'Danmaku speed: {{value}}x',
+        value: nextSpeed,
+      })
+    )
+  })
+
   useHotkeys(
     getKeyCombo('increaseOpacity') || '',
     () => adjustOpacity(OPACITY_STEP),
@@ -96,6 +152,34 @@ export const GlobalHotkeyActions = () => {
 
   useHotkeys(getKeyCombo('toggleStylePanel') || '', () => toggleStylePanel(), {
     enabled: !!getKeyCombo('toggleStylePanel'),
+    preventDefault: true,
+  })
+
+  useHotkeys(
+    getKeyCombo('danmakuTimeOffsetIncrease') || '',
+    () => adjustTimeOffset(TIME_OFFSET_STEP),
+    {
+      enabled: !!getKeyCombo('danmakuTimeOffsetIncrease'),
+      preventDefault: true,
+    }
+  )
+
+  useHotkeys(
+    getKeyCombo('danmakuTimeOffsetDecrease') || '',
+    () => adjustTimeOffset(-TIME_OFFSET_STEP),
+    {
+      enabled: !!getKeyCombo('danmakuTimeOffsetDecrease'),
+      preventDefault: true,
+    }
+  )
+
+  useHotkeys(getKeyCombo('danmakuDensityToggle') || '', () => toggleDensity(), {
+    enabled: !!getKeyCombo('danmakuDensityToggle'),
+    preventDefault: true,
+  })
+
+  useHotkeys(getKeyCombo('danmakuSpeedToggle') || '', () => toggleSpeed(), {
+    enabled: !!getKeyCombo('danmakuSpeedToggle'),
     preventDefault: true,
   })
 

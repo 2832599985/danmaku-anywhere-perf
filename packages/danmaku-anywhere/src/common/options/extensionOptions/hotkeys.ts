@@ -20,6 +20,10 @@ export const ALL_HOTKEYS = [
   'decreaseFontSize',
   'skipOp',
   'toggleStylePanel',
+  'danmakuTimeOffsetIncrease',
+  'danmakuTimeOffsetDecrease',
+  'danmakuDensityToggle',
+  'danmakuSpeedToggle',
 ] as const
 
 export type AllHotkeys = (typeof ALL_HOTKEYS)[number]
@@ -44,6 +48,23 @@ export const HOTKEY_LABELS = createLocalizationMap<AllHotkeys>({
   skipOp: () => i18n.t('optionsPage.hotkeys.skipOp', 'Skip OP'),
   toggleStylePanel: () =>
     i18n.t('optionsPage.hotkeys.toggleStylePanel', 'Toggle style panel'),
+  danmakuTimeOffsetIncrease: () =>
+    i18n.t(
+      'optionsPage.hotkeys.danmakuTimeOffsetIncrease',
+      'Danmaku time offset +0.5s'
+    ),
+  danmakuTimeOffsetDecrease: () =>
+    i18n.t(
+      'optionsPage.hotkeys.danmakuTimeOffsetDecrease',
+      'Danmaku time offset -0.5s'
+    ),
+  danmakuDensityToggle: () =>
+    i18n.t(
+      'optionsPage.hotkeys.danmakuDensityToggle',
+      'Toggle danmaku density'
+    ),
+  danmakuSpeedToggle: () =>
+    i18n.t('optionsPage.hotkeys.danmakuSpeedToggle', 'Toggle danmaku speed'),
 })
 
 export type Keymap = Record<AllHotkeys, Hotkey>
@@ -59,6 +80,10 @@ export const defaultKeymap: Keymap = {
   decreaseFontSize: createHotkey(''),
   skipOp: createHotkey(''),
   toggleStylePanel: createHotkey(''),
+  danmakuTimeOffsetIncrease: createHotkey(']'),
+  danmakuTimeOffsetDecrease: createHotkey('['),
+  danmakuDensityToggle: createHotkey('shift+d'),
+  danmakuSpeedToggle: createHotkey(''),
 } as const
 
 /**

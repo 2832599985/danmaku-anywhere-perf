@@ -302,6 +302,22 @@ export class DanmakuRenderer {
     this.manager.setStyle('pointerEvents', 'none')
     this.manager.setStyle('fontSize', `${this.config.style.fontSize}px`)
     this.manager.setStyle('fontFamily', this.config.style.fontFamily)
+
+    const { textStroke, textShadow } = this.config.style
+    const node = this.manager.container.node
+    if (textStroke) {
+      node.style.setProperty(
+        '--da-text-stroke',
+        `${textStroke.width}px ${textStroke.color}`
+      )
+    } else {
+      node.style.removeProperty('--da-text-stroke')
+    }
+    if (textShadow) {
+      node.style.setProperty('--da-text-shadow', textShadow)
+    } else {
+      node.style.removeProperty('--da-text-shadow')
+    }
   }
 
   private setArea = () => {

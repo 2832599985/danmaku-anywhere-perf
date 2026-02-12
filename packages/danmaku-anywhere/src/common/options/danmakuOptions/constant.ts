@@ -30,6 +30,8 @@ export const defaultDanmakuOptions: DanmakuOptions = {
     opacity: 0.7,
     fontSize: 25,
     fontFamily: 'sans-serif',
+    textStroke: undefined,
+    textShadow: undefined,
   },
   useCustomCss: false,
   customCss: '',

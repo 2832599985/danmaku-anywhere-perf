@@ -19,10 +19,17 @@ export interface DanmakuColorFilter {
   readonly blacklist: readonly string[]
 }
 
+export interface DanmakuTextStroke {
+  width: number
+  color: string
+}
+
 export interface DanmakuStyle {
   opacity: number
   fontSize: number
   fontFamily: string
+  textStroke?: DanmakuTextStroke
+  textShadow?: string
 }
 
 export type FixedCommentMode = 'normal' | 'hidden' | 'scroll'

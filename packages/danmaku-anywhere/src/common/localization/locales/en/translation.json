@@ -490,7 +490,14 @@
       "toggleStylePanel": "Toggle style panel",
       "conflict": "Conflict with: {{actions}}",
       "opacityChanged": "Opacity: {{value}}%",
-      "fontSizeChanged": "Font size: {{value}}px"
+      "fontSizeChanged": "Font size: {{value}}px",
+      "danmakuTimeOffsetIncrease": "Danmaku time offset +0.5s",
+      "danmakuTimeOffsetDecrease": "Danmaku time offset -0.5s",
+      "danmakuDensityToggle": "Toggle danmaku density",
+      "danmakuSpeedToggle": "Toggle danmaku speed",
+      "timeOffsetChanged": "Time offset: {{value}}ms",
+      "densityChanged": "Max on screen: {{value}}",
+      "speedChanged": "Speed: {{value}}x"
     },
     "language": "Language",
     "matchLocalDanmaku": "Enable matching local Danmaku",
@@ -686,7 +693,15 @@
       "trackHeight": "Higher values makes danmaku farther apart"
     },
     "trackHeight": "Track Height",
-    "useCustomCss": "Use Custom CSS"
+    "useCustomCss": "Use Custom CSS",
+    "strokePreset": "Stroke / Shadow",
+    "strokePresets": {
+      "none": "Default",
+      "thin": "Thin Stroke",
+      "thick": "Thick Stroke",
+      "glow": "Glow",
+      "3d": "3D Shadow"
+    }
   },
   "statsPage": {
     "avgLength": "Avg Length",
@@ -723,6 +738,12 @@
     "stats": "Stats",
     "style": "Danmaku Settings",
     "titleMapping": "Title Mapping"
+  },
+  "tabGroups": {
+    "content": "Content",
+    "display": "Display",
+    "system": "System",
+    "debug": "Debug"
   },
   "titleMapping": {
     "empty": "No title mappings found.",

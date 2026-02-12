@@ -490,7 +490,14 @@
       "toggleStylePanel": "切换样式面板",
       "conflict": "与以下快捷键冲突：{{actions}}",
       "opacityChanged": "不透明度：{{value}}%",
-      "fontSizeChanged": "字体大小：{{value}}px"
+      "fontSizeChanged": "字体大小：{{value}}px",
+      "danmakuTimeOffsetIncrease": "弹幕时间偏移 +0.5s",
+      "danmakuTimeOffsetDecrease": "弹幕时间偏移 -0.5s",
+      "danmakuDensityToggle": "切换弹幕密度",
+      "danmakuSpeedToggle": "切换弹幕速度",
+      "timeOffsetChanged": "时间偏移：{{value}}ms",
+      "densityChanged": "最大同屏弹幕数：{{value}}",
+      "speedChanged": "速度：{{value}}x"
     },
     "language": "语言",
     "matchLocalDanmaku": "匹配本地弹幕",
@@ -686,7 +693,15 @@
       "trackHeight": "行高越高，弹幕之间的间距越大"
     },
     "trackHeight": "弹幕行高",
-    "useCustomCss": "使用自定义 CSS"
+    "useCustomCss": "使用自定义 CSS",
+    "strokePreset": "描边 / 阴影",
+    "strokePresets": {
+      "none": "默认",
+      "thin": "细描边",
+      "thick": "粗描边",
+      "glow": "发光",
+      "3d": "立体阴影"
+    }
   },
   "statsPage": {
     "avgLength": "平均长度",
@@ -723,6 +738,12 @@
     "stats": "统计",
     "style": "弹幕设置",
     "titleMapping": "标题映射"
+  },
+  "tabGroups": {
+    "content": "内容",
+    "display": "显示",
+    "system": "系统",
+    "debug": "调试"
   },
   "titleMapping": {
     "empty": "没有标题映射",

@@ -2,8 +2,12 @@ import {
   Collapse,
   Divider,
   debounce,
+  FormControl,
   Grid,
   Input,
+  InputLabel,
+  MenuItem,
+  Select,
   Stack,
   TextField,
   ToggleButton,
@@ -166,6 +170,73 @@ const customCssPlaceholder = `.da-danmaku {
   color: red;
   font-weight: bold;
 }`
+
+type StrokePresetId = 'none' | 'thin' | 'thick' | 'glow' | '3d'
+
+interface StrokePreset {
+  labelKey: string
+  labelDefault: string
+  textStroke?: { width: number; color: string }
+  textShadow?: string
+}
+
+const strokePresets: Record<StrokePresetId, StrokePreset> = {
+  none: {
+    labelKey: 'stylePage.strokePresets.none',
+    labelDefault: 'Default',
+    textStroke: undefined,
+    textShadow: undefined,
+  },
+  thin: {
+    labelKey: 'stylePage.strokePresets.thin',
+    labelDefault: 'Thin Stroke',
+    textStroke: { width: 1, color: '#000000' },
+    textShadow: undefined,
+  },
+  thick: {
+    labelKey: 'stylePage.strokePresets.thick',
+    labelDefault: 'Thick Stroke',
+    textStroke: { width: 2, color: '#000000' },
+    textShadow: undefined,
+  },
+  glow: {
+    labelKey: 'stylePage.strokePresets.glow',
+    labelDefault: 'Glow',
+    textStroke: undefined,
+    textShadow:
+      '0 0 4px rgba(255,255,255,0.8), 0 0 8px rgba(255,255,255,0.5), 0 0 16px rgba(128,0,255,0.4)',
+  },
+  '3d': {
+    labelKey: 'stylePage.strokePresets.3d',
+    labelDefault: '3D Shadow',
+    textStroke: { width: 1, color: '#000000' },
+    textShadow: '2px 2px 0 #000, 3px 3px 0 rgba(0,0,0,0.4)',
+  },
+}
+
+const strokePresetIds: StrokePresetId[] = [
+  'none',
+  'thin',
+  'thick',
+  'glow',
+  '3d',
+]
+
+const detectStrokePreset = (style: {
+  textStroke?: { width: number; color: string }
+  textShadow?: string
+}): StrokePresetId => {
+  for (const id of strokePresetIds) {
+    const preset = strokePresets[id]
+    const strokeMatch =
+      preset.textStroke?.width === style.textStroke?.width &&
+      preset.textStroke?.color === style.textStroke?.color
+    const shadowMatch = preset.textShadow === style.textShadow
+    if (id === 'none' && !style.textStroke && !style.textShadow) return 'none'
+    if (id !== 'none' && strokeMatch && shadowMatch) return id
+  }
+  return 'none'
+}
 
 const opacityValueLabelFormat = (value: number) => `${value * 100}%`
 
@@ -451,6 +522,31 @@ export const DanmakuStylesForm = ({
             )}
           />
         )}
+        <FormControl size="small" fullWidth>
+          <InputLabel>
+            {t('stylePage.strokePreset', 'Stroke / Shadow')}
+          </InputLabel>
+          <Select
+            value={detectStrokePreset(formValues.style)}
+            label={t('stylePage.strokePreset', 'Stroke / Shadow')}
+            onChange={(e) => {
+              const presetId = e.target.value as StrokePresetId
+              const preset = strokePresets[presetId]
+              setValue('style.textStroke', preset.textStroke, {
+                shouldDirty: true,
+              })
+              setValue('style.textShadow', preset.textShadow, {
+                shouldDirty: true,
+              })
+            }}
+          >
+            {strokePresetIds.map((id) => (
+              <MenuItem key={id} value={id}>
+                {t(strokePresets[id].labelKey, strokePresets[id].labelDefault)}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         <Controller
           name="useCustomCss"
           control={control}

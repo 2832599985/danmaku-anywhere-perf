@@ -44,14 +44,26 @@ const ScrollingComment = ({
   fontSize,
   opacity,
   fontFamily,
+  textShadow,
+  textStroke,
 }: {
   comment: SampleComment
   fontSize: number
   opacity: number
   fontFamily: string
+  textShadow?: string
+  textStroke?: { width: number; color: string }
 }) => {
   // Scale down font size for the compact preview area
   const scaledSize = fontSize * 0.6
+
+  const defaultShadow =
+    '-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0px 2px 4px rgba(0,0,0,0.5)'
+
+  const computedShadow = textShadow ?? defaultShadow
+  const computedStroke = textStroke
+    ? { WebkitTextStroke: `${textStroke.width}px ${textStroke.color}` }
+    : {}
 
   if (comment.mode === 'top' || comment.mode === 'bottom') {
     const posStyle =
@@ -71,7 +83,8 @@ const ScrollingComment = ({
           opacity,
           whiteSpace: 'nowrap',
           pointerEvents: 'none',
-          textShadow: '1px 1px 2px rgba(0,0,0,0.8)',
+          textShadow: computedShadow,
+          ...computedStroke,
           animation: `danmaku-preview-fade ${ANIMATION_DURATION * 0.6}ms ease-in-out ${comment.delay}ms infinite`,
         }}
       >
@@ -92,7 +105,8 @@ const ScrollingComment = ({
         opacity,
         whiteSpace: 'nowrap',
         pointerEvents: 'none',
-        textShadow: '1px 1px 2px rgba(0,0,0,0.8)',
+        textShadow: computedShadow,
+        ...computedStroke,
         animation: `danmaku-preview-scroll ${ANIMATION_DURATION}ms linear ${comment.delay}ms infinite`,
       }}
     >
@@ -105,7 +119,7 @@ export const DanmakuPreview = ({ config }: DanmakuPreviewProps) => {
   const { t } = useTranslation()
   const [visible, setVisible] = useState(true)
 
-  const { opacity, fontSize, fontFamily } = config.style
+  const { opacity, fontSize, fontFamily, textShadow, textStroke } = config.style
 
   return (
     <Stack spacing={0.5}>
@@ -161,6 +175,8 @@ export const DanmakuPreview = ({ config }: DanmakuPreviewProps) => {
                 fontSize={fontSize}
                 opacity={opacity}
                 fontFamily={fontFamily}
+                textShadow={textShadow}
+                textStroke={textStroke}
               />
             ))}
           </Box>
