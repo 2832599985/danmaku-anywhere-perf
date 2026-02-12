@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '@/common/components/Toast/toastStore'
-import { DanmakuSourceType } from '@/common/danmaku/enums'
 import { Logger } from '@/common/Logger'
 import { isConfigPermissive } from '@/common/options/mountConfig/isPermissive'
 import { getTrackingService } from '@/common/telemetry/getTrackingService'
@@ -36,7 +35,7 @@ export const useIntegrationPolicy = () => {
   } = useStore.use.integration()
 
   const matchEpisode = useMatchEpisode()
-  const { loadMutation, mountDanmaku } = useLoadDanmaku()
+  const { loadMutation } = useLoadDanmaku()
 
   const integrationPolicy = useActiveIntegration()
   const activeConfig = useActiveConfig()
@@ -121,38 +120,28 @@ export const useIntegrationPolicy = () => {
             if (result.data.status !== 'success') {
               return
             }
-            if (result.data.data.provider === DanmakuSourceType.MacCMS) {
-              toast.success(
-                t(
-                  'integration.alert.matchedLocalDanmaku',
-                  'Matched local danmaku'
-                )
-              )
-              void mountDanmaku([result.data.data])
-            } else {
-              loadMutation.mutate(
-                {
-                  type: 'by-meta',
-                  meta: result.data.data,
-                  options: {
-                    forceUpdate: false,
-                  },
+            loadMutation.mutate(
+              {
+                type: 'by-meta',
+                meta: result.data.data,
+                options: {
+                  forceUpdate: false,
                 },
-                {
-                  onError: () => {
-                    toast.error(
-                      t(
-                        'danmaku.alert.fetchError',
-                        'Failed to fetch danmaku: {{message}}',
-                        {
-                          message: episodeMatchPayload.title,
-                        }
-                      )
+              },
+              {
+                onError: () => {
+                  toast.error(
+                    t(
+                      'danmaku.alert.fetchError',
+                      'Failed to fetch danmaku: {{message}}',
+                      {
+                        message: episodeMatchPayload.title,
+                      }
                     )
-                  },
-                }
-              )
-            }
+                  )
+                },
+              }
+            )
           },
         })
       },
