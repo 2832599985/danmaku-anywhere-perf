@@ -130,8 +130,8 @@ export const PanelTabs = () => {
     for (const group of groups) {
       const groupTabs = group.tabIds
         .filter((id) => visibleTabIds.has(id))
-        .map((id) => routes.find((r) => r.tab === id)!)
-        .filter(Boolean)
+        .map((id) => routes.find((r) => r.tab === id))
+        .filter((r): r is NonNullable<typeof r> => r != null)
 
       if (groupTabs.length === 0) continue
 
