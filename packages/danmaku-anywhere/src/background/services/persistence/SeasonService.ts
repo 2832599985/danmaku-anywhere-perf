@@ -11,13 +11,77 @@ import type { DbEntity } from '@/common/types/dbEntity'
 export class SeasonService {
   constructor(@inject(DanmakuAnywhereDb) private db: DanmakuAnywhereDb) {}
   async bulkUpsert<T extends SeasonInsert>(data: T[]): Promise<DbEntity<T>[]> {
-    const results: DbEntity<T>[] = []
+    if (data.length === 0) return []
 
-    for (const item of data) {
-      results.push(await this.upsert(item))
-    }
+    return this.db.transaction('rw', this.db.season, async () => {
+      const now = Date.now()
+      const results: DbEntity<T>[] = []
 
-    return results
+      // Batch lookup: find all existing seasons matching providerConfigId+indexedId
+      const existingMap = new Map<string, Season>()
+      for (const item of data) {
+        const existing = await this.db.season.get({
+          providerConfigId: item.providerConfigId,
+          indexedId: item.indexedId,
+        })
+        if (existing) {
+          existingMap.set(
+            `${item.providerConfigId}:${item.indexedId}`,
+            existing
+          )
+        }
+      }
+
+      // Prepare items for bulkPut (updates) and bulkAdd (inserts)
+      const toUpdate: Season[] = []
+      const toAdd: Omit<Season, 'id'>[] = []
+      const updateIndices: number[] = []
+      const addIndices: number[] = []
+
+      for (let i = 0; i < data.length; i++) {
+        const item = data[i]
+        const key = `${item.providerConfigId}:${item.indexedId}`
+        const existing = existingMap.get(key)
+
+        if (existing) {
+          toUpdate.push({
+            ...existing,
+            ...item,
+            timeUpdated: now,
+            version: existing.version + 1,
+          })
+          updateIndices.push(i)
+        } else {
+          toAdd.push({
+            ...item,
+            timeUpdated: now,
+            version: 1,
+          })
+          addIndices.push(i)
+        }
+      }
+
+      // Batch update via bulkPut (items have id, so Dexie updates in place)
+      if (toUpdate.length > 0) {
+        await this.db.season.bulkPut(toUpdate)
+        for (let j = 0; j < toUpdate.length; j++) {
+          results[updateIndices[j]] = toUpdate[j] as DbEntity<T>
+        }
+      }
+
+      // Batch insert via bulkAdd
+      if (toAdd.length > 0) {
+        const ids = await this.db.season.bulkAdd(toAdd, { allKeys: true })
+        for (let j = 0; j < toAdd.length; j++) {
+          results[addIndices[j]] = {
+            ...toAdd[j],
+            id: ids[j],
+          } as unknown as DbEntity<T>
+        }
+      }
+
+      return results
+    })
   }
 
   async upsert<T extends SeasonInsert>(data: T): Promise<DbEntity<T>> {
@@ -78,19 +142,23 @@ export class SeasonService {
   }
 
   async getAll(options: SeasonGetAllRequest) {
-    const seasons: Season[] = []
-
-    await this.db.transaction(
+    return this.db.transaction(
       'r',
       this.db.season,
       this.db.episode,
       async () => {
         const allSeasons = await this.db.season.toArray()
 
+        // Batch count: group episodes by seasonId in a single pass
+        const countMap = new Map<number, number>()
+        await this.db.episode.each((episode) => {
+          const sid = episode.seasonId
+          countMap.set(sid, (countMap.get(sid) ?? 0) + 1)
+        })
+
+        const seasons: Season[] = []
         for (const season of allSeasons) {
-          const episodeCount = await this.db.episode
-            .where({ seasonId: season.id })
-            .count()
+          const episodeCount = countMap.get(season.id) ?? 0
           if (episodeCount > 0 || options.includeEmpty) {
             seasons.push({
               ...season,
@@ -98,10 +166,10 @@ export class SeasonService {
             })
           }
         }
+
+        return seasons
       }
     )
-
-    return seasons
   }
 
   async filter(filter: SeasonQueryFilter): Promise<Season[]> {

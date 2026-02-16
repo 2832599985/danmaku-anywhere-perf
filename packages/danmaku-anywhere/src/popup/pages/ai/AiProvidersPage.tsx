@@ -26,7 +26,7 @@ export const AiProvidersPage = (): ReactElement => {
 
   const [editingProvider, setEditingProvider] =
     useState<AiProviderConfigInput | null>(null)
-  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const handleEditProvider = (provider: AiProviderConfig) => {
     setEditingProvider(provider)

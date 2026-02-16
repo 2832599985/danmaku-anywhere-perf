@@ -12,6 +12,50 @@ export type VideoChangeListener = (video: HTMLVideoElement) => void
 
 export type VideoNodeObserverEvent = 'videoNodeChange' | 'videoNodeRemove'
 
+/**
+ * Recursively query selector through Shadow DOM boundaries.
+ * Returns all matching elements, including those inside shadow roots.
+ */
+function querySelectorDeep(
+  selector: string,
+  root: ParentNode = document
+): HTMLVideoElement[] {
+  const results: HTMLVideoElement[] = []
+
+  // Query in the current root
+  const found = root.querySelectorAll(selector)
+  for (const el of found) {
+    if (isVideoElement(el)) {
+      results.push(el)
+    }
+  }
+
+  // Traverse into shadow roots
+  const allElements = root.querySelectorAll('*')
+  for (const el of allElements) {
+    if (el.shadowRoot) {
+      results.push(...querySelectorDeep(selector, el.shadowRoot))
+    }
+  }
+
+  return results
+}
+
+/**
+ * Recursively find shadow roots within a subtree.
+ */
+function findShadowRoots(root: ParentNode): ShadowRoot[] {
+  const shadowRoots: ShadowRoot[] = []
+  const allElements = root.querySelectorAll('*')
+  for (const el of allElements) {
+    if (el.shadowRoot) {
+      shadowRoots.push(el.shadowRoot)
+      shadowRoots.push(...findShadowRoots(el.shadowRoot))
+    }
+  }
+  return shadowRoots
+}
+
 @injectable('Singleton')
 export class VideoNodeObserverService {
   private videoStack: HTMLVideoElement[] = []
@@ -20,6 +64,7 @@ export class VideoNodeObserverService {
 
   private rootObs: MutationObserver
   private srcObs = new VideoSrcObserver()
+  private shadowObservers = new Map<ShadowRoot, MutationObserver>()
 
   private selector = 'video'
 
@@ -29,37 +74,7 @@ export class VideoNodeObserverService {
 
   constructor() {
     this.rootObs = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) {
-          if (isVideoElement(node)) {
-            if (node.matches(this.selector)) {
-              this.handleVideoNodeAdded(node)
-            }
-          } else if (isElement(node)) {
-            const videoElements = node.querySelectorAll(this.selector)
-            videoElements.forEach((video) => {
-              this.handleVideoNodeAdded(video as HTMLVideoElement)
-            })
-          }
-        }
-
-        for (const removedNode of mutation.removedNodes) {
-          if (isVideoElement(removedNode)) {
-            if (this.videoStack.includes(removedNode)) {
-              this.handleVideoNodeRemoved(removedNode)
-            }
-          } else if (isElement(removedNode)) {
-            // If the removed node is a parent of the video element, remove the video element
-            if (this.videoStack.some((v) => removedNode.contains(v))) {
-              this.videoStack.forEach((v) => {
-                if (removedNode.contains(v)) {
-                  this.handleVideoNodeRemoved(v)
-                }
-              })
-            }
-          }
-        }
-      }
+      this.handleMutations(mutations)
     })
 
     this.srcObs.onSrcChange((_, video) => {
@@ -69,6 +84,86 @@ export class VideoNodeObserverService {
 
   get activeVideo() {
     return this.activeVideoElement
+  }
+
+  private handleMutations(mutations: MutationRecord[]) {
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        if (isVideoElement(node)) {
+          if (node.matches(this.selector)) {
+            this.handleVideoNodeAdded(node)
+          }
+        } else if (isElement(node)) {
+          // Check direct children and deeper via querySelectorAll
+          const videoElements = node.querySelectorAll(this.selector)
+          videoElements.forEach((video) => {
+            this.handleVideoNodeAdded(video as HTMLVideoElement)
+          })
+
+          // Check for shadow roots in added subtree and observe them
+          if (node.shadowRoot) {
+            this.observeShadowRoot(node.shadowRoot)
+          }
+          const shadowRoots = findShadowRoots(node)
+          for (const sr of shadowRoots) {
+            this.observeShadowRoot(sr)
+          }
+        }
+      }
+
+      for (const removedNode of mutation.removedNodes) {
+        if (isVideoElement(removedNode)) {
+          if (this.videoStack.includes(removedNode)) {
+            this.handleVideoNodeRemoved(removedNode)
+          }
+        } else if (isElement(removedNode)) {
+          // If the removed node is a parent of the video element, remove the video element
+          if (this.videoStack.some((v) => removedNode.contains(v))) {
+            this.videoStack.forEach((v) => {
+              if (removedNode.contains(v)) {
+                this.handleVideoNodeRemoved(v)
+              }
+            })
+          }
+
+          // Clean up shadow root observers for removed subtrees
+          if (removedNode.shadowRoot) {
+            this.unobserveShadowRoot(removedNode.shadowRoot)
+          }
+        }
+      }
+    }
+  }
+
+  private observeShadowRoot(shadowRoot: ShadowRoot) {
+    if (this.shadowObservers.has(shadowRoot)) return
+
+    // Search for existing videos within this shadow root
+    const videos = querySelectorDeep(this.selector, shadowRoot)
+    for (const video of videos) {
+      this.handleVideoNodeAdded(video)
+    }
+
+    const observer = new MutationObserver((mutations) => {
+      this.handleMutations(mutations)
+    })
+
+    observer.observe(shadowRoot, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'id'],
+    })
+
+    this.shadowObservers.set(shadowRoot, observer)
+  }
+
+  private unobserveShadowRoot(shadowRoot: ShadowRoot) {
+    const observer = this.shadowObservers.get(shadowRoot)
+    if (observer) {
+      observer.disconnect()
+      this.shadowObservers.delete(shadowRoot)
+    }
   }
 
   private updateActiveNode() {
@@ -199,16 +294,23 @@ export class VideoNodeObserverService {
   public start(selector: string) {
     this.selector = selector
 
-    const [current, err] = tryCatchSync<HTMLVideoElement | null>(() =>
-      document.querySelector(this.selector)
+    // Deep query: search through Shadow DOM boundaries
+    const [deepResults, deepErr] = tryCatchSync(() =>
+      querySelectorDeep(this.selector)
     )
 
-    if (err) {
-      throw new Error(`Error selecting video element: ${err.message}`)
+    if (deepErr) {
+      throw new Error(`Error selecting video element: ${deepErr.message}`)
     }
 
-    if (current) {
-      this.handleVideoNodeAdded(current)
+    for (const video of deepResults) {
+      this.handleVideoNodeAdded(video)
+    }
+
+    // Observe existing shadow roots in the document
+    const shadowRoots = findShadowRoots(document)
+    for (const sr of shadowRoots) {
+      this.observeShadowRoot(sr)
     }
 
     this.rootObs.observe(document.body, {
@@ -222,6 +324,13 @@ export class VideoNodeObserverService {
   public stop() {
     this.rootObs.disconnect()
     this.srcObs.cleanup()
+
+    // Disconnect all shadow root observers
+    for (const [, observer] of this.shadowObservers) {
+      observer.disconnect()
+    }
+    this.shadowObservers.clear()
+
     for (const video of this.videoStack) {
       const listener = this.videoListeners.get(video)
       if (listener) {

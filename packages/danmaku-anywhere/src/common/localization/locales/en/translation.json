@@ -197,7 +197,9 @@
       "nextEpisodePreloaded": "Next episode danmaku preloaded",
       "nextEpisodeReady": "Next episode danmaku is ready",
       "xmlExported": "Export XML successful",
-      "xmlExportError": "Failed to export XML: {{message}}"
+      "xmlExportError": "Failed to export XML: {{message}}",
+      "assExported": "Export ASS successful",
+      "assExportError": "Failed to export ASS: {{message}}"
     },
     "backup": "Export Backup",
     "commentContent": "Comment",
@@ -209,6 +211,7 @@
     "enable": "Show Danmaku",
     "exportBackup": "Export Backup",
     "exportXml": "Export XML",
+    "exportAss": "Export ASS",
     "local": "Local Danmaku",
     "merge": {
       "mergeWithCurrent": "Merge with current",
@@ -268,6 +271,7 @@
     "backupAll": "Export All as Backup",
     "confirmDeleteMessage": "Are you sure to delete the selected Danmaku?",
     "exportAllXml": "Export All as XML",
+    "exportAllAss": "Export All as ASS",
     "noAnime": "No anime available",
     "noResult": "No anime found with title '{{filter}}'"
   },
@@ -279,6 +283,13 @@
   },
   "error": {
     "unknown": "Something went wrong."
+  },
+  "matching": {
+    "allStrategiesExhausted": "All matching strategies exhausted, no match found",
+    "episodeNumberUndefined": "Episode number could not be determined",
+    "noSeasonsAllProviders": "No seasons found across all providers",
+    "passedToNext": "No match found, passed to next strategy",
+    "previousStrategyTerminal": "Skipped: previous strategy returned a terminal result"
   },
   "importPage": {
     "confirm": "Confirm Import",

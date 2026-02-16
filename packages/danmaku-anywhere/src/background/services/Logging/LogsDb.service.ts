@@ -23,11 +23,29 @@ export class LogsDbService {
     return this.db.logs.bulkDelete(keys)
   }
 
+  async deleteOlderThan(timestamp: number) {
+    return this.db.logs.where('timestamp').below(timestamp).delete()
+  }
+
   async exportSorted() {
     return this.db.logs.orderBy('timestamp').toArray()
   }
 
   async clear() {
     return this.db.logs.clear()
+  }
+
+  /**
+   * Purge old logs: delete entries older than maxAgeDays,
+   * then cap remaining entries to maxEntries (keeping newest).
+   */
+  async purge(maxAgeDays = 7, maxEntries = 1000) {
+    const threshold = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000
+    await this.deleteOlderThan(threshold)
+
+    const remaining = await this.count()
+    if (remaining > maxEntries) {
+      await this.deleteOldest(remaining - maxEntries)
+    }
   }
 }

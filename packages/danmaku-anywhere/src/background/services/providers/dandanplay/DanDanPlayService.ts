@@ -291,7 +291,11 @@ export class DanDanPlayService implements IDanmakuProvider {
     episodeId: number,
     request: danDanPlay.SendCommentRequest
   ): Promise<Result<{ cid: number }, DanmakuProviderError>> {
-    return danDanPlay.commentSendComment(episodeId, request)
+    const res = await danDanPlay.commentSendComment(episodeId, request)
+    if (!res.success) return res
+    // commentSendComment handles inner API error, so data is always the success variant
+    const { cid } = res.data as { cid: number }
+    return { success: true, data: { cid } }
   }
 
   async register(

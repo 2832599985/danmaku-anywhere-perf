@@ -4,7 +4,6 @@ import { useHotkeys } from 'react-hotkeys-hook'
 import { useTranslation } from 'react-i18next'
 
 import { useToast } from '@/common/components/Toast/toastStore'
-import type { DanmakuOptions } from '@/common/options/danmakuOptions/constant'
 import { useDanmakuOptions } from '@/common/options/danmakuOptions/useDanmakuOptions'
 import { useHotkeyOptions } from '@/common/options/extensionOptions/useHotkeyOptions'
 import { playerRpcClient } from '@/common/rpcClient/background/client'
@@ -26,7 +25,7 @@ export const GlobalHotkeyActions = () => {
   const { activeFrame } = useStore.use.frame()
 
   const adjustOpacity = useEventCallback((delta: number) => {
-    const updated = produce(danmakuOptions, (draft: DanmakuOptions) => {
+    const updated = produce(danmakuOptions, (draft) => {
       const current = draft.style.opacity
       draft.style.opacity =
         Math.round(Math.min(1, Math.max(0, current + delta)) * 100) / 100
@@ -40,7 +39,7 @@ export const GlobalHotkeyActions = () => {
   })
 
   const adjustFontSize = useEventCallback((delta: number) => {
-    const updated = produce(danmakuOptions, (draft: DanmakuOptions) => {
+    const updated = produce(danmakuOptions, (draft) => {
       const current = draft.style.fontSize
       draft.style.fontSize = Math.min(48, Math.max(4, current + delta))
     })
@@ -69,7 +68,7 @@ export const GlobalHotkeyActions = () => {
   }
 
   const adjustTimeOffset = useEventCallback((delta: number) => {
-    const updated = produce(danmakuOptions, (draft: DanmakuOptions) => {
+    const updated = produce(danmakuOptions, (draft) => {
       draft.offset = Math.round((draft.offset + delta) * 10) / 10
     })
     partialUpdate(updated)
@@ -89,7 +88,7 @@ export const GlobalHotkeyActions = () => {
     const nextIndex =
       currentIndex === -1 ? 0 : (currentIndex + 1) % DENSITY_PRESETS.length
     const nextDensity = DENSITY_PRESETS[nextIndex]
-    const updated = produce(danmakuOptions, (draft: DanmakuOptions) => {
+    const updated = produce(danmakuOptions, (draft) => {
       draft.maxOnScreen = nextDensity
     })
     partialUpdate(updated)
@@ -109,7 +108,7 @@ export const GlobalHotkeyActions = () => {
     const nextIndex =
       currentIndex === -1 ? 0 : (currentIndex + 1) % SPEED_PRESETS.length
     const nextSpeed = SPEED_PRESETS[nextIndex]
-    const updated = produce(danmakuOptions, (draft: DanmakuOptions) => {
+    const updated = produce(danmakuOptions, (draft) => {
       draft.speed = nextSpeed
     })
     partialUpdate(updated)

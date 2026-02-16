@@ -1,3 +1,7 @@
+import type {
+  EpisodeMeta,
+  WithSeason,
+} from '@danmaku-anywhere/danmaku-converter'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '@/common/components/Toast/toastStore'
@@ -123,7 +127,7 @@ export const useIntegrationPolicy = () => {
             loadMutation.mutate(
               {
                 type: 'by-meta',
-                meta: result.data.data,
+                meta: result.data.data as WithSeason<EpisodeMeta>,
                 options: {
                   forceUpdate: false,
                 },

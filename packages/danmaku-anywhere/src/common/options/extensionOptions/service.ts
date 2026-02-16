@@ -72,6 +72,7 @@ export class ExtensionOptionsService implements IStoreService {
             // Add theme options
             draft.theme = {
               colorMode: ColorMode.System,
+              themeId: 'neon-violet',
             }
           }),
       })
@@ -165,7 +166,12 @@ export class ExtensionOptionsService implements IStoreService {
             // Add playerOptions field
             draft.playerOptions = {
               showSkipButton: true,
+              autoSkipOp: false,
               showDanmakuTimeline: true,
+              enableFixedSkip: false,
+              fixedSkipSeconds: 90,
+              autoDensity: false,
+              autoNextEpisode: false,
             }
           }),
       })

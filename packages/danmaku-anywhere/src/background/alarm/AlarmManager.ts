@@ -1,4 +1,5 @@
 import { inject, injectable } from 'inversify'
+import { LogsDbService } from '@/background/services/Logging/LogsDb.service'
 import { DanmakuService } from '@/background/services/persistence/DanmakuService'
 import { alarmKeys } from '@/common/alarms/constants'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
@@ -11,6 +12,8 @@ export class AlarmManager {
   constructor(
     @inject(DanmakuService)
     private danmakuService: DanmakuService,
+    @inject(LogsDbService)
+    private logsDbService: LogsDbService,
     @inject(ExtensionOptionsService)
     private extensionOptionsService: ExtensionOptionsService,
     @inject(LoggerSymbol) logger: ILogger
@@ -34,11 +37,16 @@ export class AlarmManager {
     // doc says to check for alarms on script start because alarms are not guaranteed to be persistent
     // if this happens, we may miss an alarm
     void this.createDanmakuPurgeAlarm()
+    void this.createLogsPurgeAlarm()
 
     const handleDanmakuPurgeAlarm = this.createHandleDanmakuPurgeAlarm()
+    const handleLogsPurgeAlarm = this.createHandleLogsPurgeAlarm()
 
     if (!chrome.alarms.onAlarm.hasListener(handleDanmakuPurgeAlarm)) {
       chrome.alarms.onAlarm.addListener(handleDanmakuPurgeAlarm)
+    }
+    if (!chrome.alarms.onAlarm.hasListener(handleLogsPurgeAlarm)) {
+      chrome.alarms.onAlarm.addListener(handleLogsPurgeAlarm)
     }
   }
 
@@ -84,5 +92,29 @@ export class AlarmManager {
       const days = extensionOptions.retentionPolicy.deleteCommentsAfter
 
       await this.danmakuService.purgeOlderThan(days)
+    }
+
+  private async createLogsPurgeAlarm() {
+    const alarm = await chrome.alarms.get(alarmKeys.PURGE_LOGS)
+
+    if (alarm) {
+      return
+    }
+
+    this.logger.debug('Creating logs purge alarm')
+    await chrome.alarms.create(alarmKeys.PURGE_LOGS, {
+      periodInMinutes: 60 * 24, // 1 day
+      when: new Date().setHours(24, 0, 0, 0),
+    })
+  }
+
+  private createHandleLogsPurgeAlarm =
+    () => async (alarm: chrome.alarms.Alarm) => {
+      if (alarm.name !== alarmKeys.PURGE_LOGS) {
+        return
+      }
+
+      this.logger.debug('Purging old logs')
+      await this.logsDbService.purge()
     }
 }

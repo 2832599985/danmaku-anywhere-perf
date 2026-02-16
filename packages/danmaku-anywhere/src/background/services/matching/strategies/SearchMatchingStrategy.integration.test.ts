@@ -1,9 +1,4 @@
-import type {
-  EpisodeMeta,
-  Season,
-  SeasonInsert,
-  WithSeason,
-} from '@danmaku-anywhere/danmaku-converter'
+import type { Season, SeasonInsert } from '@danmaku-anywhere/danmaku-converter'
 import { DanmakuSourceType } from '@danmaku-anywhere/danmaku-converter'
 import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
 import type { SeasonService } from '@/background/services/persistence/SeasonService'
@@ -163,7 +158,7 @@ describe('SearchMatchingStrategy - MacCMS integration simulation', () => {
     })
 
     it('should auto-select exact title match instead of returning disambiguation', async () => {
-      const mockEpisode: WithSeason<EpisodeMeta> = {
+      const mockEpisode = {
         provider: DanmakuSourceType.MacCMS,
         indexedId: 'http://example.com/play/1',
         title: '第01集',
@@ -228,7 +223,7 @@ describe('SearchMatchingStrategy - MacCMS integration simulation', () => {
       const singleInsert = [makeSeasonInsert('鬼灭之刃', 2001)]
       mockProviderService.search.mockResolvedValue(singleInsert)
 
-      const mockEpisode: WithSeason<EpisodeMeta> = {
+      const mockEpisode = {
         provider: DanmakuSourceType.MacCMS,
         indexedId: 'http://example.com/play/1',
         title: '第01集',
@@ -269,7 +264,7 @@ describe('SearchMatchingStrategy - MacCMS integration simulation', () => {
       ]
       mockProviderService.search.mockResolvedValue(searchInserts)
 
-      const mockEpisode: WithSeason<EpisodeMeta> = {
+      const mockEpisode = {
         provider: DanmakuSourceType.MacCMS,
         indexedId: 'http://example.com/play/1',
         title: '第01集',
@@ -366,7 +361,7 @@ describe('SearchMatchingStrategy - MacCMS integration simulation', () => {
       expect(mockTitleMappingService.add).toHaveBeenCalled()
       expect(result?.status).toBe('notFound')
       if (result?.status === 'notFound') {
-        expect(result?.cause).toBe('Episode number is undefined')
+        expect(result?.cause).toBe('matching.episodeNumberUndefined')
       }
     })
   })
@@ -400,7 +395,7 @@ describe('SearchMatchingStrategy - MacCMS integration simulation', () => {
       ])
       mockProviderService.search.mockResolvedValue([ddpInsert])
 
-      const mockEpisode: WithSeason<EpisodeMeta> = {
+      const mockEpisode = {
         provider: DanmakuSourceType.DanDanPlay,
         indexedId: 'ddp:1234:1',
         title: '第1话',
@@ -447,7 +442,7 @@ describe('SearchMatchingStrategy - MacCMS integration simulation', () => {
     })
 
     it('should exact-match "凡人修仙传" from 5 results', async () => {
-      const mockEpisode: WithSeason<EpisodeMeta> = {
+      const mockEpisode = {
         provider: DanmakuSourceType.MacCMS,
         indexedId: 'http://example.com/play/fanren/1',
         title: '第01集',
@@ -484,7 +479,7 @@ describe('SearchMatchingStrategy - MacCMS integration simulation', () => {
     })
 
     it('should exact-match "凡人修仙传 第二季" when searching for season 2', async () => {
-      const mockEpisode: WithSeason<EpisodeMeta> = {
+      const mockEpisode = {
         provider: DanmakuSourceType.MacCMS,
         indexedId: 'http://example.com/play/fanren2/1',
         title: '第01集',
@@ -521,7 +516,7 @@ describe('SearchMatchingStrategy - MacCMS integration simulation', () => {
     })
 
     it('should pick shortest containing title for partial keyword "凡人修仙"', async () => {
-      const mockEpisode: WithSeason<EpisodeMeta> = {
+      const mockEpisode = {
         provider: DanmakuSourceType.MacCMS,
         indexedId: 'http://example.com/play/fanren/5',
         title: '第05集',
@@ -558,7 +553,7 @@ describe('SearchMatchingStrategy - MacCMS integration simulation', () => {
     })
 
     it('should select "凡人修仙传之仙界篇" for that specific keyword', async () => {
-      const mockEpisode: WithSeason<EpisodeMeta> = {
+      const mockEpisode = {
         provider: DanmakuSourceType.MacCMS,
         indexedId: 'http://example.com/play/fanren-xianjie/3',
         title: '第03集',
@@ -604,7 +599,7 @@ describe('SearchMatchingStrategy - MacCMS integration simulation', () => {
       ]
       mockProviderService.search.mockResolvedValue(searchInserts)
 
-      const mockEpisode: WithSeason<EpisodeMeta> = {
+      const mockEpisode = {
         provider: DanmakuSourceType.MacCMS,
         indexedId: 'http://example.com/play/1',
         title: '第01集',

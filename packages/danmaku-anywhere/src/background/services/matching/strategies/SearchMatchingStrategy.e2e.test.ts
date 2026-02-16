@@ -12,7 +12,11 @@
  * (searchMacCmsVod) so no actual HTTP calls are made.
  */
 
-import type { SeasonInsert } from '@danmaku-anywhere/danmaku-converter'
+import type {
+  EpisodeMeta,
+  SeasonInsert,
+  WithSeason,
+} from '@danmaku-anywhere/danmaku-converter'
 import { DanmakuSourceType } from '@danmaku-anywhere/danmaku-converter'
 import type { MacCmsParsedPlayUrl } from '@danmaku-anywhere/danmaku-provider/maccms'
 import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
@@ -204,7 +208,7 @@ describe('MacCMS end-to-end: 凡人修仙传 full auto-match flow', () => {
     const realFactory = ((config: any) => {
       instanceCounter++
       return new MacCmsProviderService(config, logger)
-    }) as IDanmakuProviderFactory
+    }) as unknown as IDanmakuProviderFactory
     realFactory.getTyped = realFactory as any
 
     // ── ProviderConfigService mock ──
@@ -268,12 +272,13 @@ describe('MacCMS end-to-end: 凡人修仙传 full auto-match flow', () => {
     expect(result?.status).toBe('success')
 
     if (result?.status === 'success') {
+      const episode = result.data as WithSeason<EpisodeMeta>
       // Should have matched episode 2 of "凡人修仙传"
-      expect(result?.data.episodeNumber).toBe(2)
-      expect(result?.data.season.title).toBe('凡人修仙传')
-      expect(result?.data.season.indexedId).toBe('custom:8001')
+      expect(episode.episodeNumber).toBe(2)
+      expect(episode.season.title).toBe('凡人修仙传')
+      expect(episode.season.indexedId).toBe('custom:8001')
       // The URL should be the episode 2 URL
-      expect(result?.data.providerIds).toEqual({
+      expect(episode.providerIds).toEqual({
         url: 'https://play.example.com/fanren/02.m3u8',
       })
     }
@@ -291,8 +296,9 @@ describe('MacCMS end-to-end: 凡人修仙传 full auto-match flow', () => {
 
     expect(result?.status).toBe('success')
     if (result?.status === 'success') {
-      expect(result?.data.episodeNumber).toBe(1)
-      expect(result?.data.providerIds).toEqual({
+      const episode = result.data as WithSeason<EpisodeMeta>
+      expect(episode.episodeNumber).toBe(1)
+      expect(episode.providerIds).toEqual({
         url: 'https://play.example.com/fanren/01.m3u8',
       })
     }
@@ -319,10 +325,11 @@ describe('MacCMS end-to-end: 凡人修仙传 full auto-match flow', () => {
 
     expect(result?.status).toBe('success')
     if (result?.status === 'success') {
-      expect(result?.data.season.title).toBe('凡人修仙传 第二季')
-      expect(result?.data.season.indexedId).toBe('custom:8002')
-      expect(result?.data.episodeNumber).toBe(1)
-      expect(result?.data.providerIds).toEqual({
+      const episode = result.data as WithSeason<EpisodeMeta>
+      expect(episode.season.title).toBe('凡人修仙传 第二季')
+      expect(episode.season.indexedId).toBe('custom:8002')
+      expect(episode.episodeNumber).toBe(1)
+      expect(episode.providerIds).toEqual({
         url: 'https://play.example.com/fanren2/01.m3u8',
       })
     }
@@ -337,9 +344,10 @@ describe('MacCMS end-to-end: 凡人修仙传 full auto-match flow', () => {
 
     expect(result?.status).toBe('success')
     if (result?.status === 'success') {
-      expect(result?.data.season.title).toBe('凡人修仙传之仙界篇')
-      expect(result?.data.season.indexedId).toBe('custom:8003')
-      expect(result?.data.providerIds).toEqual({
+      const episode = result.data as WithSeason<EpisodeMeta>
+      expect(episode.season.title).toBe('凡人修仙传之仙界篇')
+      expect(episode.season.indexedId).toBe('custom:8003')
+      expect(episode.providerIds).toEqual({
         url: 'https://play.example.com/fanren-xianjie/01.m3u8',
       })
     }

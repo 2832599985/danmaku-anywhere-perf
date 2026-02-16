@@ -5,6 +5,7 @@ import { AdvancedOptions } from '@/popup/pages/options/pages/advanced/AdvancedOp
 import { BackupPage } from '@/popup/pages/options/pages/backup/BackupPage'
 import { About } from '@/popup/pages/options/pages/help/About'
 import { PlayerOptions } from '@/popup/pages/options/pages/player/PlayerOptions'
+import { StoragePage } from '@/popup/pages/options/pages/storage/StoragePage'
 import { SeasonDetailsPage } from '@/popup/pages/search/seasonDetails/SeasonDetailsPage'
 import { TitleMappingPage } from '@/popup/pages/titleMapping/TitleMappingPage'
 import { AiProvidersPage } from '../pages/ai/AiProvidersPage'
@@ -140,6 +141,10 @@ export const router: ReturnType<typeof createHashRouter> = createHashRouter([
       {
         path: 'backup',
         Component: BackupPage,
+      },
+      {
+        path: 'storage',
+        Component: StoragePage,
       },
     ],
   },

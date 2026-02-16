@@ -1,30 +1,106 @@
 import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
 import {
   DanmakuRenderer,
+  type DanmakuRenderProps,
   type PerfReporter,
 } from '@danmaku-anywhere/danmaku-engine'
 import { inject, injectable } from 'inversify'
-import { createElement } from 'react'
-import ReactDOM from 'react-dom/client'
 import { uiContainer } from '@/common/ioc/uiIoc'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import type { DanmakuOptions } from '@/common/options/danmakuOptions/constant'
 import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
 import { PerfTimer } from '@/common/utils/perf'
 import { injectCss } from '@/content/common/injectCss'
-import { DanmakuComponent } from '@/content/player/components/DanmakuComponent'
 import { DanmakuLayoutService } from '@/content/player/danmakuLayout/DanmakuLayout.service'
 import { RectObserver } from '@/content/player/danmakuManager/RectObserver'
 import { DanmakuDebugOverlayService } from '@/content/player/debugOverlay/DanmakuDebugOverlay.service'
 import { VideoNodeObserverService } from '@/content/player/videoObserver/VideoNodeObserver.service'
 import { createRemotePreparseTransport } from './remotePreparseTransport'
 
+/**
+ * DOM node pool for danmaku inner elements.
+ * Recycles <div> nodes to reduce GC pressure from frequent creation/destruction.
+ */
+class DanmakuNodePool {
+  private pool: HTMLDivElement[] = []
+  private maxSize: number
+
+  constructor(maxSize = 200) {
+    this.maxSize = maxSize
+  }
+
+  acquire(): HTMLDivElement {
+    const node = this.pool.pop()
+    if (node) {
+      return node
+    }
+    return document.createElement('div')
+  }
+
+  release(node: HTMLDivElement): void {
+    if (this.pool.length >= this.maxSize) return
+    // Reset all custom styles and attributes for safe reuse
+    node.className = ''
+    node.style.cssText = ''
+    node.textContent = ''
+    node.removeAttribute('data-text')
+    this.pool.push(node)
+  }
+
+  clear(): void {
+    this.pool.length = 0
+  }
+}
+
+/**
+ * Pure DOM render function — replaces the per-danmaku React Root.
+ * Creates (or reuses from pool) an inner <div> with text, CSS classes,
+ * and CSS custom properties that mirror the old DanmakuComponent output.
+ */
+function renderDanmaku(
+  node: HTMLElement,
+  props: DanmakuRenderProps,
+  pool: DanmakuNodePool
+): void {
+  const { text, color, mode, gradient } = props
+
+  const inner = pool.acquire()
+
+  // Build className
+  let className = `da-danmaku da-danmaku-${mode} da-danmaku-text-shadow`
+  if (gradient) {
+    className += gradient.stroke
+      ? ' da-danmaku-gradient-stroke'
+      : ' da-danmaku-gradient'
+  }
+  inner.className = className
+
+  // Set text safely (no innerHTML)
+  inner.textContent = text
+  inner.setAttribute('data-text', text)
+
+  // Set CSS custom properties via inline style
+  const style = inner.style
+  style.pointerEvents = 'none'
+  style.setProperty('--color', color)
+
+  if (gradient) {
+    style.setProperty('--gradient-start', gradient.start)
+    style.setProperty('--gradient-end', gradient.end)
+    style.setProperty('--gradient-stroke', gradient.stroke ? '2px' : '0px')
+  }
+
+  node.appendChild(inner)
+}
+
 @injectable('Singleton')
 export class DanmakuManagerService {
   private logger: ILogger
 
+  private readonly nodePool = new DanmakuNodePool()
+
   private readonly renderer = new DanmakuRenderer((node, props) => {
-    ReactDOM.createRoot(node).render(createElement(DanmakuComponent, props))
+    renderDanmaku(node, props, this.nodePool)
   })
   private readonly nodes: {
     wrapper: HTMLElement
@@ -188,7 +264,10 @@ export class DanmakuManagerService {
     } else {
       // recreate danmaku if it's already mounted
       // this fixes an issue where danmaku can get "stuck" on the screen
-      if (this.renderer.created) this.renderer.destroy()
+      if (this.renderer.created) {
+        this.recyclePooledNodes()
+        this.renderer.destroy()
+      }
 
       if (this.perfEnabled) {
         this.perfTimer.mark('mount_enter')
@@ -228,6 +307,7 @@ export class DanmakuManagerService {
     this.cleanupInjectedCss()
     this.logger.debug('Unmounting danmaku')
     this.debugOverlayService.unmount()
+    this.recyclePooledNodes()
     this.removeContainer()
     this.renderer.destroy()
     this.comments = []
@@ -286,10 +366,28 @@ export class DanmakuManagerService {
     this.videoNodeObs.stop()
     this.debugOverlayService.unmount()
     this.unmount()
+    this.nodePool.clear()
   }
 
   private cleanupInjectedCss() {
     this.injectedCss.forEach((style) => style.remove())
     this.injectedCss = []
+  }
+
+  /**
+   * Collect all pooled inner <div> nodes from the container before
+   * the engine destroys the DOM tree, and return them to the pool.
+   */
+  private recyclePooledNodes() {
+    const container = this.nodes.container
+    // The engine creates outer nodes (spans) inside container.
+    // Each outer node has one inner <div> child created by renderDanmaku().
+    const outerNodes = container.children
+    for (const outer of outerNodes) {
+      const inner = outer.firstElementChild
+      if (inner instanceof HTMLDivElement) {
+        this.nodePool.release(inner)
+      }
+    }
   }
 }

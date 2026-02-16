@@ -122,7 +122,7 @@ export const MatchResultPanel = () => {
             {t('integration.matchResult.cause', 'Reason')}
           </Typography>
           <Typography variant="body2" color="error.main">
-            {cause}
+            {t(cause, cause)}
           </Typography>
         </Box>
       )}

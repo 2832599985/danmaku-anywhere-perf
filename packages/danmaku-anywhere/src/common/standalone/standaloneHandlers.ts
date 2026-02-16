@@ -136,6 +136,8 @@ export const standaloneControllerHandlers: StandaloneRpcHandlers<ControllerMetho
       manual: false,
     }),
     invalidateCache: () => undefined,
+    navigationStateUpdated: () => undefined,
+    frameNavigated: () => undefined,
   }
 
 export const standalonePlayerCommandHandlers: StandaloneRpcHandlers<PlayerRelayCommands> =

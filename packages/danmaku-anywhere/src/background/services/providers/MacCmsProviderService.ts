@@ -192,12 +192,15 @@ export class MacCmsProviderService implements IDanmakuProvider {
     }
 
     const nextEpisode = episodes[currentIndex + 1]
-    assertProviderType(nextEpisode, DanmakuSourceType.MacCMS)
+    assertProviderType(
+      nextEpisode as { provider: DanmakuSourceType },
+      DanmakuSourceType.MacCMS
+    )
 
     // Pre-fetch the danmaku so it gets cached
     const commentsResult = await fetchDanmuIcuComments(
       this.config.options.danmuicuBaseUrl,
-      nextEpisode.providerIds.url,
+      (nextEpisode as { providerIds: { url: string } }).providerIds.url,
       this.config.options.stripColor
     )
 

@@ -82,7 +82,7 @@ export const manifest = defineManifest({
   web_accessible_resources: [
     {
       matches: ['<all_urls>', 'file:///*'],
-      resources: ['**/*', '*'],
+      resources: ['pages/*.html', 'assets/*', '*.png', 'rules/*.json'],
       use_dynamic_url: false,
     },
   ],

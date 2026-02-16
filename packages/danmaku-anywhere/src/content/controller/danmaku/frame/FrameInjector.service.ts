@@ -35,6 +35,7 @@ export class FrameInjector {
   private isFirstGetAllFrames = true
   private isFallbackMode = false
   private pollInterval: ReturnType<typeof setInterval> | null = null
+  private iframeObserver: MutationObserver | null = null
   private visibilityCleanup: (() => void) | null = null
   private logger: ILogger
 
@@ -54,15 +55,15 @@ export class FrameInjector {
     this.visibilityCleanup = this.pageVisibilityService.onVisibilityChange(
       (visible) => {
         if (visible) {
-          this.startPolling()
+          this.startDetection()
         } else {
-          this.stopPolling()
+          this.stopDetection()
         }
       }
     )
 
     if (this.pageVisibilityService.isVisible) {
-      this.startPolling()
+      this.startDetection()
     }
   }
 
@@ -71,7 +72,100 @@ export class FrameInjector {
       this.visibilityCleanup()
       this.visibilityCleanup = null
     }
+    this.stopDetection()
+  }
+
+  /**
+   * Handle a frame navigation event pushed from background.
+   * This is the primary event-driven mechanism; polling serves as a safety net.
+   */
+  public onFrameNavigated(frameId: number, url: string) {
+    if (urlBlacklist.some((u) => url.includes(u))) return
+
+    this.logger.debug('Frame navigated event received', { frameId, url })
+
+    q.run(async () => {
+      try {
+        // Get documentId from the frames API
+        const res = await chromeRpcClient.getAllFrames(undefined)
+        const frame = res.data.find((f) => f.frameId === frameId)
+
+        if (!frame) {
+          this.logger.debug('Frame not found in getAllFrames, skipping', {
+            frameId,
+          })
+          return
+        }
+
+        this.handleFrameLogics(frame)
+      } catch (e) {
+        this.logger.error('Failed to handle frame navigation event', e)
+      }
+    })
+  }
+
+  /**
+   * Start iframe detection via MutationObserver + low-frequency polling fallback.
+   * Primary frame detection is event-driven via onFrameNavigated() from background.
+   * MutationObserver catches DOM-level iframe changes, and 60s polling acts as safety net.
+   */
+  private startDetection() {
+    this.startIframeObserver()
+    this.startPolling()
+  }
+
+  private stopDetection() {
+    this.stopIframeObserver()
     this.stopPolling()
+  }
+
+  private startIframeObserver() {
+    if (this.iframeObserver) return
+
+    this.iframeObserver = new MutationObserver((mutations) => {
+      let hasIframeChange = false
+
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (
+            node instanceof HTMLIFrameElement ||
+            (node instanceof HTMLElement && node.querySelector('iframe'))
+          ) {
+            hasIframeChange = true
+            break
+          }
+        }
+        if (hasIframeChange) break
+
+        for (const node of mutation.removedNodes) {
+          if (
+            node instanceof HTMLIFrameElement ||
+            (node instanceof HTMLElement && node.querySelector('iframe'))
+          ) {
+            hasIframeChange = true
+            break
+          }
+        }
+        if (hasIframeChange) break
+      }
+
+      if (hasIframeChange) {
+        this.logger.debug('Iframe change detected, polling frames')
+        q.run(() => this.pollFrames())
+      }
+    })
+
+    this.iframeObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+    })
+  }
+
+  private stopIframeObserver() {
+    if (this.iframeObserver) {
+      this.iframeObserver.disconnect()
+      this.iframeObserver = null
+    }
   }
 
   private startPolling() {
@@ -82,7 +176,7 @@ export class FrameInjector {
     q.run(() => this.pollFrames())
     this.pollInterval = setInterval(() => {
       q.run(() => this.pollFrames())
-    }, 5000)
+    }, 60_000)
   }
 
   private stopPolling() {

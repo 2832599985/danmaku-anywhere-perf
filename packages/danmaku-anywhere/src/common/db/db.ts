@@ -223,20 +223,30 @@ export class DanmakuAnywhereDb extends Dexie {
         await tx.table('danmaku').each(async (item: DanmakuV3) => {
           /**
            * 1. move custom danmaku to a separate table
+           * Legacy data from migration v8 uses 'Custom' string instead of enum
            */
-          if (item.provider === 'Custom') {
+          if ((item.provider as string) === 'Custom') {
             await tx
               .table('customEpisode')
-              .add(episodeMigration.customV3ToV4(item))
+              .add(
+                episodeMigration.customV3ToV4(
+                  item as unknown as Parameters<
+                    typeof episodeMigration.customV3ToV4
+                  >[0]
+                )
+              )
             return
           }
 
           /**
            * 2. for other danmaku types, first create a season for the danmaku
            */
+          type NonCustomV3 = Parameters<
+            typeof episodeMigration.v3ExtractSeason
+          >[0]
           const getSeasonId = async () => {
             const seasonInsert: WithoutId<SeasonV1> = {
-              ...episodeMigration.v3ExtractSeason(item),
+              ...episodeMigration.v3ExtractSeason(item as NonCustomV3),
               version: item.version,
               timeUpdated: Date.now(),
             }
@@ -280,7 +290,7 @@ export class DanmakuAnywhereDb extends Dexie {
           }
 
           const episode: WithoutId<EpisodeV4> = {
-            ...episodeMigration.v3ToV4(item, seasonId),
+            ...episodeMigration.v3ToV4(item as NonCustomV3, seasonId),
             version: item.version,
             timeUpdated: Date.now(),
           }

@@ -15,4 +15,14 @@ export type ControllerMethods = {
   danmakuUnmount: RPCDef<void, void>
   danmakuGetState: RPCDef<void, ControllerDanmakuState | null>
   invalidateCache: RPCDef<void, void>
+  /**
+   * Notified by background when webNavigation.onHistoryStateUpdated fires,
+   * indicating a SPA navigation (pushState/replaceState) occurred.
+   */
+  navigationStateUpdated: RPCDef<{ url: string }, void>
+  /**
+   * Notified by background when webNavigation.onDOMContentLoaded fires
+   * for a sub-frame, indicating a new frame is ready for injection.
+   */
+  frameNavigated: RPCDef<{ frameId: number; url: string }, void>
 }

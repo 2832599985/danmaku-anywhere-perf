@@ -179,7 +179,8 @@ const playerRpcServer = createRpcServer<PlayerRelayCommands>(
   {
     logger: Logger,
     context: { frameId },
-    filter: (_, data) => {
+    filter: (_, rawData) => {
+      const data = rawData as { frameId?: number }
       if (import.meta.env.DEV) {
         // safety check, frameId should always be present
         if (data.frameId === undefined) throw new Error('frameId is required')
@@ -225,27 +226,59 @@ videoEventService.addVideoEventListener('ended', () => {
 // Detect SPA URL changes to trigger re-matching for next episode
 let lastUrl = location.href
 let urlChangeCheckInterval: ReturnType<typeof setInterval> | undefined
+let urlChangeCleanups: (() => void)[] = []
 
-function startUrlChangePolling() {
-  if (urlChangeCheckInterval !== undefined) return
-  urlChangeCheckInterval = setInterval(() => {
-    if (location.href !== lastUrl) {
-      Logger.debug('URL changed:', lastUrl, '->', location.href)
-      lastUrl = location.href
-      playerRpcClient.controller['relay:event:videoEnded']({ frameId })
-    }
-  }, 1000)
+function handleUrlChange() {
+  if (location.href !== lastUrl) {
+    Logger.debug('URL changed:', lastUrl, '->', location.href)
+    lastUrl = location.href
+    playerRpcClient.controller['relay:event:videoEnded']({ frameId })
+  }
 }
 
-function stopUrlChangePolling() {
+function startUrlChangeDetection() {
+  if (urlChangeCheckInterval !== undefined) return
+
+  // 1. Listen for popstate events (back/forward navigation)
+  const onPopState = () => handleUrlChange()
+  window.addEventListener('popstate', onPopState)
+  urlChangeCleanups.push(() =>
+    window.removeEventListener('popstate', onPopState)
+  )
+
+  // 2. Use Navigation API if available (modern browsers, covers all navigations)
+  if ('navigation' in window) {
+    const navigation = window.navigation as EventTarget & {
+      addEventListener(type: string, listener: EventListener): void
+      removeEventListener(type: string, listener: EventListener): void
+    }
+    const onNavigate = () => {
+      // Navigation API fires before URL changes; defer check to next microtask
+      queueMicrotask(handleUrlChange)
+    }
+    navigation.addEventListener('navigatesuccess', onNavigate)
+    urlChangeCleanups.push(() =>
+      navigation.removeEventListener('navigatesuccess', onNavigate)
+    )
+  }
+
+  // 3. Fallback polling (some SPA frameworks don't trigger History/Navigation API)
+  urlChangeCheckInterval = setInterval(handleUrlChange, 1000)
+}
+
+function stopUrlChangeDetection() {
   if (urlChangeCheckInterval !== undefined) {
     clearInterval(urlChangeCheckInterval)
     urlChangeCheckInterval = undefined
   }
+  for (const cleanup of urlChangeCleanups) {
+    cleanup()
+  }
+  urlChangeCleanups = []
 }
 
 if (autoNextEpisodeEnabled) {
-  startUrlChangePolling()
+  startUrlChangeDetection()
 }
 
 /**
@@ -271,9 +304,9 @@ const applyPlayerOptions = (
 
   autoNextEpisodeEnabled = options.playerOptions.autoNextEpisode
   if (autoNextEpisodeEnabled) {
-    startUrlChangePolling()
+    startUrlChangeDetection()
   } else {
-    stopUrlChangePolling()
+    stopUrlChangeDetection()
   }
   videoSkipService.setPlayerOptions(options.playerOptions)
   if (
@@ -326,7 +359,7 @@ playerRpcServer.listen(chrome.runtime.onMessage)
 
 window.addEventListener('pagehide', () => {
   document.removeEventListener('fullscreenchange', handleFullscreenChange)
-  stopUrlChangePolling()
+  stopUrlChangeDetection()
   playerRpcServer.unlisten(chrome.runtime.onMessage)
   managerService.stop()
   videoSkipService.disable()

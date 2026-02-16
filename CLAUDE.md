@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Working Preferences
+
+- **Prefer agent teams and subagents**: For non-trivial tasks (multi-file changes, code review, refactoring, feature implementation), use `TeamCreate` + `Task` tool to spawn multiple agents working in parallel. Split work by file scope or responsibility (e.g., one agent per file group, or separate agents for implementation vs testing). Use the `Explore` subagent for codebase exploration and the `Plan` subagent for architecture planning.
+- **Architectural Integrity (Plan-First)**: For 0-to-1 features or new modules, the `Plan` subagent must define the architecture and output a `CONTRACT.md` or API specs before any implementation begins. No code should be written until the "contract" is established and confirmed.
+- **Strict File Scope & Responsibility**: When spawning teams, assign **exclusive** file paths or directories to each agent to prevent merge conflicts. Agents are strictly forbidden from modifying files outside their assigned scope (e.g., `Agent-A` for `src/`, `Agent-B` for `tests/`).
+- **Dependency & Mocking**: Only the Leader agent or user can modify root-level configs (e.g., `package.json`, `pom.xml`). Parallel agents must use **Mocks** if a dependency from a teammate is not yet ready to maintain parallel speed.
+- **Synchronization**: After team tasks are complete, invoke the `Explore` subagent to perform a cross-check, ensuring no duplicate logic exists and all code adheres to the initial `Plan`.
+- **Single agent for simple tasks**: Only work inline for single-file edits, trivial fixes, or quick lookups.
+
 ## Project Overview
 
 Danmaku Anywhere is a monorepo for a browser extension and web app that displays danmaku (bullet comments) on video platforms. Uses pnpm workspaces.
@@ -19,6 +28,7 @@ This is a performance/UX fork (`2832599985/danmaku-anywhere-perf`) of `Mr-Quin/d
 - Batch download in season details page (`SeasonDetailsPage.tsx`)
 - DDP comment dedup using `p+m` composite key (`ddp/api.ts`)
 - CID preservation as optional field in `CommentEntity`
+- MacCMS title mapping support (season/episode persistence for automatic matching)
 
 ## Common Commands
 
@@ -104,17 +114,34 @@ The extension uses a three-layer content script architecture with RPC communicat
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### Entry Points
+
+The extension has four distinct entry points (paths relative to `packages/danmaku-anywhere/`):
+
+| Entry | HTML / Script | Purpose |
+|-------|--------------|---------|
+| **Popup** | `pages/popup.html` → `src/popup/index.tsx` | Toolbar popup UI (hash router, all settings/search/danmaku pages) |
+| **Dashboard** | `pages/dashboard.html` → reuses popup script | Full-page version of popup |
+| **Controller** | `src/content/controller/index.tsx` | Injected into matching pages; Shadow DOM + Popover React app |
+| **Player** | `src/content/player/index.ts` | Injected per-frame on video detection; danmaku rendering + skip services |
+| **App bridge** | `src/content/app/index.ts` | Runs on web app URLs; relays RPC via `window.postMessage` |
+
+Each entry point wraps in `EnvironmentContext` (`popup`, `controller`, etc.) to differentiate behavior.
+
 ### Key Files
 
 | Area | Path | Purpose |
 |------|------|---------|
 | Background IoC | `src/background/ioc.ts` | Inversify container, singleton services |
 | Background RPC | `src/background/rpc/RpcManager.ts` | 60+ RPC method handlers |
+| Episode Matching | `src/background/services/matching/EpisodeMatchingService.ts` | Three-strategy matching pipeline |
+| Provider Factory | `src/background/services/providers/ProviderFactory.ts` | Creates provider instances per config |
 | Controller Entry | `src/content/controller/index.tsx` | React app in Shadow DOM |
 | Frame Manager | `src/content/controller/danmaku/frame/FrameManager.tsx` | Multi-frame orchestration |
 | Player Entry | `src/content/player/index.ts` | RPC server + service initialization |
 | RPC Types | `src/common/rpcClient/background/types.ts` | All RPC method definitions |
 | Popover Host | `src/content/common/host/createPopoverRoot.ts` | Shadow DOM + Popover setup |
+| Database | `src/common/db/db.ts` | Dexie DB (`DanmakuAnywhereDb`) with 12 migration versions |
 | Theme | `src/common/theme/Theme.tsx` | Glass/neon theme (fork feature) |
 | Fixed Skip | `src/content/player/fixedSkip/FixedSkip.service.ts` | Timed skip button (fork feature) |
 | Video Skip | `src/content/player/videoSkip/VideoSkip.service.ts` | Auto OP skip (fork feature) |
@@ -132,6 +159,41 @@ The extension uses a three-layer content script architecture with RPC communicat
 
 All UI renders in Shadow DOM with `popover="manual"` for top-layer positioning. On fullscreen change, call `hidePopover()` then `showPopover()` to stay on top. Use `textContent` (never `innerHTML`) for injecting styles into shadow style elements.
 
+### Episode Matching Pipeline
+
+When a video is detected, `EpisodeMatchingService` runs three strategies in order. The first to return a non-null result wins; returning `null` passes to the next strategy.
+
+```
+LocalMatchingStrategy → MappingMatchingStrategy → SearchMatchingStrategy
+```
+
+1. **LocalMatchingStrategy**: Checks for locally-imported custom danmaku matching the title. Skipped if `matchLocalDanmaku` is disabled.
+2. **MappingMatchingStrategy**: Looks up existing title-to-season mappings. Uses `EpisodeResolutionService` to resolve the specific episode number via the provider's `findEpisode()`.
+3. **SearchMatchingStrategy**: Performs an online search via all enabled automatic providers. If exactly one season is found, auto-maps it. If multiple results, returns `disambiguation` status for user selection.
+
+Result type: `MatchEpisodeResult` — discriminated union with statuses `success`, `disambiguation`, `notFound`.
+
+### Provider Factory
+
+`DanmakuProviderFactory` (Inversify factory) creates provider instances from `ProviderConfig`. Each call creates a **new instance** — providers are stateless between calls. Four provider types: `DanDanPlay`, `Bilibili`, `Tencent`, `MacCMS`.
+
+MacCMS uses an in-memory `episodeCache` (Map keyed by `indexedId`). On cache miss, `getEpisodesByIndexedId()` can re-search by title to recover. This handles service worker restarts.
+
+### Data Storage
+
+**Dexie.js** (IndexedDB wrapper) with three databases:
+- `danmaku-anywhere`: Main DB — tables: `episode`, `season`, `customEpisode`, `seasonMap` (12 migration versions)
+- `danmaku-anywhere-logs`: Logging DB — table: `logs`
+- `danmaku-anywhere-image`: Image cache DB — table: `image`
+
+**chrome.storage** (via `ExtStorageService`): Options/config stored in `chrome.storage.local/sync/session`.
+
+### Internationalization
+
+Two-layer i18n:
+- **chrome.i18n**: `_locales/{en,zh_CN}/messages.json` for manifest strings (`extName`, `extDescription`)
+- **i18next + react-i18next**: `src/common/localization/locales/{en,zh}/translation.json` for UI strings with type-safe `t()` keys
+
 ## Tech Stack
 
 | Area | Stack |
@@ -145,9 +207,9 @@ All UI renders in Shadow DOM with `popover="manual"` for top-layer positioning. 
 
 ## Code Style
 
-**Biome** enforces: 2-space indent, single quotes, no semicolons, trailing commas (ES5), LF endings. Config: `biome.json`.
+**Biome** enforces: 2-space indent, single quotes, no semicolons, trailing commas (ES5), LF endings. Config: `biome.json`. Test files (`**/*.test.ts`) relax `noExplicitAny` and `noEmptyBlockStatements`.
 
-**TypeScript**: Strict mode, `import type` for type-only imports, no `any` (use `unknown`).
+**TypeScript**: Strict mode, `import type` for type-only imports, no `any` (use `unknown`). Extension tsconfig enables `experimentalDecorators` + `emitDecoratorMetadata` for Inversify. Path alias: `@/*` → `./src/*`.
 
 ## Key Patterns
 
@@ -158,8 +220,9 @@ All UI renders in Shadow DOM with `popover="manual"` for top-layer positioning. 
 
 ### Inversify Services
 - Services use `@injectable('Singleton')` + `@inject()` decorators
-- Background services registered in `src/background/ioc.ts`
-- Content services use separate IoC containers (`uiContainer`)
+- Background services registered in `src/background/ioc.ts` — `Container({ autobind: true, defaultScope: 'Singleton' })`
+- Content services use separate IoC containers (`uiContainer` in `src/common/ioc/uiIoc.ts`)
+- `DanmakuProviderFactory` bound as Inversify factory (creates new instances per call)
 
 ### Provider API Pattern
 - All provider APIs return `Result<T, DanmakuProviderError>` (never throw)
@@ -179,7 +242,9 @@ All UI renders in Shadow DOM with `popover="manual"` for top-layer positioning. 
 - Services use `@injectable('Singleton')` + `@inject()` decorators
 - Use `React.memo` for expensive components, `useMemo`/`useCallback` appropriately
 - Error boundaries for component error handling
-- Test with Vitest
+- Test with Vitest — tests colocated with source (`.test.ts` suffix), setup mocks in `src/tests/`
+- Vite builds via `@crxjs/vite-plugin` with `manifest.ts` (Manifest V3)
+- Standalone mode available via `vite.standalone.config.ts` + `VITE_STANDALONE` env var
 
 ### Angular (app/web/)
 - Standalone components (no `standalone: true` needed)

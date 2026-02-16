@@ -197,7 +197,9 @@
       "nextEpisodePreloaded": "下一集弹幕已预加载",
       "nextEpisodeReady": "下一集弹幕已就绪",
       "xmlExported": "导出XML成功",
-      "xmlExportError": "导出XML失败：{{message}}"
+      "xmlExportError": "导出XML失败：{{message}}",
+      "assExported": "导出ASS成功",
+      "assExportError": "导出ASS失败：{{message}}"
     },
     "backup": "导出备份",
     "commentContent": "弹幕内容",
@@ -209,6 +211,7 @@
     "enable": "显示弹幕",
     "exportBackup": "导出备份",
     "exportXml": "导出XML",
+    "exportAss": "导出ASS",
     "local": "本地弹幕",
     "merge": {
       "mergeWithCurrent": "合并到当前弹幕",
@@ -268,6 +271,7 @@
     "backupAll": "全部导出为备份",
     "confirmDeleteMessage": "确定要删除选中的弹幕吗？",
     "exportAllXml": "全部导出为XML",
+    "exportAllAss": "全部导出为ASS",
     "noAnime": "没有可用的番剧",
     "noResult": "没有找到标题为 '{{filter}}' 的番剧"
   },
@@ -279,6 +283,13 @@
   },
   "error": {
     "unknown": "出错啦!"
+  },
+  "matching": {
+    "allStrategiesExhausted": "所有匹配策略均已尝试，未找到匹配",
+    "episodeNumberUndefined": "无法确定集数",
+    "noSeasonsAllProviders": "所有弹幕源均未找到匹配的番剧",
+    "passedToNext": "未找到匹配，已传递给下一策略",
+    "previousStrategyTerminal": "已跳过：上一策略返回了终止结果"
   },
   "importPage": {
     "confirm": "确认导入",

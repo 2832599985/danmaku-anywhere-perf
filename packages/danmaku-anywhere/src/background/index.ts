@@ -1,6 +1,7 @@
 import { configureApiStore } from '@danmaku-anywhere/danmaku-provider'
 import { AlarmManager } from '@/background/alarm/AlarmManager'
 import { ContextMenuManager } from '@/background/contextMenu/ContextMenuManager'
+import { NavigationWatcherService } from '@/background/navigation/NavigationWatcherService'
 import { NetRequestManager } from '@/background/netRequest/NetrequestManager'
 import { PortsManager } from '@/background/ports/PortsManager'
 import { RpcManager } from '@/background/rpc/RpcManager'
@@ -32,6 +33,7 @@ container.get(RpcManager).setup()
 container.get(NetRequestManager).setup()
 container.get(AlarmManager).setup()
 container.get(PortsManager).setup()
+container.get(NavigationWatcherService).setup()
 
 setLogService(container.get(LogService))
 

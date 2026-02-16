@@ -55,7 +55,7 @@ export class EpisodeMatchingService {
               strategy: this.strategies[i].name,
               tried: false,
               skipped: true,
-              reason: 'Previous strategy returned terminal result',
+              reason: 'matching.previousStrategyTerminal',
             })
           }
           return {
@@ -72,14 +72,14 @@ export class EpisodeMatchingService {
         strategy: strategy.name,
         tried: true,
         skipped: false,
-        reason: 'No match found, passed to next strategy',
+        reason: 'matching.passedToNext',
       })
     }
 
     return {
       status: 'notFound',
       data: null,
-      cause: 'All strategies returned null',
+      cause: 'matching.allStrategiesExhausted',
       strategyAttempts: attempts,
     }
   }

@@ -48,7 +48,7 @@ export const SeasonDetailsPage = () => {
     enabled: !!season,
     queryKey: seasonQueryKeys.episodes(season?.id ?? 0),
     queryFn: () =>
-      chromeRpcClient.episodeFetchBySeason({ seasonId: season?.id }),
+      chromeRpcClient.episodeFetchBySeason({ seasonId: season?.id ?? 0 }),
     select: (res) => res.data,
     staleTime: Number.POSITIVE_INFINITY,
     retry: false,

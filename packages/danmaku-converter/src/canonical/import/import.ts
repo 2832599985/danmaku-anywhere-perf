@@ -8,6 +8,7 @@ import {
 } from '../episode/index.js'
 import { zEpisodeImportV1 } from '../episode/v1/schema.js'
 import { zEpisodeImportV2 } from '../episode/v2/schema.js'
+import type { CustomDanmakuInsertV3 } from '../episode/v3/schema.js'
 import { zEpisodeImportV3 } from '../episode/v3/schemaZod.js'
 import {
   DanmakuSourceType,
@@ -22,17 +23,23 @@ const zImportV3 = z
     zEpisodeImportV3.transform(episodeMigration.v3ToV3),
   ])
   .transform((data): BackupParseData => {
-    if (data.provider === DanmakuSourceType.MacCMS) {
+    if (
+      data.provider === DanmakuSourceType.Custom ||
+      data.provider === DanmakuSourceType.MacCMS
+    ) {
       return {
         type: 'Custom',
         episode: episodeMigration.customV3ToV4(data),
       }
     }
-    // biome-ignore lint/correctness/noUnusedVariables: remove the seasonId
-    const { seasonId, ...rest } = episodeMigration.v3ToV4(data, 0)
+    const regularData = data as Exclude<typeof data, CustomDanmakuInsertV3>
+    const { seasonId: _seasonId, ...rest } = episodeMigration.v3ToV4(
+      regularData,
+      0
+    )
     return {
       type: 'Regular',
-      season: episodeMigration.v3ExtractSeason(data),
+      season: episodeMigration.v3ExtractSeason(regularData),
       episode: rest,
     }
   })
@@ -62,6 +69,7 @@ export type BackupParseResult = {
 
 const zEpisodeInsertV4WithSeasonV1Preprocessed = z.preprocess((data) => {
   // preprocessing to set providerConfigId based on provider
+  // biome-ignore lint/suspicious/noExplicitAny: z.preprocess receives unknown data
   const d = data as any
   const provider = d?.season?.provider
   if (provider && provider in PROVIDER_TO_BUILTIN_ID) {

@@ -22,7 +22,7 @@ import { useStore } from '@/content/controller/store/store'
 const useMountDanmaku = () => {
   const { toast } = useToast()
   const { data: options } = useExtensionOptions()
-  const perfRef = useRef<PerfTimer>()
+  const perfRef = useRef<PerfTimer | null>(null)
 
   if (!perfRef.current) {
     perfRef.current = new PerfTimer(
@@ -78,7 +78,7 @@ const useMountDanmaku = () => {
 const useMergeMountDanmaku = () => {
   const { toast } = useToast()
   const { data: options } = useExtensionOptions()
-  const perfRef = useRef<PerfTimer>()
+  const perfRef = useRef<PerfTimer | null>(null)
 
   if (!perfRef.current) {
     perfRef.current = new PerfTimer(

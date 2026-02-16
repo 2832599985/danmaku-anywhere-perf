@@ -1,4 +1,8 @@
-import type { Season } from '@danmaku-anywhere/danmaku-converter'
+import type {
+  CustomSeason,
+  RemoteDanmakuSourceType,
+  Season,
+} from '@danmaku-anywhere/danmaku-converter'
 import { Star } from '@mui/icons-material'
 import {
   Box,
@@ -19,10 +23,7 @@ import { useProviderConfig } from '@/common/options/providerConfig/useProviderCo
 
 interface FavoritesSectionProps {
   onFavoriteClick: (
-    season: Pick<
-      Season,
-      'id' | 'title' | 'provider' | 'providerConfigId' | 'imageUrl'
-    >,
+    season: Season | CustomSeason,
     provider: ProviderConfig
   ) => void
 }
@@ -40,14 +41,14 @@ export const FavoritesSection = ({
     const provider = configs.find((c) => c.id === fav.providerConfigId)
     if (!provider) return
 
-    // Create a minimal season-like object from the favorite data
+    // Favorites only contain remote seasons, so cast provider accordingly
     const season = {
       id: fav.seasonId,
       title: fav.title,
-      provider: fav.provider,
+      provider: fav.provider as RemoteDanmakuSourceType,
       providerConfigId: fav.providerConfigId,
       imageUrl: fav.imageUrl,
-    }
+    } as Season | CustomSeason
 
     onFavoriteClick(season, provider)
   }

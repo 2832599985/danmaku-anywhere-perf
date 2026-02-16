@@ -29,7 +29,7 @@ export const commentsToXml = (comments: CommentEntity[]) => {
         return {
           _attributes: {
             p: [
-              Number.parseFloat(time),
+              Math.trunc(Number.parseFloat(time)),
               mode,
               '25', // font size
               color,

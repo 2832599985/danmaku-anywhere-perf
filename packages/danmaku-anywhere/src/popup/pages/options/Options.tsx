@@ -88,6 +88,10 @@ export const Options = () => {
             onClick={() => navigate('backup')}
           />
           <OptionsListItem
+            title={t('optionsPage.pages.storage', 'Storage')}
+            onClick={() => navigate('storage')}
+          />
+          <OptionsListItem
             title={t('optionsPage.pages.help', '关于')}
             onClick={() => navigate('help')}
           />

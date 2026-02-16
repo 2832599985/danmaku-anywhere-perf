@@ -15,17 +15,28 @@ const zBaseEpisodeV3 = z.object({
   ]),
 })
 
+const zCustomEpisodeV3Fields = {
+  meta: z.object({
+    provider: z.union([
+      z.literal(DanmakuSourceType.Custom),
+      z.literal(DanmakuSourceType.MacCMS),
+    ]),
+    seasonTitle: z.string(),
+    episodeTitle: z.string(),
+  }),
+  episodeTitle: z.string(),
+  seasonTitle: z.string(),
+}
+
 const schema = {
   custom: z.discriminatedUnion('provider', [
     zBaseEpisodeV3.extend({
+      provider: z.literal(DanmakuSourceType.Custom),
+      ...zCustomEpisodeV3Fields,
+    }),
+    zBaseEpisodeV3.extend({
       provider: z.literal(DanmakuSourceType.MacCMS),
-      meta: z.object({
-        provider: z.literal(DanmakuSourceType.MacCMS),
-        seasonTitle: z.string(),
-        episodeTitle: z.string(),
-      }),
-      episodeTitle: z.string(),
-      seasonTitle: z.string(),
+      ...zCustomEpisodeV3Fields,
     }),
   ]),
   dandanPlay: z.discriminatedUnion('provider', [
