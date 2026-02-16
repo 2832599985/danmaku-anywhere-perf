@@ -99,6 +99,10 @@ const fetchDanDanPlay = async <T extends ZodType>(
     return fetchData<T>({
       url: `${context.baseUrl}${path}`,
       ...options,
+      // query was already parsed and baked into `path`, clear to prevent
+      // fetchData from double-appending query params or re-parsing
+      query: undefined,
+      requestSchema: undefined,
       headers,
     })
   }
@@ -110,6 +114,9 @@ const fetchDanDanPlay = async <T extends ZodType>(
     query: {
       path,
     },
+    // requestSchema.query was already applied above; clear it so fetchData's
+    // validateRequest doesn't re-parse the proxy query and strip the `path` key
+    requestSchema: undefined,
     headers,
     isDaRequest: true,
   })
