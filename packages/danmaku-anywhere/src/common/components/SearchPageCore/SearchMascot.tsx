@@ -35,6 +35,7 @@ export const SearchMascot = () => {
       maxHeight="100%"
       bottom={0}
       right={0}
+      sx={{ pointerEvents: 'none' }}
     >
       <SuspenseImage
         src={image.src}
