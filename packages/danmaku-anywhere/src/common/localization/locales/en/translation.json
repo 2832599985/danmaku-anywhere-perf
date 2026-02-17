@@ -513,7 +513,7 @@
       "danmakuTimeOffsetDecrease": "Danmaku time offset -0.5s",
       "danmakuDensityToggle": "Toggle danmaku density",
       "danmakuSpeedToggle": "Toggle danmaku speed",
-      "timeOffsetChanged": "Time offset: {{value}}ms",
+      "timeOffsetChanged": "Time offset: {{value}}s",
       "densityChanged": "Max on screen: {{value}}",
       "speedChanged": "Speed: {{value}}x",
       "increaseSpeed": "Increase speed (+0.25)",

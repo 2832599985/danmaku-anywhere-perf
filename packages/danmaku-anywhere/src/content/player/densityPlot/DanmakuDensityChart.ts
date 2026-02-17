@@ -225,6 +225,8 @@ export class DanmakuDensityChart {
   }
 
   teardown() {
+    // Dismiss any visible tooltip before removing DOM
+    this.tooltipCallback?.(null)
     this.svg?.remove()
     this.svg = null
     this.pathUnplayed = null

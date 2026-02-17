@@ -513,7 +513,7 @@
       "danmakuTimeOffsetDecrease": "弹幕时间偏移 -0.5s",
       "danmakuDensityToggle": "切换弹幕密度",
       "danmakuSpeedToggle": "切换弹幕速度",
-      "timeOffsetChanged": "时间偏移：{{value}}ms",
+      "timeOffsetChanged": "时间偏移：{{value}}s",
       "densityChanged": "最大同屏弹幕数：{{value}}",
       "speedChanged": "速度：{{value}}x",
       "increaseSpeed": "加快弹幕速度 (+0.25)",

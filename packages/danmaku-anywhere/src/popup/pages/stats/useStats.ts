@@ -78,34 +78,59 @@ export function useStats(): UseStatsResult {
     const seasonCount = seasons.length
 
     // Compute heavy stats in requestIdleCallback to avoid blocking UI
-    const computeAsync = () => {
-      const schedule =
-        typeof requestIdleCallback === 'function'
-          ? requestIdleCallback
-          : (cb: () => void) => setTimeout(cb, 0)
+    let cancelled = false
+    const hasRIC = typeof requestIdleCallback === 'function'
 
-      schedule(() => {
-        const typeDistribution = computeTypeDistribution(allComments)
-        const topKeywords = computeTopKeywords(allComments, 10)
-        const densityBins = computeGlobalDensityBins(allComments, 10)
-        const avgLength = computeAvgLength(allComments)
-        const peakTime = computePeakTime(densityBins)
+    const handle = hasRIC
+      ? requestIdleCallback(() => {
+          if (cancelled) return
+          const typeDistribution = computeTypeDistribution(allComments)
+          const topKeywords = computeTopKeywords(allComments, 10)
+          const densityBins = computeGlobalDensityBins(allComments, 10)
+          const avgLength = computeAvgLength(allComments)
+          const peakTime = computePeakTime(densityBins)
 
-        setStats({
-          totalComments: allComments.length,
-          seasonCount,
-          episodeCount,
-          typeDistribution,
-          topKeywords,
-          densityBins,
-          avgLength,
-          peakTime,
+          setStats({
+            totalComments: allComments.length,
+            seasonCount,
+            episodeCount,
+            typeDistribution,
+            topKeywords,
+            densityBins,
+            avgLength,
+            peakTime,
+          })
+          setIsComputing(false)
         })
-        setIsComputing(false)
-      })
-    }
+      : setTimeout(() => {
+          if (cancelled) return
+          const typeDistribution = computeTypeDistribution(allComments)
+          const topKeywords = computeTopKeywords(allComments, 10)
+          const densityBins = computeGlobalDensityBins(allComments, 10)
+          const avgLength = computeAvgLength(allComments)
+          const peakTime = computePeakTime(densityBins)
 
-    computeAsync()
+          setStats({
+            totalComments: allComments.length,
+            seasonCount,
+            episodeCount,
+            typeDistribution,
+            topKeywords,
+            densityBins,
+            avgLength,
+            peakTime,
+          })
+          setIsComputing(false)
+        }, 0)
+
+    return () => {
+      cancelled = true
+      if (hasRIC) {
+        cancelIdleCallback(handle)
+      } else {
+        clearTimeout(handle)
+      }
+    }
   }, [
     isLoading,
     episodesQuery.data,

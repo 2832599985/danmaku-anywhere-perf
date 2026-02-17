@@ -125,6 +125,7 @@ export const FloatingButton = forwardRef<
       currentStatus === 'success' &&
       prevMatchStatusRef.current !== 'success'
     ) {
+      prevMatchStatusRef.current = currentStatus
       setShowCheck(true)
       const timer = setTimeout(() => {
         setShowCheck(false)
