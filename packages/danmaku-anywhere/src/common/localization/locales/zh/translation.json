@@ -231,6 +231,7 @@
     "refresh": "刷新弹幕",
     "type": {
       "bilibili": "B站",
+      "custom": "本地",
       "danDanPlay": "弹弹Play",
       "macCms": "MacCMS",
       "tencent": "腾讯"
@@ -735,13 +736,16 @@
   },
   "statsPage": {
     "avgLength": "平均长度",
+    "chars": "字",
     "densityTimeline": "密度时间线",
+    "episodeCount": "集数",
     "modeBottom": "底部",
     "modeLtr": "逆向",
     "modeRtl": "滚动",
     "modeTop": "顶部",
     "noData": "装填弹幕后查看统计",
     "peakTime": "峰值时间",
+    "seasonCount": "季度",
     "title": "统计",
     "topKeywords": "热门关键词",
     "totalCount": "总数",

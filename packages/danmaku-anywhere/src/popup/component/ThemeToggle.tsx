@@ -1,20 +1,23 @@
 import {
   DarkModeOutlined,
   LightModeOutlined,
+  PaletteOutlined,
   SettingsBrightnessOutlined,
 } from '@mui/icons-material'
-import { Box, IconButton, Tooltip } from '@mui/material'
+import { Box, IconButton, Popover, Tooltip } from '@mui/material'
+import { useCallback, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ColorMode } from '@/common/theme/enums'
 import { useThemeContext } from '@/common/theme/Theme'
-import { themeIds, themes } from '@/common/theme/themes'
+import { ThemePreviewCards } from '@/popup/component/ThemePreviewCards'
 
 export const ThemeToggle = () => {
   const { t } = useTranslation()
-  const { colorMode, setColorMode, themeId, setThemeId } = useThemeContext()
+  const { colorMode, setColorMode } = useThemeContext()
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   const handleToggle = () => {
-    // Cycle through Light -> System -> Dark -> Light
     switch (colorMode) {
       case ColorMode.Light:
         setColorMode(ColorMode.System)
@@ -50,6 +53,14 @@ export const ThemeToggle = () => {
     }
   }
 
+  const handleOpenPalette = useCallback(() => {
+    setAnchorEl(buttonRef.current)
+  }, [])
+
+  const handleClosePalette = useCallback(() => {
+    setAnchorEl(null)
+  }, [])
+
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
       <Tooltip title={getTooltip()}>
@@ -62,34 +73,42 @@ export const ThemeToggle = () => {
           {getIcon()}
         </IconButton>
       </Tooltip>
-      <Box sx={{ display: 'flex', gap: 0.5 }}>
-        {themeIds.map((id) => {
-          const palette = themes[id]
-          const isSelected = id === themeId
-          return (
-            <Tooltip key={id} title={t(palette.name)} arrow>
-              <Box
-                onClick={() => setThemeId(id)}
-                sx={{
-                  width: 20,
-                  height: 20,
-                  borderRadius: '50%',
-                  background: palette.gradient,
-                  cursor: 'pointer',
-                  border: isSelected ? '2px solid' : '2px solid transparent',
-                  borderColor: isSelected ? 'text.primary' : 'transparent',
-                  boxShadow: isSelected ? `0 0 6px ${palette.primary}` : 'none',
-                  transition: 'all 0.2s ease',
-                  '&:hover': {
-                    transform: 'scale(1.2)',
-                    boxShadow: `0 0 8px ${palette.primary}`,
-                  },
-                }}
-              />
-            </Tooltip>
-          )
-        })}
-      </Box>
+      <Tooltip title={t('theme.selectTheme', 'Select Theme')}>
+        <IconButton
+          ref={buttonRef}
+          onClick={handleOpenPalette}
+          sx={{
+            color: 'inherit',
+          }}
+        >
+          <PaletteOutlined />
+        </IconButton>
+      </Tooltip>
+      <Popover
+        open={Boolean(anchorEl)}
+        anchorEl={anchorEl}
+        onClose={handleClosePalette}
+        anchorOrigin={{
+          vertical: 'bottom',
+          horizontal: 'center',
+        }}
+        transformOrigin={{
+          vertical: 'top',
+          horizontal: 'center',
+        }}
+        slotProps={{
+          paper: {
+            sx: {
+              width: 240,
+              p: 1,
+              borderRadius: 2,
+              mt: 0.5,
+            },
+          },
+        }}
+      >
+        <ThemePreviewCards />
+      </Popover>
     </Box>
   )
 }

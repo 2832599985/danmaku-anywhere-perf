@@ -231,6 +231,7 @@
     "refresh": "Refresh Danmaku",
     "type": {
       "bilibili": "Bilibili",
+      "custom": "Custom",
       "danDanPlay": "DanDanPlay",
       "macCms": "MacCMS",
       "tencent": "Tencent"
@@ -735,13 +736,16 @@
   },
   "statsPage": {
     "avgLength": "Avg Length",
+    "chars": "chars",
     "densityTimeline": "Density Timeline",
+    "episodeCount": "Episodes",
     "modeBottom": "Bottom",
     "modeLtr": "Reverse",
     "modeRtl": "Scroll",
     "modeTop": "Top",
     "noData": "Mount danmaku to see statistics",
     "peakTime": "Peak Time",
+    "seasonCount": "Seasons",
     "title": "Statistics",
     "topKeywords": "Top Keywords",
     "totalCount": "Total",

@@ -17,6 +17,7 @@ export const CommentsPage = () => {
       {episodes ? (
         <CommentsTable
           comments={comments}
+          episodes={episodes}
           onTimeClick={seekToTime}
           isTimeClickable={hasVideo()}
           onRefresh={refreshComments}

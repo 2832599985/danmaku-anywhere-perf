@@ -61,6 +61,13 @@ export const Home = () => {
           to="/danmaku"
           component={Link}
         />,
+        <Tab
+          key="/stats"
+          label={t('tabs.stats', 'Stats')}
+          value="/stats"
+          to="/stats"
+          component={Link}
+        />,
       ],
     },
     {

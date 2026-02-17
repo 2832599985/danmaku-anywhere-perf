@@ -1,8 +1,15 @@
-import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
-import { parseCommentEntityTime } from '@danmaku-anywhere/danmaku-converter'
+import type {
+  CommentEntity,
+  GenericEpisode,
+} from '@danmaku-anywhere/danmaku-converter'
+import {
+  type DanmakuSourceType,
+  parseCommentEntityTime,
+} from '@danmaku-anywhere/danmaku-converter'
 import { ContentCopy, FilterList, Sync } from '@mui/icons-material'
 import {
   Box,
+  Chip,
   CircularProgress,
   IconButton,
   Stack,
@@ -18,14 +25,22 @@ import {
   Typography,
 } from '@mui/material'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { match } from 'ts-pattern'
 import { FilterButton } from '@/common/components/FilterButton'
+import { localizedDanmakuSourceType } from '@/common/danmaku/enums'
+import {
+  buildCommentProviderMap,
+  getCommentProvider,
+  getSourceInfoFromEpisodes,
+  providerColors,
+} from '@/common/danmaku/providerColors'
 import { ScrollBox } from './layout/ScrollBox'
 
 interface CommentListProps {
   comments: CommentEntity[]
+  episodes?: GenericEpisode[]
   isTimeClickable?: boolean
   onTimeClick?: (time: number) => void
   onFilterComment?: (comment: string) => void
@@ -48,6 +63,7 @@ const formatTime = (seconds: number) => {
 
 export const CommentsTable = ({
   comments,
+  episodes,
   isTimeClickable,
   onFilterComment,
   onTimeClick,
@@ -70,14 +86,53 @@ export const CommentsTable = ({
   const [order, setOrder] = useState<'asc' | 'desc'>('asc')
   const [hoverRow, setHoverRow] = useState<number>()
   const [filter, setFilter] = useState('')
+  const [hiddenSources, setHiddenSources] = useState<Set<DanmakuSourceType>>(
+    new Set()
+  )
+
+  const sourceInfoList = useMemo(
+    () => getSourceInfoFromEpisodes(episodes),
+    [episodes]
+  )
+
+  const commentProviderMap = useMemo(
+    () => buildCommentProviderMap(comments, episodes),
+    [comments, episodes]
+  )
+
+  const hasMultipleSources = sourceInfoList.length > 1
+
+  const toggleSource = useCallback((provider: DanmakuSourceType) => {
+    setHiddenSources((prev) => {
+      const next = new Set(prev)
+      if (next.has(provider)) {
+        next.delete(provider)
+      } else {
+        next.add(provider)
+      }
+      return next
+    })
+  }, [])
 
   const filteredComments = useMemo(() => {
     const keyword = filter.trim().toLowerCase()
-    if (!keyword) {
-      return comments
+    let result = comments
+
+    // Apply source filter
+    if (hiddenSources.size > 0 && commentProviderMap.size > 0) {
+      result = result.filter((c) => {
+        const provider = getCommentProvider(c, commentProviderMap)
+        return provider === undefined || !hiddenSources.has(provider)
+      })
     }
-    return comments.filter((c) => c.m.toLowerCase().includes(keyword))
-  }, [comments, filter])
+
+    // Apply text filter
+    if (keyword) {
+      result = result.filter((c) => c.m.toLowerCase().includes(keyword))
+    }
+
+    return result
+  }, [comments, filter, hiddenSources, commentProviderMap])
 
   const sortedComments = useMemo(() => {
     return match(orderBy)
@@ -113,6 +168,51 @@ export const CommentsTable = ({
     estimateSize: () => 32,
   })
 
+  const renderSourceChips = () => {
+    if (!hasMultipleSources) return null
+
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          gap: 0.5,
+          px: 2,
+          py: 0.5,
+          flexWrap: 'wrap',
+          backgroundColor: 'background.paper',
+        }}
+      >
+        {sourceInfoList.map(({ provider, count }) => {
+          const isHidden = hiddenSources.has(provider)
+          return (
+            <Chip
+              key={provider}
+              label={`${localizedDanmakuSourceType(provider)} (${count})`}
+              size="small"
+              variant={isHidden ? 'outlined' : 'filled'}
+              onClick={() => toggleSource(provider)}
+              sx={{
+                borderColor: providerColors[provider],
+                backgroundColor: isHidden
+                  ? 'transparent'
+                  : `${providerColors[provider]}20`,
+                color: isHidden ? 'text.disabled' : 'text.primary',
+                '&:hover': {
+                  backgroundColor: isHidden
+                    ? `${providerColors[provider]}10`
+                    : `${providerColors[provider]}30`,
+                },
+                '& .MuiChip-label': {
+                  fontSize: '0.75rem',
+                },
+              }}
+            />
+          )
+        })}
+      </Box>
+    )
+  }
+
   const renderToolbar = () => {
     return (
       <Toolbar
@@ -128,7 +228,10 @@ export const CommentsTable = ({
       >
         <Typography variant="h6" sx={{ flexGrow: 1 }}>
           {t('danmaku.commentCounted', {
-            count: filter.trim() ? filteredComments.length : comments.length,
+            count:
+              filter.trim() || hiddenSources.size > 0
+                ? filteredComments.length
+                : comments.length,
           })}
         </Typography>
         <FilterButton filter={filter} onChange={setFilter} />
@@ -150,6 +253,7 @@ export const CommentsTable = ({
   return (
     <Box flex={1} display="flex" flexDirection="column" overflow="hidden">
       {renderToolbar()}
+      {renderSourceChips()}
       <TableContainer component={ScrollBox} flex={1} overflow="auto" ref={ref}>
         <Table size="small" stickyHeader>
           <TableHead>
@@ -193,6 +297,8 @@ export const CommentsTable = ({
               const time = parseCommentEntityTime(comment.p)
               const timeValid = Number.isFinite(time)
               const isHovering = hoverRow === virtualItem.index
+              const provider = getCommentProvider(comment, commentProviderMap)
+              const dotColor = provider ? providerColors[provider] : undefined
 
               return (
                 <TableRow
@@ -244,9 +350,23 @@ export const CommentsTable = ({
                       textOverflow: 'ellipsis',
                       flexGrow: 1,
                       display: 'flex',
+                      alignItems: 'center',
                     }}
                     title={comment.m}
                   >
+                    {dotColor && (
+                      <Box
+                        component="span"
+                        sx={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          backgroundColor: dotColor,
+                          flexShrink: 0,
+                          mr: 0.75,
+                        }}
+                      />
+                    )}
                     <Typography
                       variant="body2"
                       sx={{

@@ -88,6 +88,7 @@ export const CommentPage = () => {
       {episode ? (
         <CommentsTable
           comments={episode.comments}
+          episodes={[episode]}
           onFilterComment={(comment) => navigate('/filter', { state: comment })}
           onRefresh={handleRefresh}
           showRefresh={canRefresh}
