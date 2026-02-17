@@ -49,4 +49,5 @@ export const defaultExtensionOptions: ExtensionOptions = {
   enableAnalytics: true,
   id: undefined,
   restrictInitiatorDomain: true,
+  enableMultiSourceMerge: false,
 }

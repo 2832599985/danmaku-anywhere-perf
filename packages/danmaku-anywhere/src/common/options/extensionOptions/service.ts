@@ -330,6 +330,13 @@ export class ExtensionOptionsService implements IStoreService {
           })
         },
       })
+      .version(30, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            draft.enableMultiSourceMerge ??= false
+          })
+        },
+      })
   }
 
   async get() {

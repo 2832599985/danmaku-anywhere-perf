@@ -163,6 +163,14 @@ export const extensionOptionsSchema = z.object({
    * Whether to limit the modifier header to requests initiated by the extension itself
    */
   restrictInitiatorDomain: z.boolean(),
+
+  /**
+   * Whether to enable multi-source danmaku merge.
+   * When enabled, after matching an episode from one provider,
+   * the extension will also search other enabled providers for the same episode
+   * and merge all danmaku together with deduplication.
+   */
+  enableMultiSourceMerge: z.boolean(),
 })
 
 export type ExtensionOptions = z.infer<typeof extensionOptionsSchema>

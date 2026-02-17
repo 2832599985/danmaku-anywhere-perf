@@ -13,6 +13,7 @@ import { getThemePalette } from '@/common/theme/themes'
 import { getThemeCssVarsString } from '@/common/theme/themeVars'
 import { createPopoverRoot } from '@/content/common/host/createPopoverRoot'
 import { injectCss } from '@/content/common/injectCss'
+import { AutoOffsetService } from '@/content/player/autoOffset/AutoOffset.service'
 import danmakuComponentCss from '@/content/player/components/DanmakuComponent.css?inline'
 import fixedSkipButtonCss from '@/content/player/components/FixedSkipButton/FixedSkipButton.css?inline'
 import skipButtonCss from '@/content/player/components/SkipButton/SkipButton.css?inline'
@@ -40,6 +41,7 @@ const videoEventService = uiContainer.get(VideoEventService)
 const videoSkipService = uiContainer.get(VideoSkipService)
 const fixedSkipService = uiContainer.get(FixedSkipService)
 const danmakuDensityService = uiContainer.get(DanmakuDensityService)
+const autoOffsetService = uiContainer.get(AutoOffsetService)
 
 const { shadowRoot, shadowContainer, root } = createPopoverRoot({
   id: PLAYER_ROOT_ID,
@@ -114,12 +116,14 @@ const playerRpcServer = createRpcServer<PlayerRelayCommands>(
       managerService.mount(comments)
       videoSkipService.setComments(comments)
       danmakuDensityService.setComments(comments)
+      autoOffsetService.setComments(comments)
       return true
     },
     'relay:command:unmount': async () => {
       managerService.unmount()
       videoSkipService.clear()
       danmakuDensityService.clear()
+      autoOffsetService.clear()
       return true
     },
     'relay:command:start': async ({ data: query }) => {
@@ -137,6 +141,12 @@ const playerRpcServer = createRpcServer<PlayerRelayCommands>(
     },
     'relay:command:skipOp': async () => {
       videoSkipService.skipOpNow()
+    },
+    'relay:command:autoCalibrate': async () => {
+      return autoOffsetService.calibrate()
+    },
+    'relay:command:applyAutoOffset': async ({ data: offsetMs }) => {
+      await autoOffsetService.applyOffset(offsetMs)
     },
     'relay:command:enterPip': async () => {
       // TODO: https://github.com/WICG/document-picture-in-picture/issues/97

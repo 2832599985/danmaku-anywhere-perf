@@ -11,6 +11,7 @@ import {
   getAdaptiveBinSize,
 } from '@/content/player/densityPlot/adaptiveDensity'
 import { computeDensityBins } from '@/content/player/densityPlot/computeDensityBins'
+import type { DensityTooltipInfo } from '@/content/player/densityPlot/DanmakuDensityChart'
 import { DanmakuDensityChart } from '@/content/player/densityPlot/DanmakuDensityChart'
 import type {
   DensityPoint,
@@ -19,6 +20,12 @@ import type {
 import { VideoEventService } from '@/content/player/videoEvent/VideoEvent.service'
 
 export type DensityFilterCallback = (filtered: CommentEntity[]) => void
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
 
 @injectable('Singleton')
 export class DanmakuDensityService {
@@ -40,6 +47,8 @@ export class DanmakuDensityService {
   private resizeObserver: ResizeObserver | null = null
 
   private densityFilterCallback: DensityFilterCallback | null = null
+
+  private tooltipEl: HTMLElement | null = null
 
   private readonly boundHandleTimeUpdate: (event: Event) => void
   private readonly boundHandleSeeked: () => void
@@ -86,6 +95,8 @@ export class DanmakuDensityService {
     this.enabled = true
     this.logger.debug('Enabling density plot')
     this.chart.setup()
+    this.setupTooltip()
+    this.setupChartCallbacks()
     this.scheduleCompute()
     this.setupEventListeners()
   }
@@ -144,6 +155,63 @@ export class DanmakuDensityService {
    */
   updateSkipRegions(regions: SkipRegion[]) {
     this.chart.updateSkipRegions(regions)
+  }
+
+  private setupTooltip() {
+    if (this.tooltipEl) return
+
+    const el = document.createElement('div')
+    el.className = 'da-density-tooltip'
+    el.style.display = 'none'
+    this.layoutService.wrapper.appendChild(el)
+    this.tooltipEl = el
+  }
+
+  private removeTooltip() {
+    if (this.tooltipEl) {
+      this.tooltipEl.remove()
+      this.tooltipEl = null
+    }
+  }
+
+  private setupChartCallbacks() {
+    this.chart.onTooltip((info: DensityTooltipInfo | null) => {
+      if (!this.tooltipEl) return
+
+      if (!info) {
+        this.tooltipEl.style.display = 'none'
+        return
+      }
+
+      const timeStr = formatTime(info.time)
+      this.tooltipEl.textContent = `${timeStr} | ${info.count}`
+      this.tooltipEl.style.display = ''
+
+      // Position the tooltip above the SVG, aligned to cursor x
+      const tooltipWidth = this.tooltipEl.offsetWidth
+      const wrapperWidth = this.layoutService.wrapper.clientWidth
+
+      let left = info.x - tooltipWidth / 2
+      // Clamp to wrapper bounds
+      if (left < 2) left = 2
+      if (left + tooltipWidth > wrapperWidth - 2) {
+        left = wrapperWidth - tooltipWidth - 2
+      }
+
+      this.tooltipEl.style.left = `${left}px`
+      this.tooltipEl.style.bottom = `${this.chartHeight + 4}px`
+    })
+
+    this.chart.onSeek((time: number) => {
+      if (!this.currentVideo) return
+      this.logger.debug(`Density chart seek to ${time.toFixed(1)}s`)
+      this.currentVideo.currentTime = time
+    })
+  }
+
+  private removeChartCallbacks() {
+    this.chart.onTooltip(null)
+    this.chart.onSeek(null)
   }
 
   private applyDensityFilter() {
@@ -311,6 +379,8 @@ export class DanmakuDensityService {
       this.showChartTimeout = null
     }
     this.removeEventListeners()
+    this.removeChartCallbacks()
+    this.removeTooltip()
     this.chart.teardown()
   }
 }

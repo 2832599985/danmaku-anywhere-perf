@@ -14,10 +14,26 @@ export interface DanmakuDensityChartOptions {
   opacity?: number
 }
 
+export interface DensityTooltipInfo {
+  /** X position relative to the SVG element */
+  x: number
+  /** Y position relative to the SVG element (top of svg) */
+  y: number
+  /** Time in seconds at cursor position */
+  time: number
+  /** Comment count at cursor position */
+  count: number
+}
+
+export type TooltipCallback = (info: DensityTooltipInfo | null) => void
+export type SeekCallback = (time: number) => void
+
 export class DanmakuDensityChart {
   private readonly wrapper: HTMLElement
   private readonly clipId =
     `danmaku-density-clip-${Math.random().toString(36).slice(2)}`
+  private readonly gradientId =
+    `danmaku-density-grad-${Math.random().toString(36).slice(2)}`
 
   private options: {
     height: number
@@ -57,11 +73,26 @@ export class DanmakuDensityChart {
     null,
     undefined
   > | null = null
+  private hoverLine: d3.Selection<
+    SVGLineElement,
+    unknown,
+    null,
+    undefined
+  > | null = null
+  private interactionRect: d3.Selection<
+    SVGRectElement,
+    unknown,
+    null,
+    undefined
+  > | null = null
 
   private data: DensityPoint[] = []
   private duration = 0
   private lastCurrentTime = 0
   private skipRegions: SkipRegion[] = []
+
+  private tooltipCallback: TooltipCallback | null = null
+  private seekCallback: SeekCallback | null = null
 
   constructor(wrapper: HTMLElement, options: DanmakuDensityChartOptions = {}) {
     this.wrapper = wrapper
@@ -78,6 +109,14 @@ export class DanmakuDensityChart {
   private getCssVar(name: string, fallback: string): string {
     const value = getComputedStyle(this.wrapper).getPropertyValue(name).trim()
     return value || fallback
+  }
+
+  onTooltip(callback: TooltipCallback | null) {
+    this.tooltipCallback = callback
+  }
+
+  onSeek(callback: SeekCallback | null) {
+    this.seekCallback = callback
   }
 
   setup() {
@@ -102,19 +141,39 @@ export class DanmakuDensityChart {
       .attr('width', 0)
       .attr('height', this.options.height)
 
+    // Color gradient for density (cool -> warm)
+    const gradient = defs
+      .append('linearGradient')
+      .attr('id', this.gradientId)
+      .attr('gradientUnits', 'userSpaceOnUse')
+      .attr('x1', 0)
+      .attr('y1', this.options.height)
+      .attr('x2', 0)
+      .attr('y2', 0)
+
+    gradient
+      .append('stop')
+      .attr('offset', '0%')
+      .attr('stop-color', 'rgba(56, 189, 248, 0.6)')
+    gradient
+      .append('stop')
+      .attr('offset', '50%')
+      .attr('stop-color', 'rgba(250, 204, 21, 0.7)')
+    gradient
+      .append('stop')
+      .attr('offset', '100%')
+      .attr('stop-color', 'rgba(239, 68, 68, 0.85)')
+
     // Skip region overlays (rendered below density paths)
     const skipRegionGroup = svg.append('g').classed('da-skip-regions', true)
 
-    const unplayedColor = this.getCssVar(
-      '--da-density-unplayed',
-      this.options.colors.unplayed
-    )
+    const unplayedGradient = `url(#${this.gradientId})`
     const playedColor = this.getCssVar(
       '--da-density-played',
       this.options.colors.played
     )
 
-    const pathUnplayed = svg.append('path').attr('fill', unplayedColor)
+    const pathUnplayed = svg.append('path').attr('fill', unplayedGradient)
 
     const pathPlayed = svg
       .append('path')
@@ -124,12 +183,45 @@ export class DanmakuDensityChart {
     // Legend group (rendered on top)
     const legendGroup = svg.append('g').classed('da-skip-legend', true)
 
+    // Hover indicator line
+    const hoverLine = svg
+      .append('line')
+      .classed('da-density-hover-line', true)
+      .attr('y1', 0)
+      .attr('y2', this.options.height)
+      .attr('stroke', 'rgba(255, 255, 255, 0.6)')
+      .attr('stroke-width', 1)
+      .attr('pointer-events', 'none')
+      .style('display', 'none')
+
+    // Transparent interaction layer on top for mouse events
+    const interactionRect = svg
+      .append('rect')
+      .classed('da-density-interaction', true)
+      .attr('width', '100%')
+      .attr('height', this.options.height)
+      .attr('fill', 'transparent')
+      .attr('pointer-events', 'auto')
+      .style('cursor', 'pointer')
+
+    interactionRect.on('mousemove', (event: MouseEvent) => {
+      this.handleHover(event)
+    })
+    interactionRect.on('mouseleave', () => {
+      this.handleHoverEnd()
+    })
+    interactionRect.on('click', (event: MouseEvent) => {
+      this.handleClick(event)
+    })
+
     this.svg = svg
     this.pathUnplayed = pathUnplayed
     this.pathPlayed = pathPlayed
     this.clipRect = clipRect
     this.skipRegionGroup = skipRegionGroup
     this.legendGroup = legendGroup
+    this.hoverLine = hoverLine
+    this.interactionRect = interactionRect
   }
 
   teardown() {
@@ -140,6 +232,8 @@ export class DanmakuDensityChart {
     this.clipRect = null
     this.skipRegionGroup = null
     this.legendGroup = null
+    this.hoverLine = null
+    this.interactionRect = null
   }
 
   setOptions(options: DanmakuDensityChartOptions) {
@@ -162,11 +256,11 @@ export class DanmakuDensityChart {
     if (this.svg && heightChanged) {
       this.svg.attr('height', this.options.height)
       this.clipRect?.attr('height', this.options.height)
+      this.hoverLine?.attr('y2', this.options.height)
+      this.interactionRect?.attr('height', this.options.height)
       this.redraw()
     }
     if (colorsChanged) {
-      if (this.pathUnplayed)
-        this.pathUnplayed.attr('fill', this.options.colors.unplayed)
       if (this.pathPlayed)
         this.pathPlayed.attr('fill', this.options.colors.played)
     }
@@ -242,8 +336,99 @@ export class DanmakuDensityChart {
     this.pathUnplayed.attr('d', d)
     this.pathPlayed.attr('d', d)
 
+    // Update gradient vertical range
+    this.updateGradient()
+
     this.drawSkipRegions()
     this.updateProgress(this.lastCurrentTime)
+  }
+
+  private updateGradient() {
+    if (!this.svg) return
+    this.svg
+      .select(`#${this.gradientId}`)
+      .attr('y1', this.options.height)
+      .attr('y2', 0)
+  }
+
+  private handleHover(event: MouseEvent) {
+    if (
+      !this.svg ||
+      !this.tooltipCallback ||
+      this.data.length === 0 ||
+      !Number.isFinite(this.duration) ||
+      this.duration <= 0
+    ) {
+      return
+    }
+
+    const svgNode = this.svg.node()
+    if (!svgNode) return
+
+    const rect = svgNode.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const { width } = this.getSvgSize()
+
+    if (width <= 0) return
+
+    const ratio = Math.min(1, Math.max(0, x / width))
+    const time = ratio * this.duration
+
+    // Find the closest bin
+    const bin = this.findClosestBin(time)
+    const count = bin?.count ?? 0
+
+    // Show hover line
+    this.hoverLine?.attr('x1', x).attr('x2', x).style('display', null)
+
+    this.tooltipCallback({ x, y: 0, time, count })
+  }
+
+  private handleHoverEnd() {
+    this.hoverLine?.style('display', 'none')
+    this.tooltipCallback?.(null)
+  }
+
+  private handleClick(event: MouseEvent) {
+    if (
+      !this.svg ||
+      !this.seekCallback ||
+      !Number.isFinite(this.duration) ||
+      this.duration <= 0
+    ) {
+      return
+    }
+
+    const svgNode = this.svg.node()
+    if (!svgNode) return
+
+    const rect = svgNode.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const { width } = this.getSvgSize()
+
+    if (width <= 0) return
+
+    const ratio = Math.min(1, Math.max(0, x / width))
+    const time = ratio * this.duration
+
+    this.seekCallback(time)
+  }
+
+  private findClosestBin(time: number): DensityPoint | null {
+    if (this.data.length === 0) return null
+
+    let closest = this.data[0]
+    let closestDist = Math.abs(closest.time - time)
+
+    for (let i = 1; i < this.data.length; i++) {
+      const dist = Math.abs(this.data[i].time - time)
+      if (dist < closestDist) {
+        closest = this.data[i]
+        closestDist = dist
+      }
+    }
+
+    return closest
   }
 
   private drawSkipRegions() {

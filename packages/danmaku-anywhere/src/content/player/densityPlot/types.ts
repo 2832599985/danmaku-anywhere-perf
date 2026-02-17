@@ -1,6 +1,8 @@
 export interface DensityPoint {
   time: number
   value: number
+  /** Raw comment count in this bin (used for tooltip display) */
+  count?: number
 }
 
 export interface SkipRegion {

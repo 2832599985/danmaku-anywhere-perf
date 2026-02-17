@@ -4,6 +4,7 @@ import type { ReactNode, Ref } from 'react'
 import { memo } from 'react'
 import { useIsSmallScreen } from '@/content/controller/common/hooks/useIsSmallScreen'
 import { useStore } from '@/content/controller/store/store'
+import type { PanelSize } from '@/content/controller/ui/constants/size'
 import { WindowPaneLayout } from '@/content/controller/ui/floatingPanel/layout/WindowPaneLayout'
 import { WindowPopper } from './WindowPopper'
 
@@ -15,6 +16,11 @@ interface ControlWindowProps {
   open: boolean
   toolbar: ReactNode
   ref?: Ref<HTMLDivElement>
+  panelSize?: PanelSize
+  isResizing?: boolean
+  onResize?: (size: PanelSize) => void
+  onResizeEnd?: (size: PanelSize) => void
+  onResetSize?: () => void
 }
 
 const BaseWindow = ({
@@ -25,6 +31,11 @@ const BaseWindow = ({
   open,
   toolbar,
   ref,
+  panelSize,
+  isResizing,
+  onResize,
+  onResizeEnd,
+  onResetSize,
 }: ControlWindowProps) => {
   const sm = useIsSmallScreen()
 
@@ -59,6 +70,11 @@ const BaseWindow = ({
       anchorEl={anchorEl}
       open={open && !isPicking}
       unmountOnExit={false}
+      panelSize={panelSize}
+      isResizing={isResizing}
+      onResize={onResize}
+      onResizeEnd={onResizeEnd}
+      onResetSize={onResetSize}
     >
       {({ bind }) => {
         return (

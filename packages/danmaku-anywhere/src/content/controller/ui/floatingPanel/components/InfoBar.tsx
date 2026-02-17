@@ -1,4 +1,4 @@
-import { Sync } from '@mui/icons-material'
+import { Sync, TuneOutlined } from '@mui/icons-material'
 import {
   Box,
   Button,
@@ -11,6 +11,7 @@ import {
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { episodeToString } from '@/common/danmaku/utils'
+import { useAutoCalibrate } from '@/content/controller/common/hooks/useAutoCalibrate'
 import { useLoadDanmaku } from '@/content/controller/common/hooks/useLoadDanmaku'
 import { useUnmountDanmaku } from '@/content/controller/common/hooks/useUnmountDanmaku'
 import { useStore } from '@/content/controller/store/store'
@@ -24,6 +25,7 @@ export const InfoBar = () => {
 
   const unmountMutation = useUnmountDanmaku()
   const { refreshComments, canRefresh, loadMutation } = useLoadDanmaku()
+  const { calibrateAndApply, isPending: isCalibrating } = useAutoCalibrate()
 
   const handleUnmount = () => {
     unmountMutation.mutate()
@@ -68,6 +70,21 @@ export const InfoBar = () => {
             </Typography>
           </Box>
           <Box flexShrink={0}>
+            <Tooltip
+              title={t(
+                'autoOffset.calibrateTooltip',
+                'Auto-calibrate danmaku offset'
+              )}
+            >
+              <IconButton
+                onClick={calibrateAndApply}
+                disabled={isCalibrating}
+                color="primary"
+                size="small"
+              >
+                <TuneOutlined fontSize="small" />
+              </IconButton>
+            </Tooltip>
             {canRefresh && (
               <Tooltip title={t('danmaku.refresh', 'Refresh Danmaku')}>
                 <IconButton

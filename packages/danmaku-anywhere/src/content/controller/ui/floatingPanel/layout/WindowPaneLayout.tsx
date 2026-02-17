@@ -14,6 +14,7 @@ interface WindowPaneLayoutProps {
   paperProps?: PaperProps
   width?: number
   height?: number
+  isResizing?: boolean
   ref?: Ref<HTMLDivElement>
 }
 
@@ -22,6 +23,7 @@ export const WindowPaneLayout = (props: WindowPaneLayoutProps) => {
     ref,
     width = CONTROLLER_WINDOW_DEFAULT_WIDTH,
     height = CONTROLLER_WINDOW_MIN_HEIGHT,
+    isResizing = false,
   } = props
   const sm = useIsSmallScreen()
   const { palette } = useThemeContext()
@@ -30,6 +32,7 @@ export const WindowPaneLayout = (props: WindowPaneLayoutProps) => {
     <Paper
       elevation={0}
       sx={{
+        position: 'relative',
         padding: 0,
         width: sm ? '100%' : width,
         maxWidth: sm ? '100%' : width,
@@ -40,9 +43,12 @@ export const WindowPaneLayout = (props: WindowPaneLayoutProps) => {
         touchAction: 'manipulation',
         background: palette.glass.base,
         backdropFilter: palette.glass.blur,
-        border: `1px solid ${palette.glass.border}`,
+        border: isResizing
+          ? '1px dashed rgba(139, 92, 246, 0.6)'
+          : `1px solid ${palette.glass.border}`,
         borderRadius: '16px',
         color: '#fff',
+        transition: isResizing ? 'none' : 'border-color 0.2s',
       }}
       ref={ref}
       {...props.paperProps}

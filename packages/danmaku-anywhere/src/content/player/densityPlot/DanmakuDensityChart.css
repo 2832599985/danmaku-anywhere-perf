@@ -17,3 +17,22 @@
 .da-skip-legend {
   pointer-events: none;
 }
+
+.da-density-hover-line {
+  pointer-events: none;
+}
+
+.da-density-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.8);
+  color: #fff;
+  font-size: 11px;
+  font-family: sans-serif;
+  padding: 3px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+  z-index: 10;
+  transition: opacity 0.15s ease-in-out;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}

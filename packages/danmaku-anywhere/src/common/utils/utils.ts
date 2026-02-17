@@ -264,3 +264,85 @@ export const mergeComments = <T extends { cid?: number; p: string; m: string }>(
 
   return result
 }
+
+/**
+ * Extract the time value from a comment's `p` field.
+ * The `p` field is formatted as `time,mode,color[,uid]`.
+ */
+const extractTime = (p: string): number => {
+  const comma = p.indexOf(',')
+  if (comma === -1) return Number.NaN
+  return Number.parseFloat(p.slice(0, comma))
+}
+
+/**
+ * Fuzzy deduplication for multi-source danmaku merge.
+ * Two comments are considered duplicates if:
+ * 1. Their text (`m`) is exactly the same, AND
+ * 2. Their time values are within `timeTolerance` seconds of each other.
+ *
+ * This is a pure function suitable for unit testing.
+ * Time complexity: O(n * m) where n = existing, m = incoming, but in practice
+ * the inner loop is bounded by the number of comments with the same text.
+ */
+export const fuzzyDedupeComments = <
+  T extends { cid?: number; p: string; m: string },
+>(
+  existing: T[],
+  incoming: T[],
+  timeTolerance = 1
+): T[] => {
+  // First do exact dedup
+  const seen = new Set<string>()
+  const result: T[] = []
+
+  for (const comment of existing) {
+    const key = commentKey(comment)
+    if (!seen.has(key)) {
+      seen.add(key)
+      result.push(comment)
+    }
+  }
+
+  // Group existing comments by text for fuzzy matching
+  const existingByText = new Map<string, number[]>()
+  for (const comment of result) {
+    const time = extractTime(comment.p)
+    if (!existingByText.has(comment.m)) {
+      existingByText.set(comment.m, [])
+    }
+    existingByText.get(comment.m)?.push(time)
+  }
+
+  for (const comment of incoming) {
+    const key = commentKey(comment)
+    // Exact match dedup
+    if (seen.has(key)) {
+      continue
+    }
+
+    // Fuzzy time match: same text within timeTolerance seconds
+    const existingTimes = existingByText.get(comment.m)
+    if (existingTimes) {
+      const incomingTime = extractTime(comment.p)
+      const isFuzzyDuplicate = existingTimes.some(
+        (t) => Math.abs(t - incomingTime) < timeTolerance
+      )
+      if (isFuzzyDuplicate) {
+        continue
+      }
+    }
+
+    seen.add(key)
+    result.push(comment)
+
+    // Track for subsequent fuzzy checks
+    const time = extractTime(comment.p)
+    if (!existingByText.has(comment.m)) {
+      existingByText.set(comment.m, [])
+    }
+    existingByText.get(comment.m)?.push(time)
+  }
+
+  return result
+}

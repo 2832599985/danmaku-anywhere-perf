@@ -204,7 +204,8 @@
       "xmlExported": "导出XML成功",
       "xmlExportError": "导出XML失败：{{message}}",
       "assExported": "导出ASS成功",
-      "assExportError": "导出ASS失败：{{message}}"
+      "assExportError": "导出ASS失败：{{message}}",
+      "multiSourceMerged": "已合并多源弹幕：{{sources}}"
     },
     "backup": "导出备份",
     "commentContent": "弹幕内容",
@@ -546,6 +547,8 @@
       "densitySkipRegionTooltip": "检测到的OP/ED区域会在弹幕密度时间轴上高亮显示"
     },
     "restrictInitiatorDomain": "限制DNR至发起自扩展的请求",
+    "enableMultiSourceMerge": "启用多源弹幕合并",
+    "enableMultiSourceMergeDescription": "匹配到集数后，同时搜索其他已启用的弹幕源并合并去重后显示。",
     "retentionPolicy": {
       "alert": {
         "nDanmakuDeleted_one": "已删除{{count}}条弹幕",
@@ -725,6 +728,11 @@
       "3d": "立体阴影"
     }
   },
+  "densityChart": {
+    "comments_one": "{{count}}条弹幕",
+    "comments_other": "{{count}}条弹幕",
+    "clickToSeek": "点击跳转"
+  },
   "statsPage": {
     "avgLength": "平均长度",
     "densityTimeline": "密度时间线",
@@ -781,5 +789,11 @@
       "video": "视频控制",
       "panel": "面板控制"
     }
+  },
+  "autoOffset": {
+    "calibrateTooltip": "自动校准弹幕时间偏移",
+    "noCalibrationNeeded": "无需校准时间偏移",
+    "applied": "已自动校准偏移：{{offset}}ms",
+    "error": "自动校准失败"
   }
 }

@@ -84,6 +84,19 @@ const advancedSettings: SettingConfig<ExtensionOptions>[] = [
     getValue: (options) => options.restrictInitiatorDomain,
     createUpdate: (_, newValue) => ({ restrictInitiatorDomain: newValue }),
   },
+  {
+    id: 'toggle.enableMultiSourceMerge',
+    label: () =>
+      i18n.t(
+        'optionsPage.enableMultiSourceMerge',
+        'Enable multi-source danmaku merge'
+      ),
+    descriptionKey: 'optionsPage.enableMultiSourceMergeDescription',
+    category: 'advanced',
+    type: 'toggle',
+    getValue: (options) => options.enableMultiSourceMerge,
+    createUpdate: (_, newValue) => ({ enableMultiSourceMerge: newValue }),
+  },
 ]
 
 const playerSettings: SettingConfig<ExtensionOptions>[] = [

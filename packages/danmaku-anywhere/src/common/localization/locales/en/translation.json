@@ -204,7 +204,8 @@
       "xmlExported": "Export XML successful",
       "xmlExportError": "Failed to export XML: {{message}}",
       "assExported": "Export ASS successful",
-      "assExportError": "Failed to export ASS: {{message}}"
+      "assExportError": "Failed to export ASS: {{message}}",
+      "multiSourceMerged": "Merged danmaku from {{sources}}"
     },
     "backup": "Export Backup",
     "commentContent": "Comment",
@@ -546,6 +547,8 @@
       "densitySkipRegionTooltip": "Detected OP/ED regions are highlighted on the density timeline"
     },
     "restrictInitiatorDomain": "Limit DNR initiator domains to this extension",
+    "enableMultiSourceMerge": "Enable multi-source danmaku merge",
+    "enableMultiSourceMergeDescription": "After matching an episode, also search other enabled providers and merge all danmaku together with deduplication.",
     "retentionPolicy": {
       "alert": {
         "nDanmakuDeleted_one": "{{count}} danmaku deleted",
@@ -725,6 +728,11 @@
       "3d": "3D Shadow"
     }
   },
+  "densityChart": {
+    "comments_one": "{{count}} comment",
+    "comments_other": "{{count}} comments",
+    "clickToSeek": "Click to seek"
+  },
   "statsPage": {
     "avgLength": "Avg Length",
     "densityTimeline": "Density Timeline",
@@ -781,5 +789,11 @@
       "video": "Video Controls",
       "panel": "Panel Controls"
     }
+  },
+  "autoOffset": {
+    "calibrateTooltip": "Auto-calibrate danmaku offset",
+    "noCalibrationNeeded": "No offset calibration needed",
+    "applied": "Auto offset applied: {{offset}}ms",
+    "error": "Auto calibration failed"
   }
 }

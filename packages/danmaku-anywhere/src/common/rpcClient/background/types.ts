@@ -19,6 +19,10 @@ import type {
   SetHeaderRule,
 } from '@danmaku-anywhere/web-scraper'
 import type {
+  MultiSourceFetchInput,
+  MultiSourceFetchResult,
+} from '@/background/services/DanmakuMergeService'
+import type {
   GenericVodSearchData,
   MatchEpisodeInput,
   MatchEpisodeResult,
@@ -148,6 +152,7 @@ export type BackgroundMethods = {
   backupExport: RPCDef<void, BackupData>
   backupImport: RPCDef<unknown, BackupRestoreResult>
   dataWipeDanmaku: RPCDef<{ includeCustomEpisodes: boolean }, void>
+  episodeFetchMultiSource: RPCDef<MultiSourceFetchInput, MultiSourceFetchResult>
 }
 
 type InputWithFrameId<TInput> = TInput extends void
@@ -177,6 +182,23 @@ export type PlayerRelayCommands = {
   'relay:command:enterPip': RPCDef<InputWithFrameId<void>, void, FrameContext>
   'relay:command:show': RPCDef<InputWithFrameId<boolean>, void, FrameContext>
   'relay:command:skipOp': RPCDef<InputWithFrameId<void>, void, FrameContext>
+  'relay:command:autoCalibrate': RPCDef<
+    InputWithFrameId<void>,
+    AutoOffsetResultDto | null,
+    FrameContext
+  >
+  'relay:command:applyAutoOffset': RPCDef<
+    InputWithFrameId<number>,
+    void,
+    FrameContext
+  >
+}
+
+export interface AutoOffsetResultDto {
+  offsetMs: number
+  confidence: number
+  densitySpikeTime: number
+  opEndTime: number
 }
 
 // Player -> Controller communication

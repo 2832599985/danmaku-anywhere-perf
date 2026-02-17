@@ -7,6 +7,7 @@ import { inject, injectable } from 'inversify'
 import { match } from 'ts-pattern'
 import { ScriptingManager } from '@/background/scripting/ScriptingManager'
 import { BackupService } from '@/background/services/Backup/BackupService.service'
+import { DanmakuMergeService } from '@/background/services/DanmakuMergeService'
 import { DataManagementService } from '@/background/services/DataManagementService'
 import { GenAIService } from '@/background/services/GenAIService'
 import { IconService } from '@/background/services/IconService'
@@ -70,7 +71,9 @@ export class RpcManager {
     @inject(ImageCacheService) private imageCacheService: ImageCacheService,
     @inject(BackupService) private backupService: BackupService,
     @inject(DataManagementService)
-    private dataManagementService: DataManagementService
+    private dataManagementService: DataManagementService,
+    @inject(DanmakuMergeService)
+    private danmakuMergeService: DanmakuMergeService
   ) {
     this.logger = logger.sub('[RpcManager]')
   }
@@ -388,6 +391,9 @@ export class RpcManager {
           await this.dataManagementService.wipeAllData(data)
           void invalidateContentScriptData(sender.tab?.id)
         },
+        episodeFetchMultiSource: async (data) => {
+          return this.danmakuMergeService.fetchFromOtherProviders(data)
+        },
       },
       {
         logger: this.logger,
@@ -443,6 +449,12 @@ export class RpcManager {
         ),
         'relay:command:skipOp': passThrough(
           relayFrameClient['relay:command:skipOp']
+        ),
+        'relay:command:autoCalibrate': passThrough(
+          relayFrameClient['relay:command:autoCalibrate']
+        ),
+        'relay:command:applyAutoOffset': passThrough(
+          relayFrameClient['relay:command:applyAutoOffset']
         ),
         'relay:event:playerReady': passThrough(
           relayFrameClient['relay:event:playerReady']

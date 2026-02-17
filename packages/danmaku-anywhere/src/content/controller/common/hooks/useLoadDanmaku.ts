@@ -16,7 +16,11 @@ import { Logger } from '@/common/Logger'
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
 import { playerRpcClient } from '@/common/rpcClient/background/client'
 import { PerfTimer } from '@/common/utils/perf'
-import { concatArr, dedupeComments, mergeComments } from '@/common/utils/utils'
+import {
+  concatArr,
+  dedupeComments,
+  fuzzyDedupeComments,
+} from '@/common/utils/utils'
 import { useStore } from '@/content/controller/store/store'
 
 const useMountDanmaku = () => {
@@ -109,7 +113,9 @@ const useMergeMountDanmaku = () => {
       const incoming = dedupeComments(rawComments)
 
       // Merge with existing comments, deduplicating across sources
-      const merged = mergeComments(
+      // Uses fuzzy dedup to catch near-duplicate comments from different providers
+      // (same text within 1 second tolerance)
+      const merged = fuzzyDedupeComments(
         useStore.getState().danmaku.comments,
         incoming
       )
