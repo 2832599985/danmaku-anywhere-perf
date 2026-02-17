@@ -50,6 +50,7 @@ const standaloneMountConfig: MountConfig = {
   id: 'standalone',
   name: 'Standalone',
   mediaQuery: 'video',
+  preferredProviders: [],
 }
 
 export const standaloneBackgroundHandlers: StandaloneRpcHandlers<BackgroundMethods> =

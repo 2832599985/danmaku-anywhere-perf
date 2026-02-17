@@ -319,6 +319,17 @@ export class ExtensionOptionsService implements IStoreService {
           })
         },
       })
+      .version(29, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            draft.hotkeys.increaseSpeed ??= { key: '', enabled: true }
+            draft.hotkeys.decreaseSpeed ??= { key: '', enabled: true }
+            draft.hotkeys.increaseOffset ??= { key: '', enabled: true }
+            draft.hotkeys.decreaseOffset ??= { key: '', enabled: true }
+            draft.hotkeys.toggleDensityPlot ??= { key: '', enabled: true }
+          })
+        },
+      })
   }
 
   async get() {

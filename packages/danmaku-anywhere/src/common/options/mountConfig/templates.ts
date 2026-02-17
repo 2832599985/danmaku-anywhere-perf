@@ -1,7 +1,8 @@
+import { DanmakuSourceType } from '@danmaku-anywhere/danmaku-converter'
 import type { AutomationMode } from '@/common/options/mountConfig/schema'
 
 export interface MountConfigTemplate {
-  /** Template identifier — stable across versions for update tracking */
+  /** Template identifier -- stable across versions for update tracking */
   templateId: string
   name: string
   description: string
@@ -10,6 +11,8 @@ export interface MountConfigTemplate {
   mode: AutomationMode
   /** Category for grouping in the picker UI */
   category: 'chinese' | 'international' | 'self-hosted'
+  /** Default preferred provider order for this template */
+  preferredProviders?: DanmakuSourceType[]
 }
 
 export const mountConfigTemplates: MountConfigTemplate[] = [
@@ -22,6 +25,10 @@ export const mountConfigTemplates: MountConfigTemplate[] = [
     mediaQuery: 'video',
     mode: 'ai',
     category: 'chinese',
+    preferredProviders: [
+      DanmakuSourceType.Bilibili,
+      DanmakuSourceType.DanDanPlay,
+    ],
   },
   {
     templateId: 'bilibili-bangumi',
@@ -31,6 +38,10 @@ export const mountConfigTemplates: MountConfigTemplate[] = [
     mediaQuery: 'video',
     mode: 'ai',
     category: 'chinese',
+    preferredProviders: [
+      DanmakuSourceType.Bilibili,
+      DanmakuSourceType.DanDanPlay,
+    ],
   },
   {
     templateId: 'iqiyi',
@@ -58,6 +69,10 @@ export const mountConfigTemplates: MountConfigTemplate[] = [
     mediaQuery: 'video',
     mode: 'ai',
     category: 'chinese',
+    preferredProviders: [
+      DanmakuSourceType.Tencent,
+      DanmakuSourceType.DanDanPlay,
+    ],
   },
   {
     templateId: 'mango-tv',
@@ -86,6 +101,7 @@ export const mountConfigTemplates: MountConfigTemplate[] = [
     mediaQuery: 'video',
     mode: 'ai',
     category: 'international',
+    preferredProviders: [DanmakuSourceType.DanDanPlay],
   },
   {
     templateId: 'crunchyroll',
@@ -95,6 +111,7 @@ export const mountConfigTemplates: MountConfigTemplate[] = [
     mediaQuery: 'video',
     mode: 'ai',
     category: 'international',
+    preferredProviders: [DanmakuSourceType.DanDanPlay],
   },
   {
     templateId: 'disney-plus',

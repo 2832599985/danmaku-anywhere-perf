@@ -111,6 +111,7 @@ export const useIntegrationPolicy = () => {
           title: state.title,
           episodeNumber: state.episode,
           originalTitle: state.originalTitle,
+          preferredProviders: activeConfig.preferredProviders,
         }
 
         toast.info(

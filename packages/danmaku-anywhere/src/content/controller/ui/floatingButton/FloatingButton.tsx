@@ -1,14 +1,17 @@
+import { Check } from '@mui/icons-material'
 import type { FabProps, PopoverVirtualElement } from '@mui/material'
 import {
   Badge,
+  Box,
   ClickAwayListener,
   Fab,
   Fade,
+  keyframes,
   SpeedDialIcon,
   styled,
 } from '@mui/material'
 import type { MouseEventHandler } from 'react'
-import { forwardRef, useRef, useState } from 'react'
+import { forwardRef, useEffect, useRef, useState } from 'react'
 import { useAnyLoading } from '@/common/hooks/useAnyLoading'
 import { useMergeRefs } from '@/common/hooks/useMergeRefs'
 import { isConfigIncomplete } from '@/common/options/mountConfig/isPermissive'
@@ -28,24 +31,58 @@ interface FloatingButtonProps extends FabProps {
   isOpen: boolean
 }
 
-const StyledFab = styled(Fab, {
-  shouldForwardProp: (prop) => prop !== 'hover' && prop !== 'palette',
-})<{ hover: boolean; palette: ThemePalette }>(({ hover, palette }) => {
-  return {
-    transition: 'all 0.2s ease-in-out',
-    transform: hover ? 'rotate(45deg)' : 'rotate(0deg)',
-    touchAction: 'none',
-    background: `${palette.glass.base} !important`,
-    backdropFilter: palette.glass.blur,
-    border: `1px solid ${palette.glass.border}`,
-    boxShadow:
-      '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-    color: '#fff',
-    '&:hover': {
-      background: `${palette.glass.hover} !important`,
-    },
+const errorPulse = keyframes`
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4);
   }
-})
+  50% {
+    box-shadow: 0 0 0 8px rgba(244, 67, 54, 0);
+  }
+`
+
+const checkFadeInOut = keyframes`
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  15% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  75% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+`
+
+const StyledFab = styled(Fab, {
+  shouldForwardProp: (prop) =>
+    prop !== 'hover' && prop !== 'palette' && prop !== 'hasError',
+})<{ hover: boolean; palette: ThemePalette; hasError: boolean }>(
+  ({ hover, palette, hasError }) => {
+    return {
+      transition: 'all 0.2s ease-in-out',
+      transform: hover ? 'rotate(45deg)' : 'rotate(0deg)',
+      touchAction: 'none',
+      background: `${palette.glass.base} !important`,
+      backdropFilter: palette.glass.blur,
+      border: `1px solid ${palette.glass.border}`,
+      boxShadow:
+        '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+      color: '#fff',
+      '&:hover': {
+        background: `${palette.glass.hover} !important`,
+      },
+      ...(hasError && {
+        animation: `${errorPulse} 1.5s ease-in-out infinite`,
+      }),
+    }
+  }
+)
 
 const useInitialAnchor = () => {
   // bottom 12, left 3
@@ -53,6 +90,11 @@ const useInitialAnchor = () => {
   const bottom = window.innerHeight - 96
 
   return useRef(createVirtualElement(left, bottom))
+}
+
+const formatBadgeCount = (count: number): string => {
+  if (count > 999) return '999+'
+  return String(count)
 }
 
 export const FloatingButton = forwardRef<
@@ -67,10 +109,30 @@ export const FloatingButton = forwardRef<
   const [contextMenuAnchor, setContextMenuAnchor] =
     useState<PopoverVirtualElement | null>(null)
   const [fabHover, setFabHover] = useState(false)
+  const [showCheck, setShowCheck] = useState(false)
 
-  const { isMounted } = useStore.use.danmaku()
+  const { isMounted, comments } = useStore.use.danmaku()
   const isDisconnected = useStore.use.isDisconnected()
+  const matchResult = useStore((state) => state.integration.matchResult)
   const activeConfig = useActiveConfig()
+
+  const prevMatchStatusRef = useRef<string | undefined>(undefined)
+
+  // Track match success transitions to show checkmark animation
+  useEffect(() => {
+    const currentStatus = matchResult?.status
+    if (
+      currentStatus === 'success' &&
+      prevMatchStatusRef.current !== 'success'
+    ) {
+      setShowCheck(true)
+      const timer = setTimeout(() => {
+        setShowCheck(false)
+      }, 1500)
+      return () => clearTimeout(timer)
+    }
+    prevMatchStatusRef.current = currentStatus
+  }, [matchResult?.status])
 
   const fabAnchor = useInitialAnchor()
 
@@ -112,6 +174,9 @@ export const FloatingButton = forwardRef<
 
   const isIncomplete = isConfigIncomplete(activeConfig)
 
+  const commentCount = comments.length
+  const showCountBadge = isMounted && commentCount > 0
+
   return (
     <ClickAwayListener onClickAway={handleCloseContextMenu}>
       <div>
@@ -151,21 +216,73 @@ export const FloatingButton = forwardRef<
                       },
                     }}
                   >
-                    <StyledFab
-                      size="small"
-                      onContextMenu={handleContextMenu}
-                      ref={mergedFabRefs}
-                      color={dialColor}
-                      hover={fabHover}
-                      palette={palette}
-                      onMouseOver={() => setFabHover(true)}
-                      onMouseOut={() => setFabHover(false)}
+                    <Badge
+                      badgeContent={
+                        showCountBadge
+                          ? formatBadgeCount(commentCount)
+                          : undefined
+                      }
+                      invisible={!showCountBadge}
+                      max={9999}
+                      sx={{
+                        '& .MuiBadge-badge': {
+                          zIndex: 1402,
+                          backgroundColor: palette.primary,
+                          color: '#fff',
+                          fontSize: '0.65rem',
+                          minWidth: 18,
+                          height: 18,
+                          padding: '0 4px',
+                          fontWeight: 600,
+                        },
+                      }}
                     >
-                      <SpeedDialIcon />
-                      <FabLoadingIndicator
-                        isLoading={!isDisconnected && isLoading}
-                      />
-                    </StyledFab>
+                      <StyledFab
+                        size="small"
+                        onContextMenu={handleContextMenu}
+                        ref={mergedFabRefs}
+                        color={dialColor}
+                        hover={fabHover}
+                        palette={palette}
+                        hasError={isDisconnected}
+                        onMouseOver={() => setFabHover(true)}
+                        onMouseOut={() => setFabHover(false)}
+                      >
+                        <SpeedDialIcon />
+                        <FabLoadingIndicator
+                          isLoading={!isDisconnected && isLoading}
+                          primaryColor={`${palette.primary}80`}
+                          secondaryColor={`${palette.secondary}40`}
+                        />
+                        {/* Checkmark overlay on match success */}
+                        {showCheck && (
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%',
+                              height: '100%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              pointerEvents: 'none',
+                              animation: `${checkFadeInOut} 1.5s ease-in-out forwards`,
+                              zIndex: 1,
+                            }}
+                          >
+                            <Check
+                              sx={{
+                                fontSize: 24,
+                                color: '#4caf50',
+                                filter:
+                                  'drop-shadow(0 0 4px rgba(76, 175, 80, 0.6))',
+                              }}
+                            />
+                          </Box>
+                        )}
+                      </StyledFab>
+                    </Badge>
                   </Badge>
                 </div>
               </Fade>

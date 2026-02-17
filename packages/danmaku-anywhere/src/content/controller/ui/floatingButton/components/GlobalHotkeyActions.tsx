@@ -1,18 +1,23 @@
 import { useEventCallback } from '@mui/material'
 import { produce } from 'immer'
+import { useEffect, useState } from 'react'
 import { useHotkeys } from 'react-hotkeys-hook'
 import { useTranslation } from 'react-i18next'
 
 import { useToast } from '@/common/components/Toast/toastStore'
 import { useDanmakuOptions } from '@/common/options/danmakuOptions/useDanmakuOptions'
+import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
 import { useHotkeyOptions } from '@/common/options/extensionOptions/useHotkeyOptions'
 import { playerRpcClient } from '@/common/rpcClient/background/client'
 import { PopupTab, usePopup } from '@/content/controller/store/popupStore'
 import { useStore } from '@/content/controller/store/store'
+import { HotkeyCheatSheet } from '@/content/controller/ui/floatingButton/components/HotkeyCheatSheet'
 
 const OPACITY_STEP = 0.1
 const FONT_SIZE_STEP = 2
 const TIME_OFFSET_STEP = 0.5
+const SPEED_STEP = 0.25
+const OFFSET_STEP = 1
 const DENSITY_PRESETS = [100, 200, 500, 1000] as const
 const SPEED_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const
 
@@ -20,9 +25,45 @@ export const GlobalHotkeyActions = () => {
   const { t } = useTranslation()
   const { getKeyCombo } = useHotkeyOptions()
   const { data: danmakuOptions, partialUpdate } = useDanmakuOptions()
+  const { data: extensionOptions, partialUpdate: partialUpdateExtension } =
+    useExtensionOptions()
   const { toast } = useToast()
   const { toggleOpen, setTab, isOpen, tab } = usePopup()
   const { activeFrame } = useStore.use.frame()
+
+  const [cheatSheetVisible, setCheatSheetVisible] = useState(false)
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === '?' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const target = e.target as HTMLElement
+        const tagName = target.tagName?.toLowerCase()
+        if (
+          tagName === 'input' ||
+          tagName === 'textarea' ||
+          tagName === 'select' ||
+          target.isContentEditable
+        ) {
+          return
+        }
+        setCheatSheetVisible(true)
+      }
+    }
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === '?' || e.key === '/') {
+        setCheatSheetVisible(false)
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    document.addEventListener('keyup', handleKeyUp)
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [])
 
   const adjustOpacity = useEventCallback((delta: number) => {
     const updated = produce(danmakuOptions, (draft) => {
@@ -120,6 +161,52 @@ export const GlobalHotkeyActions = () => {
     )
   })
 
+  const adjustSpeed = useEventCallback((delta: number) => {
+    const updated = produce(danmakuOptions, (draft) => {
+      const current = draft.speed
+      draft.speed =
+        Math.round(Math.min(3, Math.max(0.25, current + delta)) * 100) / 100
+    })
+    partialUpdate(updated)
+    toast.info(
+      t('optionsPage.hotkeys.speedChanged', {
+        defaultValue: 'Danmaku speed: {{value}}x',
+        value: updated.speed,
+      })
+    )
+  })
+
+  const adjustOffset = useEventCallback((delta: number) => {
+    const updated = produce(danmakuOptions, (draft) => {
+      draft.offset = Math.round((draft.offset + delta) * 10) / 10
+    })
+    partialUpdate(updated)
+    toast.info(
+      t('optionsPage.hotkeys.timeOffsetChanged', {
+        defaultValue: 'Time offset: {{value}}s',
+        value: updated.offset >= 0 ? `+${updated.offset}` : updated.offset,
+      })
+    )
+  })
+
+  const toggleDensityPlot = useEventCallback(() => {
+    const current = extensionOptions.playerOptions.showDanmakuTimeline
+    partialUpdateExtension({
+      playerOptions: {
+        ...extensionOptions.playerOptions,
+        showDanmakuTimeline: !current,
+      },
+    })
+    toast.info(
+      t('optionsPage.hotkeys.densityPlotChanged', {
+        defaultValue: 'Density plot: {{value}}',
+        value: !current
+          ? t('common.enable', 'Enable')
+          : t('danmaku.disable', 'Disable'),
+      })
+    )
+  })
+
   useHotkeys(
     getKeyCombo('increaseOpacity') || '',
     () => adjustOpacity(OPACITY_STEP),
@@ -182,5 +269,38 @@ export const GlobalHotkeyActions = () => {
     preventDefault: true,
   })
 
-  return null
+  useHotkeys(
+    getKeyCombo('increaseSpeed') || '',
+    () => adjustSpeed(SPEED_STEP),
+    { enabled: !!getKeyCombo('increaseSpeed'), preventDefault: true }
+  )
+
+  useHotkeys(
+    getKeyCombo('decreaseSpeed') || '',
+    () => adjustSpeed(-SPEED_STEP),
+    { enabled: !!getKeyCombo('decreaseSpeed'), preventDefault: true }
+  )
+
+  useHotkeys(
+    getKeyCombo('increaseOffset') || '',
+    () => adjustOffset(OFFSET_STEP),
+    { enabled: !!getKeyCombo('increaseOffset'), preventDefault: true }
+  )
+
+  useHotkeys(
+    getKeyCombo('decreaseOffset') || '',
+    () => adjustOffset(-OFFSET_STEP),
+    { enabled: !!getKeyCombo('decreaseOffset'), preventDefault: true }
+  )
+
+  useHotkeys(
+    getKeyCombo('toggleDensityPlot') || '',
+    () => toggleDensityPlot(),
+    {
+      enabled: !!getKeyCombo('toggleDensityPlot'),
+      preventDefault: true,
+    }
+  )
+
+  return <HotkeyCheatSheet visible={cheatSheetVisible} />
 }

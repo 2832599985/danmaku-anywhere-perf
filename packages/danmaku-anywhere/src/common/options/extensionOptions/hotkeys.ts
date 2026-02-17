@@ -24,6 +24,11 @@ export const ALL_HOTKEYS = [
   'danmakuTimeOffsetDecrease',
   'danmakuDensityToggle',
   'danmakuSpeedToggle',
+  'increaseSpeed',
+  'decreaseSpeed',
+  'increaseOffset',
+  'decreaseOffset',
+  'toggleDensityPlot',
 ] as const
 
 export type AllHotkeys = (typeof ALL_HOTKEYS)[number]
@@ -65,6 +70,19 @@ export const HOTKEY_LABELS = createLocalizationMap<AllHotkeys>({
     ),
   danmakuSpeedToggle: () =>
     i18n.t('optionsPage.hotkeys.danmakuSpeedToggle', 'Toggle danmaku speed'),
+  increaseSpeed: () =>
+    i18n.t('optionsPage.hotkeys.increaseSpeed', 'Increase speed (+0.25)'),
+  decreaseSpeed: () =>
+    i18n.t('optionsPage.hotkeys.decreaseSpeed', 'Decrease speed (-0.25)'),
+  increaseOffset: () =>
+    i18n.t('optionsPage.hotkeys.increaseOffset', 'Danmaku time offset +1s'),
+  decreaseOffset: () =>
+    i18n.t('optionsPage.hotkeys.decreaseOffset', 'Danmaku time offset -1s'),
+  toggleDensityPlot: () =>
+    i18n.t(
+      'optionsPage.hotkeys.toggleDensityPlot',
+      'Toggle danmaku density plot'
+    ),
 })
 
 export type Keymap = Record<AllHotkeys, Hotkey>
@@ -84,6 +102,11 @@ export const defaultKeymap: Keymap = {
   danmakuTimeOffsetDecrease: createHotkey('['),
   danmakuDensityToggle: createHotkey('shift+d'),
   danmakuSpeedToggle: createHotkey(''),
+  increaseSpeed: createHotkey(''),
+  decreaseSpeed: createHotkey(''),
+  increaseOffset: createHotkey(''),
+  decreaseOffset: createHotkey(''),
+  toggleDensityPlot: createHotkey(''),
 } as const
 
 /**

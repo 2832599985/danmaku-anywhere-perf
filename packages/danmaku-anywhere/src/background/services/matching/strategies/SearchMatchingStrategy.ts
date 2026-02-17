@@ -38,13 +38,30 @@ export class SearchMatchingStrategy implements IMatchingStrategy {
   }
 
   async match(input: MatchEpisodeInput): Promise<MatchEpisodeResult | null> {
-    const { title, mapKey, episodeNumber } = input
+    const { title, mapKey, episodeNumber, preferredProviders } = input
 
-    const autoProviders =
+    const allAutoProviders =
       await this.providerConfigService.getAutomaticProviders()
 
-    if (autoProviders.length === 0) {
+    if (allAutoProviders.length === 0) {
       return null
+    }
+
+    // If preferredProviders is set and non-empty, filter and reorder providers
+    let autoProviders = allAutoProviders
+    if (preferredProviders && preferredProviders.length > 0) {
+      const ordered: typeof allAutoProviders = []
+      for (const impl of preferredProviders) {
+        const matching = allAutoProviders.filter((p) => p.impl === impl)
+        ordered.push(...matching)
+      }
+      // Only use providers that match the preferred list
+      if (ordered.length > 0) {
+        autoProviders = ordered
+        this.logger.debug(
+          `Using preferred providers: ${autoProviders.map((p) => p.name).join(', ')}`
+        )
+      }
     }
 
     // Extract season hint from title for season-aware matching

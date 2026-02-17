@@ -40,6 +40,8 @@ export interface MatchEpisodeInput {
   // if available, use seasonId to disambiguate
   seasonId?: number
   originalTitle?: string
+  // preferred provider order for this mount config
+  preferredProviders?: DanmakuSourceType[]
 }
 
 export interface MatchEpisodeMetadata {

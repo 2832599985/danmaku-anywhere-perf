@@ -1,14 +1,18 @@
+import type { DanmakuSourceType } from '@danmaku-anywhere/danmaku-converter'
 import {
   Alert,
   Box,
+  Button,
   Card,
   CardActionArea,
   CardContent,
+  Chip,
   Radio,
   RadioGroup,
   Stack,
   Typography,
 } from '@mui/material'
+import { useCallback } from 'react'
 import type {
   Control,
   ControllerRenderProps,
@@ -16,6 +20,10 @@ import type {
 } from 'react-hook-form'
 import { Controller } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
+import {
+  danmakuSourceTypeList,
+  localizedDanmakuSourceType,
+} from '@/common/danmaku/enums'
 import { integrationData } from '@/common/options/mountConfig/integrationData'
 import type { AutomationMode } from '@/common/options/mountConfig/schema'
 import { EMPTY_INTEGRATION_VALUE } from '../emptyIntegrationValue.constant'
@@ -71,6 +79,74 @@ const AutomationCard = ({
   )
 }
 
+const PreferredProvidersEditor = ({
+  value,
+  onChange,
+}: {
+  value: DanmakuSourceType[]
+  onChange: (value: DanmakuSourceType[]) => void
+}) => {
+  const { t } = useTranslation()
+
+  const handleToggle = useCallback(
+    (provider: DanmakuSourceType) => {
+      const current = value ?? []
+      if (current.includes(provider)) {
+        onChange(current.filter((p) => p !== provider))
+      } else {
+        onChange([...current, provider])
+      }
+    },
+    [value, onChange]
+  )
+
+  const handleReset = useCallback(() => {
+    onChange([])
+  }, [onChange])
+
+  const selected = value ?? []
+
+  return (
+    <Stack spacing={1}>
+      <Typography variant="body2" color="text.secondary">
+        {t(
+          'configPage.editor.preferredProviders.description',
+          'Click to add providers in preferred order. When set, only these providers will be used for automatic matching.'
+        )}
+      </Typography>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+        {danmakuSourceTypeList.map((provider) => {
+          const isSelected = selected.includes(provider)
+          const order = selected.indexOf(provider)
+          return (
+            <Chip
+              key={provider}
+              label={
+                isSelected
+                  ? `${order + 1}. ${localizedDanmakuSourceType(provider)}`
+                  : localizedDanmakuSourceType(provider)
+              }
+              onClick={() => handleToggle(provider)}
+              color={isSelected ? 'primary' : 'default'}
+              variant={isSelected ? 'filled' : 'outlined'}
+            />
+          )
+        })}
+      </Box>
+      {selected.length > 0 && (
+        <Button
+          size="small"
+          variant="text"
+          onClick={handleReset}
+          sx={{ alignSelf: 'flex-start' }}
+        >
+          {t('configPage.editor.preferredProviders.reset', 'Reset to Default')}
+        </Button>
+      )}
+    </Stack>
+  )
+}
+
 export const MountConfigAutomationStep = ({
   control,
   watch,
@@ -108,6 +184,26 @@ export const MountConfigAutomationStep = ({
             )}
           </Alert>
         )}
+      {selectedMode !== 'manual' && (
+        <>
+          <Typography variant="body1" sx={{ mt: 1 }}>
+            {t(
+              'configPage.editor.preferredProviders.title',
+              'Preferred Providers'
+            )}
+          </Typography>
+          <Controller
+            name="preferredProviders"
+            control={control}
+            render={({ field }) => (
+              <PreferredProvidersEditor
+                value={field.value ?? []}
+                onChange={field.onChange}
+              />
+            )}
+          />
+        </>
+      )}
     </Stack>
   )
 }

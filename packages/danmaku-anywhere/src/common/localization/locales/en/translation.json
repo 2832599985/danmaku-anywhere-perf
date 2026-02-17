@@ -124,6 +124,11 @@
       "integrationMode": {
         "setupIncomplete": "Setup Incomplete"
       },
+      "preferredProviders": {
+        "title": "Preferred Providers",
+        "description": "Click to add providers in preferred order. When set, only these providers will be used for automatic matching.",
+        "reset": "Reset to Default"
+      },
       "mediaQuery": "Video Node",
       "name": "Name",
       "pattern": "Pattern",
@@ -508,7 +513,13 @@
       "danmakuSpeedToggle": "Toggle danmaku speed",
       "timeOffsetChanged": "Time offset: {{value}}ms",
       "densityChanged": "Max on screen: {{value}}",
-      "speedChanged": "Speed: {{value}}x"
+      "speedChanged": "Speed: {{value}}x",
+      "increaseSpeed": "Increase speed (+0.25)",
+      "decreaseSpeed": "Decrease speed (-0.25)",
+      "increaseOffset": "Danmaku time offset +1s",
+      "decreaseOffset": "Danmaku time offset -1s",
+      "toggleDensityPlot": "Toggle danmaku density plot",
+      "densityPlotChanged": "Density plot: {{value}}"
     },
     "language": "Language",
     "matchLocalDanmaku": "Enable matching local Danmaku",
@@ -761,5 +772,14 @@
     "noSeasons": "No options for the selected provider",
     "title": "Title Mappings",
     "unmapped": "Unmapped"
+  },
+  "cheatSheet": {
+    "title": "Keyboard Shortcuts",
+    "hint": "Hold ? to show, release to dismiss",
+    "group": {
+      "danmaku": "Danmaku Controls",
+      "video": "Video Controls",
+      "panel": "Panel Controls"
+    }
   }
 }

@@ -124,6 +124,11 @@
       "integrationMode": {
         "setupIncomplete": "配置未完成"
       },
+      "preferredProviders": {
+        "title": "弹幕源优先级",
+        "description": "点击添加弹幕源并排序。设置后，自动匹配时将仅使用这些弹幕源。",
+        "reset": "重置为默认"
+      },
       "mediaQuery": "视频节点",
       "name": "名称",
       "pattern": "模式",
@@ -508,7 +513,13 @@
       "danmakuSpeedToggle": "切换弹幕速度",
       "timeOffsetChanged": "时间偏移：{{value}}ms",
       "densityChanged": "最大同屏弹幕数：{{value}}",
-      "speedChanged": "速度：{{value}}x"
+      "speedChanged": "速度：{{value}}x",
+      "increaseSpeed": "加快弹幕速度 (+0.25)",
+      "decreaseSpeed": "减慢弹幕速度 (-0.25)",
+      "increaseOffset": "弹幕时间偏移 +1s",
+      "decreaseOffset": "弹幕时间偏移 -1s",
+      "toggleDensityPlot": "开关弹幕密度图",
+      "densityPlotChanged": "弹幕密度图：{{value}}"
     },
     "language": "语言",
     "matchLocalDanmaku": "匹配本地弹幕",
@@ -761,5 +772,14 @@
     "noSeasons": "没有可以映射的番剧",
     "title": "标题映射",
     "unmapped": "未映射"
+  },
+  "cheatSheet": {
+    "title": "快捷键一览",
+    "hint": "按住 ? 显示，松开关闭",
+    "group": {
+      "danmaku": "弹幕控制",
+      "video": "视频控制",
+      "panel": "面板控制"
+    }
   }
 }

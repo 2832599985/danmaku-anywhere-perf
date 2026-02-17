@@ -83,6 +83,7 @@ export const TemplatePickerDialog = ({
       mediaQuery: template.mediaQuery,
       mode: template.mode,
       enabled: true,
+      preferredProviders: template.preferredProviders,
     })
     try {
       await create.mutateAsync(config)
