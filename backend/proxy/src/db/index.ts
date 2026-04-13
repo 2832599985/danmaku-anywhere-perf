@@ -1,11 +1,17 @@
 import { drizzle } from 'drizzle-orm/d1'
 import * as authSchema from './schema/auth'
 import * as backupSchema from './schema/backup'
+import * as communitySchema from './schema/community'
 import * as siteIntegrationSchema from './schema/siteIntegration'
 
 function createDb(d1: D1Database) {
   return drizzle(d1, {
-    schema: { ...siteIntegrationSchema, ...authSchema, ...backupSchema },
+    schema: {
+      ...siteIntegrationSchema,
+      ...authSchema,
+      ...backupSchema,
+      ...communitySchema,
+    },
   })
 }
 

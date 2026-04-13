@@ -23,6 +23,7 @@ import type {
   MultiSourceFetchInput,
   MultiSourceFetchResult,
 } from '@/background/services/DanmakuMergeService'
+import type { TranslationRequest } from '@/background/services/translation/types'
 import type {
   GenericVodSearchData,
   MatchEpisodeInput,
@@ -183,6 +184,7 @@ export type BackgroundMethods = {
   bookmarkDeleteBySeason: RPCDef<BookmarkDeleteBySeasonInput, void>
   bookmarkGetAll: RPCDef<void, Bookmark[]>
   bookmarkRefresh: RPCDef<BookmarkRefreshInput, Bookmark>
+  translateBatch: RPCDef<TranslationRequest, string[]>
 }
 
 type InputWithFrameId<TInput> = TInput extends void

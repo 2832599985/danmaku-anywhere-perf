@@ -25,6 +25,7 @@ declare namespace Cloudflare {
 		BETTER_AUTH_URL: string;
 		GOOGLE_CLIENT_ID: string;
 		DDP_SERVICE: Fetcher /* ddp-microservice-staging */;
+		WATCH_ROOM: DurableObjectNamespace;
 	}
 	interface ProductionEnv {
 		FILES_BUCKET: R2Bucket;
@@ -46,6 +47,7 @@ declare namespace Cloudflare {
 		BETTER_AUTH_URL: string;
 		GOOGLE_CLIENT_ID: string;
 		DDP_SERVICE: Fetcher /* ddp-microservice-prod */;
+		WATCH_ROOM: DurableObjectNamespace;
 	}
 	interface Env {
 		FILES_BUCKET: R2Bucket;
@@ -67,6 +69,7 @@ declare namespace Cloudflare {
 		BETTER_AUTH_URL: string;
 		GOOGLE_CLIENT_ID: string;
 		DDP_SERVICE: Fetcher /* ddp-microservice-staging */ | Fetcher /* ddp-microservice-prod */;
+		WATCH_ROOM: DurableObjectNamespace;
 	}
 }
 interface Env extends Cloudflare.Env {}

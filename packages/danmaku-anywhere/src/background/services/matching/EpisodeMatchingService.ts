@@ -8,6 +8,7 @@ import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import type { IMatchingStrategy } from './strategies/IMatchingStrategy'
 import { LocalMatchingStrategy } from './strategies/LocalMatchingStrategy'
 import { MappingMatchingStrategy } from './strategies/MappingMatchingStrategy'
+import { MediaServerMatchingStrategy } from './strategies/MediaServerMatchingStrategy'
 import { SearchMatchingStrategy } from './strategies/SearchMatchingStrategy'
 
 @injectable('Singleton')
@@ -18,10 +19,17 @@ export class EpisodeMatchingService {
   constructor(
     @inject(LocalMatchingStrategy) localStrategy: LocalMatchingStrategy,
     @inject(MappingMatchingStrategy) mappingStrategy: MappingMatchingStrategy,
+    @inject(MediaServerMatchingStrategy)
+    mediaServerStrategy: MediaServerMatchingStrategy,
     @inject(SearchMatchingStrategy) searchStrategy: SearchMatchingStrategy,
     @inject(LoggerSymbol) logger: ILogger
   ) {
-    this.strategies = [localStrategy, mappingStrategy, searchStrategy]
+    this.strategies = [
+      localStrategy,
+      mappingStrategy,
+      mediaServerStrategy,
+      searchStrategy,
+    ]
     this.logger = logger.sub('[EpisodeMatchingService]')
   }
 

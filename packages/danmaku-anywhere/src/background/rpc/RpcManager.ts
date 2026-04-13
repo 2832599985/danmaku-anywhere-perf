@@ -20,6 +20,7 @@ import { TitleMappingService } from '@/background/services/persistence/TitleMapp
 import { BilibiliService } from '@/background/services/providers/bilibili/BilibiliService'
 import { MacCmsProviderService } from '@/background/services/providers/MacCmsProviderService'
 import { TencentService } from '@/background/services/providers/tencent/TencentService'
+import { TranslationService } from '@/background/services/translation/TranslationService'
 import { invalidateContentScriptData } from '@/background/utils/invalidateContentScriptData'
 import { AuthClientService } from '@/common/auth/AuthClientService'
 import type { EpisodeFetchBySeasonParams } from '@/common/danmaku/dto'
@@ -77,7 +78,9 @@ export class RpcManager {
     @inject(AuthClientService)
     private authClientService: AuthClientService,
     @inject(BookmarkService)
-    private bookmarkService: BookmarkService
+    private bookmarkService: BookmarkService,
+    @inject(TranslationService)
+    private translationService: TranslationService
   ) {
     this.logger = logger.sub('[RpcManager]')
   }
@@ -109,8 +112,11 @@ export class RpcManager {
         episodeFetchBySeason: async (input: EpisodeFetchBySeasonParams) => {
           return this.providerService.fetchEpisodesBySeason(input.seasonId)
         },
-        episodeMatch: async (data) => {
-          return this.episodeMatchingService.findMatchingEpisodes(data)
+        episodeMatch: async (data, sender) => {
+          return this.episodeMatchingService.findMatchingEpisodes({
+            ...data,
+            tabUrl: data.tabUrl ?? sender.tab?.url,
+          })
         },
         bilibiliSetCookies: async () => {
           return BilibiliService.setCookies(this.logger)
@@ -418,6 +424,12 @@ export class RpcManager {
         },
         bookmarkRefresh: async (data) => {
           return this.bookmarkService.refresh(data.id, this.providerService)
+        },
+        translateBatch: async (data) => {
+          return this.translationService.translateBatch(
+            data.texts,
+            data.targetLang
+          )
         },
       },
       {

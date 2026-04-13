@@ -42,6 +42,8 @@ export interface MatchEpisodeInput {
   originalTitle?: string
   // preferred provider order for this mount config
   preferredProviders?: DanmakuSourceType[]
+  // tab URL for media server detection (injected by RPC layer)
+  tabUrl?: string
 }
 
 export interface MatchEpisodeMetadata {

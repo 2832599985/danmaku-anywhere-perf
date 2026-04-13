@@ -10,6 +10,15 @@
   "observability": {
     "enabled": true
   },
+  "durable_objects": {
+    "bindings": [{ "name": "WATCH_ROOM", "class_name": "WatchRoom" }]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["WatchRoom"]
+    }
+  ],
   "vars": {
     "ENVIRONMENT": "dev",
     "ALLOWED_ORIGIN": "https://danmaku.weeblify.app,https://danmaku-staging.weeblify.app,http://localhost:4200",

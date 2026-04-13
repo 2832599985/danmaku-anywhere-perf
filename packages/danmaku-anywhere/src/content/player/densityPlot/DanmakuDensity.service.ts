@@ -13,6 +13,10 @@ import {
 import { computeDensityBins } from '@/content/player/densityPlot/computeDensityBins'
 import type { DensityTooltipInfo } from '@/content/player/densityPlot/DanmakuDensityChart'
 import { DanmakuDensityChart } from '@/content/player/densityPlot/DanmakuDensityChart'
+import {
+  detectHighlights,
+  type HighlightMoment,
+} from '@/content/player/densityPlot/highlightDetector'
 import type {
   DensityPoint,
   SkipRegion,
@@ -47,6 +51,8 @@ export class DanmakuDensityService {
   private resizeObserver: ResizeObserver | null = null
 
   private densityFilterCallback: DensityFilterCallback | null = null
+
+  private highlights: HighlightMoment[] = []
 
   private tooltipEl: HTMLElement | null = null
 
@@ -146,6 +152,7 @@ export class DanmakuDensityService {
   clear() {
     this.comments = []
     this.data = []
+    this.highlights = []
     this.chart.updateData([], 0)
     this.chart.updateSkipRegions([])
   }
@@ -155,6 +162,13 @@ export class DanmakuDensityService {
    */
   updateSkipRegions(regions: SkipRegion[]) {
     this.chart.updateSkipRegions(regions)
+  }
+
+  /**
+   * Get detected highlight moments from the current density data.
+   */
+  getHighlights(): HighlightMoment[] {
+    return this.highlights
   }
 
   private setupTooltip() {
@@ -312,6 +326,7 @@ export class DanmakuDensityService {
     }
 
     this.computeBins(duration)
+    this.highlights = detectHighlights(this.data, this.comments)
     this.chart.updateData(this.data, duration)
     this.chart.updateProgress(active.currentTime)
   }

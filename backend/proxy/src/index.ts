@@ -107,6 +107,8 @@ app.onError((error, c) => {
   return c.json({ message, success: false }, { status: 500 })
 })
 
+export { WatchRoom } from '@/durable-objects/WatchRoom'
+
 export default Sentry.withSentry((env: Env) => {
   const { id: versionId } = env.CF_VERSION_METADATA
 
