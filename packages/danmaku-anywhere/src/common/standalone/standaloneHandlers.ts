@@ -144,6 +144,7 @@ export const standaloneBackgroundHandlers: StandaloneRpcHandlers<BackgroundMetho
     cloudBackupDownload: () => standaloneBackupData,
     dataWipeDanmaku: () => undefined,
     bilibiliSetCookies: () => undefined,
+    translateBatch: () => [],
   }
 
 export const standaloneControllerHandlers: StandaloneRpcHandlers<ControllerMethods> =

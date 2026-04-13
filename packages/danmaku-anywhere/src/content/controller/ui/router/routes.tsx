@@ -8,8 +8,11 @@ import { SelectorPage } from '@/content/controller/ui/floatingPanel/pages/Select
 import { StylesPage } from '@/content/controller/ui/floatingPanel/pages/StylesPage'
 import { SearchPage } from '@/content/controller/ui/floatingPanel/pages/search/SearchPage'
 import { StatsPage } from '@/content/controller/ui/floatingPanel/pages/stats/StatsPage'
+import { CommunityPage } from '../floatingPanel/pages/community/CommunityPage'
 import { FilterPage } from '../floatingPanel/pages/FilterPage'
+import { HighlightsPage } from '../floatingPanel/pages/highlights/HighlightsPage'
 import { TitleMappingPage } from '../floatingPanel/pages/titleMapping/TitleMappingPage'
+import { WatchPartyPage } from '../floatingPanel/pages/watchParty/WatchPartyPage'
 
 export const routes = [
   {
@@ -61,5 +64,20 @@ export const routes = [
     tab: PopupTab.TitleMapping,
     name: () => i18n.t('titleMapping.title', 'Title Mappings'),
     element: <TitleMappingPage />,
+  },
+  {
+    tab: PopupTab.Highlights,
+    name: () => i18n.t('highlights.title', 'Highlights'),
+    element: <HighlightsPage />,
+  },
+  {
+    tab: PopupTab.Community,
+    name: () => i18n.t('community.title', 'Community'),
+    element: <CommunityPage />,
+  },
+  {
+    tab: PopupTab.WatchParty,
+    name: () => i18n.t('watchParty.title', 'Watch Party'),
+    element: <WatchPartyPage />,
   },
 ]

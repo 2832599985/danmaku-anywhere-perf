@@ -39,6 +39,8 @@ export const defaultExtensionOptions: ExtensionOptions = {
     autoDensity: false,
     autoNextEpisode: true,
     enableFullscreenInteraction: true,
+    enableTranslation: false,
+    translationTargetLang: 'en',
   },
   theme: {
     colorMode: ColorMode.System,

@@ -64,6 +64,8 @@ export const playerOptionsSchema = z.object({
    */
   autoNextEpisode: z.boolean(),
   enableFullscreenInteraction: z.boolean(),
+  enableTranslation: z.boolean(),
+  translationTargetLang: z.enum(['en', 'ja', 'zh', 'ko']).default('en'),
 })
 
 export const retentionPolicySchema = z.object({

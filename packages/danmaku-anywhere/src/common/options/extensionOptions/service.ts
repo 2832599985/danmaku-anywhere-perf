@@ -350,6 +350,13 @@ export class ExtensionOptionsService implements IStoreService {
             draft.showFloatingButton = true
           }),
       })
+      .version(33, {
+        upgrade: (data) =>
+          produce<ExtensionOptions>(data, (draft) => {
+            draft.playerOptions.enableTranslation = false
+            draft.playerOptions.translationTargetLang = 'en'
+          }),
+      })
   }
 
   async get() {

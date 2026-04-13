@@ -49,6 +49,7 @@
     "matchingStrategy": {
       "local": "本地匹配",
       "mapping": "映射匹配",
+      "mediaServer": "媒体服务器",
       "search": "搜索匹配"
     },
     "numericEpisode": "第{{episode}}集",
@@ -868,5 +869,48 @@
     "noCalibrationNeeded": "无需校准时间偏移",
     "applied": "已自动校准偏移：{{offset}}ms",
     "error": "自动校准失败"
+  },
+  "highlights": {
+    "title": "高能时刻",
+    "noData": "装填弹幕后可查看高能时刻",
+    "peakDensity": "弹幕密度",
+    "jumpTo": "跳转",
+    "count": "{{count}}条弹幕",
+    "share": "复制分享",
+    "copied": "已复制到剪贴板"
+  },
+  "community": {
+    "title": "社区弹幕",
+    "send": "发送",
+    "inputPlaceholder": "发个弹幕吧~",
+    "loginRequired": "请先登录后发送弹幕",
+    "sendSuccess": "发送成功",
+    "sendFailed": "发送失败",
+    "fetchFailed": "获取社区弹幕失败"
+  },
+  "watchParty": {
+    "title": "一起看",
+    "create": "创建房间",
+    "join": "加入房间",
+    "leave": "离开房间",
+    "roomId": "房间号",
+    "invite": "复制邀请链接",
+    "copied": "已复制",
+    "members": "{{count}}人在线",
+    "connected": "已连接",
+    "disconnected": "已断开",
+    "hostControls": "房主控制",
+    "syncPlayback": "同步播放进度"
+  },
+  "translation": {
+    "enable": "启用弹幕翻译",
+    "targetLang": "翻译目标语言",
+    "translating": "翻译中...",
+    "languages": {
+      "en": "英语",
+      "ja": "日语",
+      "zh": "中文",
+      "ko": "韩语"
+    }
   }
 }

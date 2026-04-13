@@ -49,6 +49,7 @@
     "matchingStrategy": {
       "local": "Local",
       "mapping": "Mapping",
+      "mediaServer": "Media Server",
       "search": "Search"
     },
     "numericEpisode": "Episode {{episode}}",
@@ -867,5 +868,48 @@
     "noCalibrationNeeded": "No offset calibration needed",
     "applied": "Auto offset applied: {{offset}}ms",
     "error": "Auto calibration failed"
+  },
+  "highlights": {
+    "title": "Highlights",
+    "noData": "Mount danmaku to see highlights",
+    "peakDensity": "Peak density",
+    "jumpTo": "Jump",
+    "count": "{{count}} comments",
+    "share": "Copy to share",
+    "copied": "Copied to clipboard"
+  },
+  "community": {
+    "title": "Community",
+    "send": "Send",
+    "inputPlaceholder": "Type a danmaku...",
+    "loginRequired": "Please sign in to send danmaku",
+    "sendSuccess": "Sent successfully",
+    "sendFailed": "Failed to send",
+    "fetchFailed": "Failed to fetch community danmaku"
+  },
+  "watchParty": {
+    "title": "Watch Party",
+    "create": "Create Room",
+    "join": "Join Room",
+    "leave": "Leave Room",
+    "roomId": "Room ID",
+    "invite": "Copy Invite Link",
+    "copied": "Copied",
+    "members": "{{count}} online",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "hostControls": "Host Controls",
+    "syncPlayback": "Sync Playback"
+  },
+  "translation": {
+    "enable": "Enable danmaku translation",
+    "targetLang": "Translation language",
+    "translating": "Translating...",
+    "languages": {
+      "en": "English",
+      "ja": "Japanese",
+      "zh": "Chinese",
+      "ko": "Korean"
+    }
   }
 }

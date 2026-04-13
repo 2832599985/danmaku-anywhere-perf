@@ -216,6 +216,19 @@ const playerSettings: SettingConfig<ExtensionOptions>[] = [
       },
     }),
   },
+  {
+    id: 'toggle.player.enableTranslation',
+    label: () => i18n.t('translation.enable', 'Enable danmaku translation'),
+    category: 'player',
+    type: 'toggle',
+    getValue: (options) => options.playerOptions.enableTranslation,
+    createUpdate: (options, newValue) => ({
+      playerOptions: {
+        ...options.playerOptions,
+        enableTranslation: newValue,
+      },
+    }),
+  },
 ]
 
 export const UPLOAD_DEBUG_DATA_BUTTON: ButtonSettingConfig = {
