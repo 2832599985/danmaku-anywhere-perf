@@ -38,7 +38,7 @@ export class DanmakuDensityService {
   private autoDensityEnabled = false
 
   private data: DensityPoint[] = []
-  private chartHeight = 28
+  private chartHeight = 14
   private computeTimer: number | null = null
   private perfEnabled = false
   private perfTimer: PerfTimer
