@@ -1,3 +1,4 @@
+import { parseCommentEntityTime } from '@danmaku-anywhere/danmaku-converter'
 import { ContentCopy, PlayArrow } from '@mui/icons-material'
 import {
   Box,
@@ -120,8 +121,7 @@ export const HighlightsPage = () => {
     // Estimate duration from max comment time
     let maxTime = 0
     for (const c of comments) {
-      const parts = c.p.split(',')
-      const t = Number.parseFloat(parts[0])
+      const t = parseCommentEntityTime(c.p)
       if (t > maxTime) maxTime = t
     }
     const duration = maxTime + 30
@@ -131,11 +131,7 @@ export const HighlightsPage = () => {
   }, [comments])
 
   const handleJump = (time: number) => {
-    // Find video element and seek
-    const video = document.querySelector('video')
-    if (video) {
-      video.currentTime = time
-    }
+    useStore.getState().danmaku.seekToTime(time)
   }
 
   const handleShare = () => {

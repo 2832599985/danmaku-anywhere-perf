@@ -47,9 +47,14 @@ export class WatchRoom extends DurableObject {
     return new Response('Not found', { status: 404 })
   }
 
-  async webSocketMessage(ws: WebSocket, message: string) {
-    const msg: WsMessage = JSON.parse(message)
-    this.broadcast(msg, ws)
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+    if (typeof message !== 'string') return
+    try {
+      const msg: WsMessage = JSON.parse(message)
+      this.broadcast(msg, ws)
+    } catch {
+      // Ignore malformed messages
+    }
   }
 
   async webSocketClose(ws: WebSocket) {
