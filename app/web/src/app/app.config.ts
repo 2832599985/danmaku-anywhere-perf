@@ -1,11 +1,14 @@
+import { isPlatformBrowser } from '@angular/common'
 import {
   type ApplicationConfig,
   inject,
   isDevMode,
+  PLATFORM_ID,
   provideAppInitializer,
   provideBrowserGlobalErrorListeners,
   provideZonelessChangeDetection,
 } from '@angular/core'
+import { provideClientHydration } from '@angular/platform-browser'
 import { provideAnimationsAsync } from '@angular/platform-browser/animations/async'
 import {
   provideRouter,
@@ -46,6 +49,7 @@ const preset = definePreset(Aura, {
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
+    provideClientHydration(),
     provideQueryClient(queryClient),
     provideZonelessChangeDetection(),
     provideRouter(
@@ -74,10 +78,13 @@ export const appConfig: ApplicationConfig = {
     MessageService,
     ConfirmationService,
     provideAppInitializer(async () => {
-      const trackingService = inject(TrackingService)
-      trackingService.init()
-      const extensionService = inject(ExtensionService)
-      await extensionService.init()
+      const platformId = inject(PLATFORM_ID)
+      if (isPlatformBrowser(platformId)) {
+        const trackingService = inject(TrackingService)
+        trackingService.init()
+        const extensionService = inject(ExtensionService)
+        await extensionService.init()
+      }
       console.log('App initialized')
     }),
     provideServiceWorker('ngsw-worker.js', {

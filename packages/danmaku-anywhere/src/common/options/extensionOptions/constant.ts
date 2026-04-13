@@ -38,6 +38,7 @@ export const defaultExtensionOptions: ExtensionOptions = {
     fixedSkipSeconds: 90,
     autoDensity: false,
     autoNextEpisode: true,
+    enableFullscreenInteraction: true,
   },
   theme: {
     colorMode: ColorMode.System,
@@ -50,4 +51,5 @@ export const defaultExtensionOptions: ExtensionOptions = {
   id: undefined,
   restrictInitiatorDomain: true,
   enableMultiSourceMerge: false,
+  showFloatingButton: true,
 }

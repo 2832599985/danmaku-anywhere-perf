@@ -40,11 +40,16 @@ const useMountDanmaku = () => {
     perfRef.current?.setEnabled(options?.debug ?? false)
   }, [options?.debug])
 
-  const { mustGetActiveFrame, updateFrame } = useStore.use.frame()
+  const { getActiveFrame, updateFrame } = useStore.use.frame()
   const { mount } = useStore.use.danmaku()
 
   return useMutation({
     mutationFn: async (episodes: GenericEpisode[]) => {
+      const activeFrame = getActiveFrame()
+      if (!activeFrame) {
+        throw new Error('No active frame to mount danmaku')
+      }
+
       perfRef.current?.mark('mount_start')
       const rawComments: CommentEntity[] =
         episodes.length === 1
@@ -59,7 +64,7 @@ const useMountDanmaku = () => {
 
       perfRef.current?.mark('mount_comments_ready')
       const res = await playerRpcClient.player['relay:command:mount']({
-        frameId: mustGetActiveFrame().frameId,
+        frameId: activeFrame.frameId,
         data: comments,
       })
       perfRef.current?.mark('mount_rpc_done')
@@ -68,10 +73,12 @@ const useMountDanmaku = () => {
       if (!res.data) {
         throw new Error('Failed to mount danmaku')
       }
+
+      return activeFrame.frameId
     },
-    onSuccess: (_, danmaku) => {
+    onSuccess: (mountedFrameId, danmaku) => {
       mount(danmaku)
-      updateFrame(mustGetActiveFrame().frameId, { mounted: true })
+      updateFrame(mountedFrameId, { mounted: true })
     },
     onError: (err) => {
       toast.error(err.message)

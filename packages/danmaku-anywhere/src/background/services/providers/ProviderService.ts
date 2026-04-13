@@ -9,11 +9,13 @@ import { inject, injectable } from 'inversify'
 import { DanmakuService } from '@/background/services/persistence/DanmakuService'
 import { SeasonService } from '@/background/services/persistence/SeasonService'
 import type { SeasonQueryFilter, SeasonSearchRequest } from '@/common/anime/dto'
-import type { DanmakuFetchRequest } from '@/common/danmaku/dto'
+import type {
+  DanmakuFetchByMeta,
+  DanmakuFetchRequest,
+} from '@/common/danmaku/dto'
 import { DanmakuSourceType } from '@/common/danmaku/enums'
 import { assertProviderType } from '@/common/danmaku/utils'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
-import type { ProviderConfig } from '@/common/options/providerConfig/schema'
 import { ProviderConfigService } from '@/common/options/providerConfig/service'
 import { RpcException } from '@/common/rpc/types'
 import { invariant, isServiceWorker } from '@/common/utils/utils'
@@ -151,12 +153,15 @@ export class ProviderService {
   }
 
   async preloadNextEpisode(request: DanmakuFetchRequest): Promise<void> {
-    const config = await this.resolveConfig(request)
+    const resolved = await this.resolveMeta(request)
+    const config = await this.providerConfigService.mustGet(
+      resolved.meta.season.providerConfigId
+    )
 
     const service = this.danmakuProviderFactory(config)
 
     if (service?.preloadNextEpisode) {
-      return service.preloadNextEpisode(request)
+      return service.preloadNextEpisode(resolved)
     }
 
     this.logger.warn(
@@ -164,21 +169,32 @@ export class ProviderService {
     )
   }
 
-  private async resolveConfig(
+  private async resolveMeta(
     request: DanmakuFetchRequest
-  ): Promise<ProviderConfig> {
-    return this.providerConfigService.mustGet(
-      request.meta.season.providerConfigId
-    )
+  ): Promise<DanmakuFetchByMeta> {
+    if (request.type === 'by-meta') {
+      return request
+    }
+    const season = await this.seasonService.mustGetById(request.seasonId)
+    const meta = enrichEpisode(
+      {
+        ...request.stub,
+        schemaVersion: 4 as const,
+        lastChecked: 0,
+      },
+      season
+    ) as WithSeason<EpisodeMeta>
+    return { type: 'by-meta', meta, options: request.options }
   }
 
   async getDanmaku(request: DanmakuFetchRequest): Promise<WithSeason<Episode>> {
-    const { options = {} } = request
-    const provider = request.meta.provider
+    const resolved = await this.resolveMeta(request)
+    const { options = {} } = resolved
+    const provider = resolved.meta.provider
 
     let existingDanmaku: WithSeason<Episode> | undefined
 
-    const { meta } = request
+    const { meta } = resolved
     const [found] = await this.danmakuService.filter({
       provider,
       indexedId: meta.indexedId,
@@ -197,10 +213,12 @@ export class ProviderService {
       this.logger.debug('Danmaku not found in db, fetching from server')
     }
 
-    const config = await this.resolveConfig(request)
+    const config = await this.providerConfigService.mustGet(
+      meta.season.providerConfigId
+    )
     const service = this.danmakuProviderFactory(config)
 
-    const comments = await service.getDanmaku(request)
+    const comments = await service.getDanmaku(resolved)
 
     const { season, ...rest } = meta
 

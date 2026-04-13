@@ -1,7 +1,11 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useToast } from '@/common/components/Toast/toastStore'
 import type { DanmakuFetchDto } from '@/common/danmaku/dto'
-import { episodeQueryKeys, seasonQueryKeys } from '@/common/queries/queryKeys'
+import {
+  bookmarkQueryKeys,
+  episodeQueryKeys,
+  seasonQueryKeys,
+} from '@/common/queries/queryKeys'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { getTrackingService } from '@/common/telemetry/getTrackingService'
 
@@ -15,48 +19,20 @@ import { getTrackingService } from '@/common/telemetry/getTrackingService'
  * This is a mutation because it updates the cache
  */
 export const useFetchDanmaku = () => {
-  const queryClient = useQueryClient()
   const toast = useToast.use.toast()
 
   const mutation = useMutation({
-    mutationKey: episodeQueryKeys.all(),
     mutationFn: async (data: DanmakuFetchDto) => {
       getTrackingService().track('fetchDanmaku', data)
       const res = await chromeRpcClient.episodeFetch(data)
       return res.data
     },
-    onSuccess: (episode, input) => {
-      // Refresh season list caches (e.g. local episode count) without invalidating every "season.*" query.
-      // Invalidating all season queries can cause UI jank in search pages that depend on `seasonQueryKeys.episodes()`.
-      void queryClient.invalidateQueries({
-        queryKey: seasonQueryKeys.all(),
-        exact: true,
-      })
-
-      // Refresh only the caches that are affected by this episode download/update.
-      const byMetaFilter = {
-        provider: input.meta.provider,
-        indexedId: input.meta.indexedId,
-        seasonId: input.meta.seasonId,
-      }
-
-      void queryClient.invalidateQueries({
-        queryKey: episodeQueryKeys.filter(byMetaFilter),
-      })
-
-      void queryClient.invalidateQueries({
-        queryKey: episodeQueryKeys.filterLite(byMetaFilter),
-      })
-
-      void queryClient.invalidateQueries({
-        queryKey: episodeQueryKeys.filter({ id: episode.id }),
-      })
-
-      void queryClient.invalidateQueries({
-        queryKey: episodeQueryKeys.filterLite({
-          seasonId: input.meta.seasonId,
-        }),
-      })
+    meta: {
+      invalidates: [
+        episodeQueryKeys.all(),
+        seasonQueryKeys.all(),
+        bookmarkQueryKeys.all(),
+      ],
     },
     onError: async (error) => {
       toast.error(error.message)

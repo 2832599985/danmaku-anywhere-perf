@@ -36,6 +36,7 @@ import {
   getSourceInfoFromEpisodes,
   providerColors,
 } from '@/common/danmaku/providerColors'
+import { compareLocale } from '@/common/utils/collator'
 import { ScrollBox } from './layout/ScrollBox'
 
 interface CommentListProps {
@@ -139,8 +140,8 @@ export const CommentsTable = ({
       .with('comment', () => {
         return filteredComments.toSorted((a, b) => {
           return order === 'asc'
-            ? a.m.localeCompare(b.m)
-            : b.m.localeCompare(a.m)
+            ? compareLocale(a.m, b.m)
+            : compareLocale(b.m, a.m)
         })
       })
       .with('time', () => {

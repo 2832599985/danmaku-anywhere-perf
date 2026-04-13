@@ -35,6 +35,23 @@ export type SettingConfig<S> = ToggleSettingConfig<S>
 
 const advancedSettings: SettingConfig<ExtensionOptions>[] = [
   {
+    id: 'toggle.player.enableFullscreenInteraction',
+    label: () =>
+      i18n.t(
+        'optionsPage.enableFullscreenInteraction',
+        'Enable fullscreen interaction'
+      ),
+    category: 'advanced',
+    type: 'toggle',
+    getValue: (options) => options.playerOptions.enableFullscreenInteraction,
+    createUpdate: (options, newValue) => ({
+      playerOptions: {
+        ...options.playerOptions,
+        enableFullscreenInteraction: newValue,
+      },
+    }),
+  },
+  {
     id: 'toggle.analytics',
     label: () =>
       i18n.t('optionsPage.enableAnalytics', 'Enable anonymous analytics'),
@@ -96,6 +113,15 @@ const advancedSettings: SettingConfig<ExtensionOptions>[] = [
     type: 'toggle',
     getValue: (options) => options.enableMultiSourceMerge,
     createUpdate: (_, newValue) => ({ enableMultiSourceMerge: newValue }),
+  },
+  {
+    id: 'toggle.showFloatingButton',
+    label: () =>
+      i18n.t('optionsPage.showFloatingButton', 'Show floating button'),
+    category: 'advanced',
+    type: 'toggle',
+    getValue: (options) => options.showFloatingButton,
+    createUpdate: (_, newValue) => ({ showFloatingButton: newValue }),
   },
 ]
 

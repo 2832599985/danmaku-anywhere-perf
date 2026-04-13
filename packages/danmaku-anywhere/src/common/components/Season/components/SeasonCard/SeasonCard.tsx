@@ -3,7 +3,13 @@ import {
   DanmakuSourceType,
   type Season,
 } from '@danmaku-anywhere/danmaku-converter'
-import { Delete, FileDownload, Sync } from '@mui/icons-material'
+import {
+  BookmarkBorder,
+  Bookmark as BookmarkIcon,
+  Delete,
+  FileDownload,
+  Sync,
+} from '@mui/icons-material'
 import {
   alpha,
   Card,
@@ -17,9 +23,13 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useDeleteSeason } from '@/common/anime/queries/useDeleteSeason'
+import { useRefreshSeason } from '@/common/anime/queries/useRefreshSeason'
+import { useBookmarkAdd } from '@/common/bookmark/queries/useBookmarkAdd'
+import { useBookmarkDeleteBySeason } from '@/common/bookmark/queries/useBookmarkDelete'
+import { useBookmarkedSeasonIds } from '@/common/bookmark/queries/useBookmarks'
 import { FullPageSpinner } from '@/common/components/FullPageSpinner'
 import {
   CoverImage,
@@ -28,11 +38,8 @@ import {
 import { DrilldownMenu } from '@/common/components/Menu/DrilldownMenu'
 import { ProviderLogo } from '@/common/components/ProviderLogo'
 import type { HandleSeasonClick } from '@/common/components/Season/types'
-import { useToast } from '@/common/components/Toast/toastStore'
 import { useDeleteEpisode } from '@/common/danmaku/queries/useDeleteEpisode'
 import { isProvider } from '@/common/danmaku/utils'
-import { episodeQueryKeys, seasonQueryKeys } from '@/common/queries/queryKeys'
-import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { useExportDanmaku } from '@/popup/hooks/useExportDanmaku'
 import { useExportXml } from '@/popup/hooks/useExportXml'
 
@@ -121,38 +128,20 @@ export const SeasonCard = ({
   onSelect,
 }: SeasonCardProps) => {
   const { t } = useTranslation()
-  const { toast } = useToast()
-
-  const queryClient = useQueryClient()
 
   const exportXml = useExportXml()
   const exportDanmaku = useExportDanmaku()
   const deleteEpisode = useDeleteEpisode()
 
-  const deleteMutation = useMutation({
-    mutationKey: seasonQueryKeys.all(),
-    mutationFn: (id: number) => chromeRpcClient.seasonDelete({ id }),
-    onSuccess: () => {
-      toast.success(t('common.success', 'Success'))
-      void queryClient.invalidateQueries({
-        queryKey: episodeQueryKeys.all(),
-      })
-    },
-    onError: () => {
-      toast.error(t('common.failed', 'Failed'))
-    },
-  })
+  const { data: bookmarkedSeasonIds } = useBookmarkedSeasonIds()
 
-  const refreshMutation = useMutation({
-    mutationKey: seasonQueryKeys.all(),
-    mutationFn: (id: number) => chromeRpcClient.seasonRefresh({ id }),
-    onSuccess: () => {
-      toast.success(t('common.success', 'Success'))
-    },
-    onError: () => {
-      toast.error(t('common.failed', 'Failed'))
-    },
-  })
+  const isBookmarked = bookmarkedSeasonIds?.has(season.id) ?? false
+
+  const bookmarkAddMutation = useBookmarkAdd()
+  const bookmarkDeleteMutation = useBookmarkDeleteBySeason()
+
+  const deleteMutation = useDeleteSeason()
+  const refreshMutation = useRefreshSeason()
 
   const renderEpisodeCount = () => {
     if (season.localEpisodeCount) {
@@ -238,6 +227,23 @@ export const SeasonCard = ({
             size: 'small',
           }}
           items={[
+            {
+              id: 'bookmark',
+              label: isBookmarked
+                ? t('bookmark.remove', 'Remove Bookmark')
+                : t('bookmark.add', 'Bookmark'),
+              icon: isBookmarked ? <BookmarkIcon /> : <BookmarkBorder />,
+              onClick: () => {
+                if (isBookmarked) {
+                  bookmarkDeleteMutation.mutate(season.id)
+                } else {
+                  bookmarkAddMutation.mutate(season.id)
+                }
+              },
+              loading:
+                bookmarkAddMutation.isPending ||
+                bookmarkDeleteMutation.isPending,
+            },
             {
               id: 'refresh',
               label: t('anime.refreshMetadata', 'Refresh Metadata'),

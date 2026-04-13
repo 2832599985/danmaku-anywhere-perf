@@ -1,16 +1,17 @@
 import { CommonModule } from '@angular/common'
 import {
-  type AfterViewInit,
+  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
   effect,
   inject,
 } from '@angular/core'
-import { Title } from '@angular/platform-browser'
+import { Meta, Title } from '@angular/platform-browser'
 import { ProgressSpinner } from 'primeng/progressspinner'
 import { VideoPlayer } from '../../core/video-player/video-player'
 import { LocalFolderSelectorComponent } from './components/local-folder-selector.component'
+import { FfmpegService } from './services/ffmpeg.service'
 import { LocalPlayerService } from './services/local-player.service'
 
 @Component({
@@ -29,30 +30,39 @@ import { LocalPlayerService } from './services/local-player.service'
       </div>
 
       <div class="grid grid-cols-1 xl:grid-cols-[1fr_424px] gap-8">
-        <da-video-player
-          [videoUrl]="$videoUrl()"
-          [title]="$nodeInfo()?.name"
-          [poster]="''"
-          [showOverlay]="$showOverlay()"
-          [hasPrevious]="$nodeInfo()?.hasPrev ?? false"
-          [hasNext]="$nodeInfo()?.hasNext ?? false"
-          (previousEpisode)="onPrevious()"
-          (nextEpisode)="onNext()"
-        >
-          <ng-template #content>
-            <div class="size-full flex flex-col justify-center items-center">
-              @if ($isLoading()) {
-                <p-progress-spinner />
-                <p>正在加载视频...</p>
-              } @else if (!$hasSelection()) {
-                <p>
-                  请选择一个视频文件
-                </p>
-              }
-            </div>
-          </ng-template>
-        </da-video-player>
-
+        <!-- defer to opt out of SSG -->
+        @defer (on immediate) {
+          <da-video-player
+            [videoUrl]="$videoUrl()"
+            [title]="$nodeInfo()?.name"
+            [poster]="''"
+            [subtitleTracks]="$subtitleTracks()"
+            [subtitleLoading]="$isExtractingSubtitles()"
+            [showOverlay]="$showOverlay()"
+            [hasPrevious]="$nodeInfo()?.hasPrev ?? false"
+            [hasNext]="$nodeInfo()?.hasNext ?? false"
+            (previousEpisode)="onPrevious()"
+            (nextEpisode)="onNext()"
+          >
+            <ng-template #content>
+              <div class="size-full flex flex-col justify-center items-center">
+                @if ($isLoading()) {
+                  <p-progress-spinner />
+                  <p>正在加载视频...</p>
+                } @else if (!$hasSelection()) {
+                  <p>
+                    请选择一个视频文件
+                  </p>
+                }
+              </div>
+            </ng-template>
+          </da-video-player>
+        } @placeholder {
+          <div class="size-full flex flex-col justify-center items-center">
+            <p-progress-spinner />
+            <p>正在加载播放器...</p>
+          </div>
+        }
         <div class="flex flex-col gap-4">
           <da-local-folder-selector />
         </div>
@@ -61,13 +71,18 @@ import { LocalPlayerService } from './services/local-player.service'
     </div>
   `,
 })
-export class LocalPlayerPageComponent implements AfterViewInit {
+export class LocalPlayerPageComponent {
   private titleService = inject(Title)
+  private meta = inject(Meta)
   private localPlayerService = inject(LocalPlayerService)
+  private ffmpegService = inject(FfmpegService)
 
   protected $videoUrl = this.localPlayerService.$videoUrl
+  protected $subtitleTracks = this.localPlayerService.$subtitleTracks
   protected $isLoading = this.localPlayerService.$isLoading
   protected $hasSelection = this.localPlayerService.$hasSelection
+  protected $isExtractingSubtitles =
+    this.localPlayerService.$isExtractingSubtitles
   protected $showOverlay = this.localPlayerService.$showOverlay
   protected $nodeInfo = this.localPlayerService.$nodeInfo
 
@@ -77,6 +92,27 @@ export class LocalPlayerPageComponent implements AfterViewInit {
   })
 
   constructor() {
+    // Set meta tags for SEO (applied during prerendering)
+    const description =
+      '在线本地视频播放器，支持内嵌字幕与外挂字幕，读取本地文件夹'
+    this.meta.updateTag({
+      name: 'description',
+      content: description,
+    })
+    this.meta.updateTag({
+      property: 'og:title',
+      content: '在线本地视频播放器 — 支持内嵌与外挂字幕',
+    })
+    this.meta.updateTag({
+      property: 'og:description',
+      content: description,
+    })
+
+    afterNextRender(() => {
+      this.ffmpegService.preload()
+      void this.localPlayerService.checkPersistence()
+    })
+
     effect(() => {
       const currentTitle = this.$pageTitle()
       const pageTitle = currentTitle
@@ -84,10 +120,6 @@ export class LocalPlayerPageComponent implements AfterViewInit {
         : 'Danmaku Anywhere'
       this.titleService.setTitle(pageTitle)
     })
-  }
-
-  ngAfterViewInit(): void {
-    void this.localPlayerService.checkPersistence()
   }
 
   protected onPrevious() {

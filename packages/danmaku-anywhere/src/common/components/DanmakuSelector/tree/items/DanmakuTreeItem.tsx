@@ -22,6 +22,7 @@ import { SeasonTreeItem } from '@/common/components/DanmakuSelector/tree/items/S
 import { DanmakuContextMenu } from '@/common/components/DanmakuSelector/tree/menus/DanmakuContextMenu'
 import { useLongPress } from '@/common/hooks/useLongPress'
 import { FolderTreeItem } from './FolderTreeItem'
+import { StubEpisodeTreeItem } from './StubEpisodeTreeItem'
 
 const StyledTreeRoot = styled(TreeItemRoot)({
   position: 'relative',
@@ -30,6 +31,8 @@ const StyledTreeRoot = styled(TreeItemRoot)({
 const StyledTreeContent = styled(TreeItemContent)({
   height: '40px',
   paddingRight: '32px',
+  // pan-y preserves native vertical scroll of the enclosing tree container
+  touchAction: 'pan-y',
 })
 
 interface CustomTreeItemProps
@@ -56,8 +59,14 @@ export const DanmakuTreeItem = forwardRef(function CustomTreeItem(
     status,
   } = useTreeItem({ id, itemId, children, label, disabled, rootRef: ref })
 
-  const { itemMap, apiRef, isMultiSelect, contextMenu, setContextMenu } =
-    useDanmakuTreeContext()
+  const {
+    itemMap,
+    apiRef,
+    isMultiSelect,
+    contextMenu,
+    setContextMenu,
+    namingRuleByFolderPath,
+  } = useDanmakuTreeContext()
 
   const item = itemMap.get(itemId)
   const isSeason = item?.kind === 'season'
@@ -96,24 +105,40 @@ export const DanmakuTreeItem = forwardRef(function CustomTreeItem(
       return label
     }
     if (isSeason) {
+      const children = item.children ?? []
+      const fetchedCount = children.filter((c) => c.kind === 'episode').length
+      const stubCount = children.filter((c) => c.kind === 'stub').length
       return (
         <SeasonTreeItem
           season={item.data}
           provider={item.provider}
-          childrenCount={item.children?.length}
+          fetchedCount={fetchedCount}
+          stubCount={stubCount}
+          bookmarked={item.bookmarked}
         />
       )
     }
     if (item.kind === 'folder') {
+      const namingRule = namingRuleByFolderPath.get(item.folderPath)
       return (
         <FolderTreeItem
           label={item.label}
           childrenCount={item.children?.length}
+          namingRuleTitle={namingRule?.title}
+        />
+      )
+    }
+    if (item.kind === 'stub') {
+      return (
+        <StubEpisodeTreeItem
+          stub={item.data}
+          season={item.season}
+          label={item.label}
         />
       )
     }
     return <EpisodeTreeItem episode={item.data} label={item.label} />
-  }, [item, label])
+  }, [item, label, namingRuleByFolderPath])
 
   const bindLongPress = useLongPress({
     onLongPress: ({ xy }) => {

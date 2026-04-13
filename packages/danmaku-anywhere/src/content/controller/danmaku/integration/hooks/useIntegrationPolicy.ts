@@ -29,7 +29,13 @@ export const useIntegrationPolicy = () => {
 
   const [observer, setObserver] = useState<MediaObserver | null>(null)
 
-  const videoId = useStore.use.videoId?.()
+  const activeFrameVideoKey = useStore((s) => {
+    const af = s.frame.activeFrame
+    if (!af?.hasVideo) {
+      return undefined
+    }
+    return `${af.frameId}:${af.videoChangeCount}`
+  })
   const unmountDanmaku = useUnmountDanmaku()
   const {
     setMediaInfo,
@@ -228,11 +234,11 @@ export const useIntegrationPolicy = () => {
     if (!observer) {
       return
     }
-    if (videoId) {
+    if (activeFrameVideoKey !== undefined) {
       observer.run()
     } else {
       observer.reset()
       resetIntegration()
     }
-  }, [videoId, observer])
+  }, [activeFrameVideoKey, observer])
 }

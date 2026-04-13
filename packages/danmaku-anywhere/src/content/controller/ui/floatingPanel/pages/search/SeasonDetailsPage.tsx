@@ -3,7 +3,7 @@ import type {
   Season,
   WithSeason,
 } from '@danmaku-anywhere/danmaku-converter'
-import { MergeType, Star, StarBorder } from '@mui/icons-material'
+import { MergeType } from '@mui/icons-material'
 import {
   Badge,
   Button,
@@ -18,6 +18,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Suspense, useMemo, useRef, useState } from 'react'
 import { ErrorBoundary } from 'react-error-boundary'
 import { useTranslation } from 'react-i18next'
+import { BookmarkToggleButton } from '@/common/bookmark/components/BookmarkToggleButton'
 import { BaseEpisodeListItem } from '@/common/components/EpisodeList/BaseEpisodeListItem'
 import { EpisodeSearchList } from '@/common/components/EpisodeList/EpisodeSearchList'
 import { ErrorMessage } from '@/common/components/ErrorMessage'
@@ -26,7 +27,6 @@ import { TabToolbar } from '@/common/components/layout/TabToolbar'
 import { useToast } from '@/common/components/Toast/toastStore'
 import { resolveBatchDownloadOutcome } from '@/common/danmaku/batchDownloadOutcome'
 import { useFetchDanmakuLite } from '@/common/danmaku/queries/useFetchDanmakuLite'
-import { useFavorites } from '@/common/hooks/useFavorites'
 import { seasonQueryKeys } from '@/common/queries/queryKeys'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { useLoadDanmaku } from '@/content/controller/common/hooks/useLoadDanmaku'
@@ -47,7 +47,6 @@ export const SeasonDetailsPage = ({
 }: SeasonDetailsPageProps) => {
   const { t } = useTranslation()
   const toast = useToast.use.toast()
-  const { isFavorite, toggleFavorite } = useFavorites()
 
   const { loadMutation, mergeLoadMutation, canMerge } = useLoadDanmaku()
   const { mutateAsync: download, isPending: isDownloading } =
@@ -191,25 +190,7 @@ export const SeasonDetailsPage = ({
     <TabLayout>
       <TabToolbar showBackButton onGoBack={onGoBack} title={season.title}>
         <Stack direction="row" gap={1} alignItems="center">
-          <Tooltip
-            title={
-              isFavorite(season.id)
-                ? t('searchPage.favorites.remove')
-                : t('searchPage.favorites.add')
-            }
-          >
-            <IconButton
-              size="small"
-              onClick={() => toggleFavorite(season)}
-              color={isFavorite(season.id) ? 'warning' : 'default'}
-            >
-              {isFavorite(season.id) ? (
-                <Star fontSize="small" />
-              ) : (
-                <StarBorder fontSize="small" />
-              )}
-            </IconButton>
-          </Tooltip>
+          <BookmarkToggleButton season={season} />
           {sources.length > 0 && (
             <Tooltip
               title={
@@ -316,7 +297,9 @@ export const SeasonDetailsPage = ({
         </Stack>
       )}
       <ErrorBoundary
-        fallbackRender={({ error }) => <ErrorMessage message={error.message} />}
+        fallbackRender={({ error }) => (
+          <ErrorMessage message={(error as Error).message} />
+        )}
       >
         <Suspense fallback={null}>
           <EpisodeSearchList

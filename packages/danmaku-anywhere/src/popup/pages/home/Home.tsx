@@ -8,6 +8,7 @@ import { Link, Outlet, useLocation, useMatches } from 'react-router'
 import { ErrorMessage } from '@/common/components/ErrorMessage'
 import { FullPageSpinner } from '@/common/components/FullPageSpinner'
 import { TabLayout } from '@/common/components/layout/TabLayout'
+import { MountAvailabilityBanner } from '@/popup/component/MountAvailabilityBanner'
 import { ReleaseNotes } from '@/popup/component/releaseNotes/ReleaseNotes'
 import { AppToolBar } from './AppToolBar'
 
@@ -127,6 +128,9 @@ export const Home = () => {
   return (
     <Stack direction="column" spacing={0} height={1}>
       <AppToolBar />
+      <Suspense fallback={null}>
+        <MountAvailabilityBanner />
+      </Suspense>
       <Box display="flex" flexGrow={1} height={1} minHeight={0}>
         <Tabs
           value={currentTab === '/' ? '/mount' : currentTab}
@@ -155,7 +159,7 @@ export const Home = () => {
           fallbackRender={({ error }) => {
             return (
               <TabLayout>
-                <ErrorMessage message={error.message} />
+                <ErrorMessage message={(error as Error).message} />
               </TabLayout>
             )
           }}

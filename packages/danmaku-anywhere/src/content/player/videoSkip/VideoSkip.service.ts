@@ -12,7 +12,7 @@ import { properCase } from '@/common/utils/utils'
 import { SkipButton } from '@/content/player/components/SkipButton/SkipButton'
 import { DanmakuLayoutService } from '@/content/player/danmakuLayout/DanmakuLayout.service'
 import { shouldAutoSkipOp } from '@/content/player/videoSkip/autoSkipOp'
-import type { SkipTarget } from '@/content/player/videoSkip/SkipTarget'
+import { SkipTarget } from '@/content/player/videoSkip/SkipTarget'
 import { VideoEventService } from '../videoEvent/VideoEvent.service'
 import { parseCommentsForJumpTargets } from './videoSkipParser'
 
@@ -175,6 +175,20 @@ export class VideoSkipService {
     for (const cb of this.onTargetsChangeCallbacks) {
       cb(this.jumpTargets)
     }
+  }
+
+  debugShowSkipButton() {
+    this.logger.debug('Showing debug skip button')
+    if (this.activeButton) {
+      this.activeButton.root.unmount()
+      this.activeButton = null
+    }
+    const time = this.currentVideo?.currentTime ?? 120
+    const target = new SkipTarget({
+      startTime: time,
+      endTime: time + 90,
+    })
+    this.showSkipButton(target)
   }
 
   private setupEventListeners() {

@@ -9,6 +9,7 @@ import type { MatchEpisodeResult } from '@/common/anime/dto'
 import { localizedDanmakuSourceType } from '@/common/danmaku/enums'
 import { i18n } from '@/common/localization/i18n'
 import { playerRpcClient } from '@/common/rpcClient/background/client'
+import type { VideoInfo } from '@/common/rpcClient/background/types'
 import { createSelectors } from '@/common/utils/createSelectors'
 import { mergeComments } from '@/common/utils/utils'
 import type { MediaInfo } from '@/content/controller/danmaku/integration/models/MediaInfo'
@@ -38,9 +39,10 @@ const buildSourceLabel = (episodes: GenericEpisode[]): string => {
 
 enableMapSet()
 
+export type { VideoInfo }
+
 export interface FrameState {
   frameId: number
-  documentId: string
   // The url of the frame
   url: string
   // Whether the danmaku manager has started in this frame
@@ -49,6 +51,12 @@ export interface FrameState {
   mounted: boolean
   // Whether a video element is detected in this frame
   hasVideo: boolean
+  // Info about the active video element
+  videoInfo?: VideoInfo
+  // Monotonic counter incremented each time a new video is detected in this frame
+  videoChangeCount: number
+  // Timestamp of when the video last started playing (used for hysteresis)
+  lastPlayTimestamp: number
 }
 
 interface StoreState {
@@ -104,6 +112,7 @@ interface StoreState {
   }
 
   seekToTime: (time: number) => void
+  debugShowSkipButton: (frameId: number) => void
 
   /**
    * Media information for pages with integration
@@ -124,11 +133,9 @@ interface StoreState {
   }
 
   /**
-   * Whether the video element is present
+   * Whether the active frame has a video element.
    */
   hasVideo: () => boolean
-  videoId?: string
-  setVideoId: (videoId?: string) => void
 
   /**
    * State of each frame in the page
@@ -136,9 +143,9 @@ interface StoreState {
   frame: {
     allFrames: Map<number, FrameState>
     activeFrame?: FrameState
-    mustGetActiveFrame: () => FrameState
+    getActiveFrame: () => FrameState | undefined
     setActiveFrame: (frameId: number) => void
-    addFrame: (init: Pick<FrameState, 'frameId' | 'url' | 'documentId'>) => void
+    addFrame: (init: Pick<FrameState, 'frameId' | 'url'>) => void
     removeFrame: (frameId: number) => void
     updateFrame: (
       frameId: number,
@@ -225,15 +232,9 @@ const useStoreBase = create<StoreState>()(
       },
       isVisible: true,
       toggleVisible: (visible) => {
-        if (visible === undefined) {
-          set((state) => {
-            state.danmaku.isVisible = !state.danmaku.isVisible
-          })
-        } else {
-          set((state) => {
-            state.danmaku.isVisible = visible
-          })
-        }
+        set((state) => {
+          state.danmaku.isVisible = visible ?? !state.danmaku.isVisible
+        })
       },
 
       comments: [],
@@ -246,24 +247,28 @@ const useStoreBase = create<StoreState>()(
 
       isManual: false,
       toggleManualMode: (manual) => {
-        if (manual !== undefined) {
-          set((state) => {
-            state.danmaku.isManual = manual
-          })
-        } else {
-          set((state) => {
-            state.danmaku.isManual = !state.danmaku.isManual
-          })
-        }
+        set((state) => {
+          state.danmaku.isManual = manual ?? !state.danmaku.isManual
+        })
       },
 
       sources: [],
     },
 
     seekToTime: (time) => {
+      const activeFrame = get().frame.getActiveFrame()
+      if (!activeFrame) {
+        return
+      }
       void playerRpcClient.player['relay:command:seek']({
-        frameId: get().frame.mustGetActiveFrame().frameId,
+        frameId: activeFrame.frameId,
         data: time,
+      })
+    },
+
+    debugShowSkipButton: (frameId) => {
+      void playerRpcClient.player['relay:command:debugSkipButton']({
+        frameId,
       })
     },
 
@@ -309,24 +314,14 @@ const useStoreBase = create<StoreState>()(
     },
 
     hasVideo: () => {
-      return get().videoId !== undefined
-    },
-    videoId: undefined,
-    setVideoId: (videoId) => {
-      set((state) => {
-        state.videoId = videoId
-      })
+      return get().frame.activeFrame?.hasVideo ?? false
     },
 
     frame: {
       allFrames: new Map<number, FrameState>(),
       activeFrame: undefined,
-      mustGetActiveFrame: () => {
-        const activeFrame = get().frame.activeFrame
-        if (activeFrame === undefined) {
-          throw new Error('No active frame')
-        }
-        return activeFrame
+      getActiveFrame: () => {
+        return get().frame.activeFrame
       },
       setActiveFrame: (frameId) => {
         set((state) => {
@@ -341,15 +336,16 @@ const useStoreBase = create<StoreState>()(
           state.frame.activeFrame = selectedFrame
         })
       },
-      addFrame: ({ frameId, url, documentId }) => {
+      addFrame: ({ frameId, url }) => {
         set((state) => {
           state.frame.allFrames.set(frameId, {
             frameId,
             url,
-            documentId,
             started: false,
             mounted: false,
             hasVideo: false,
+            videoChangeCount: 0,
+            lastPlayTimestamp: 0,
           })
         })
       },
@@ -363,7 +359,6 @@ const useStoreBase = create<StoreState>()(
         }
 
         if (frame.mounted) {
-          get().setVideoId(undefined)
           get().danmaku.unmount()
         }
 
@@ -399,28 +394,17 @@ const useStoreBase = create<StoreState>()(
     integrationForm: {
       showEditor: false,
       toggleEditor: (show) => {
-        if (show !== undefined) {
-          set((state) => {
-            state.integrationForm.showEditor = show
-          })
-        } else {
-          set((state) => {
-            state.integrationForm.showEditor = !state.integrationForm.showEditor
-          })
-        }
+        set((state) => {
+          state.integrationForm.showEditor =
+            show ?? !state.integrationForm.showEditor
+        })
       },
       showAiEditor: false,
       toggleAiEditor: (show) => {
-        if (show !== undefined) {
-          set((state) => {
-            state.integrationForm.showAiEditor = show
-          })
-        } else {
-          set((state) => {
-            state.integrationForm.showAiEditor =
-              !state.integrationForm.showAiEditor
-          })
-        }
+        set((state) => {
+          state.integrationForm.showAiEditor =
+            show ?? !state.integrationForm.showAiEditor
+        })
       },
       isPicking: false,
       setIsPicking: (picking) => {

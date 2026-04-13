@@ -3,8 +3,6 @@ import {
   Divider,
   debounce,
   FormControl,
-  Grid,
-  Input,
   InputLabel,
   MenuItem,
   Select,
@@ -15,8 +13,7 @@ import {
   Typography,
   useEventCallback,
 } from '@mui/material'
-import { useEffect, useMemo, useState } from 'react'
-import type { ControllerRenderProps } from 'react-hook-form'
+import { useEffect, useMemo } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { DocIcon } from '@/common/components/DocIcon'
@@ -28,7 +25,6 @@ import type { DanmakuOptions } from '@/common/options/danmakuOptions/constant'
 import type { DanmakuPresetId } from '@/common/options/danmakuOptions/presets'
 import { danmakuPresetsMap } from '@/common/options/danmakuOptions/presets'
 import { useDanmakuOptions } from '@/common/options/danmakuOptions/useDanmakuOptions'
-import { withStopPropagation } from '@/common/utils/withStopPropagation'
 import { DanmakuPreview } from '@/content/common/DanmakuStyles/DanmakuPreview'
 import { FontSelector } from '@/content/common/DanmakuStyles/FontSelector'
 import { LabeledSwitch } from '@/content/common/DanmakuStyles/LabeledSwitch'
@@ -36,6 +32,7 @@ import {
   detectActivePreset,
   PresetSelector,
 } from '@/content/common/DanmakuStyles/PresetSelector'
+import { LabeledScrubber } from './LabeledScrubber'
 import { LabeledSlider } from './LabeledSlider'
 
 const opacityMarks = [
@@ -245,6 +242,11 @@ const fontSizeValueLabelFormat = (value: number) => `${value}px`
 const safeZoneValueLabelFormat = (value: number) => `${value}%`
 
 const offsetValueLabelFormat = (value: number) => {
+  const absValue = Math.abs(value)
+  if (absValue >= 1000) {
+    const formatted = Number.parseFloat((value / 1000).toFixed(3)).toString()
+    return `${value > 0 ? '+' : ''}${formatted}s`
+  }
   return `${value > 0 ? '+' : ''}${value}ms`
 }
 
@@ -284,87 +286,6 @@ const convertDisplaySpeedToActual = (displaySpeed: number) => {
 }
 
 export type SaveStatus = 'idle' | 'saving' | 'saved'
-
-const OffsetSlider = ({
-  field,
-}: {
-  field: ControllerRenderProps<DanmakuOptions, 'offset'>
-}) => {
-  const { t } = useTranslation()
-  const [isEditingOffset, setIsEditingOffset] = useState(false)
-  const [editOffsetValue, setEditOffsetValue] = useState<string>(
-    field.value.toString()
-  )
-
-  useEffect(() => {
-    if (!isEditingOffset) {
-      setEditOffsetValue(field.value.toString())
-    }
-  }, [field.value, isEditingOffset])
-
-  const handleOffsetBlur = () => {
-    setIsEditingOffset(false)
-    let numericValue = Number.parseInt(editOffsetValue, 10)
-    if (isNaN(numericValue)) {
-      numericValue = field.value ?? 0
-    }
-    if (numericValue !== field.value) {
-      field.onChange(numericValue)
-    }
-    setEditOffsetValue(numericValue.toString())
-  }
-
-  return (
-    <LabeledSlider
-      label={t('stylePage.offset', 'Time Offset (milliseconds)')}
-      tooltip={t(
-        'stylePage.tooltip.offset',
-        'How earlier danmaku appears. Positive values make danmaku appear later, negative values make danmaku appear earlier.'
-      )}
-      value={field.value}
-      onChange={(_e, newValue) => {
-        const numericValue = newValue as number
-        field.onChange(numericValue)
-        if (!isEditingOffset) {
-          setEditOffsetValue(numericValue.toString())
-        }
-      }}
-      gridSize={8}
-      step={10}
-      min={-5000}
-      max={5000}
-      size="small"
-      valueLabelDisplay="auto"
-      valueLabelFormat={offsetValueLabelFormat}
-    >
-      <Grid size={4}>
-        <Input
-          value={isEditingOffset ? editOffsetValue : field.value}
-          size="small"
-          {...withStopPropagation()}
-          onFocus={() => {
-            setIsEditingOffset(true)
-            setEditOffsetValue(field.value.toString())
-          }}
-          onBlur={handleOffsetBlur}
-          onChange={(e) => {
-            setEditOffsetValue(e.target.value)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              handleOffsetBlur()
-              ;(e.target as HTMLInputElement).blur()
-            }
-          }}
-          inputProps={{
-            step: 1,
-            type: 'number',
-          }}
-        />
-      </Grid>
-    </LabeledSlider>
-  )
-}
 
 export type DanmakuStylesFormProps = {
   onSaveStatusChange?: (status: SaveStatus) => void
@@ -631,7 +552,25 @@ export const DanmakuStylesForm = ({
         <Controller
           name="offset"
           control={control}
-          render={({ field }) => <OffsetSlider field={field} />}
+          render={({ field }) => (
+            <LabeledScrubber
+              label={t('stylePage.offset', 'Time Offset')}
+              tooltip={t(
+                'stylePage.tooltip.offsetScrubber',
+                'Drag horizontally or use scroll wheel to adjust. Double-click to manual entry. Positive values make danmaku appear later, negative values earlier.'
+              )}
+              value={field.value}
+              onChange={(newValue) => field.onChange(newValue)}
+              onReset={() => field.onChange(0)}
+              step={10}
+              fastStep={100}
+              slowStep={1}
+              min={-100000}
+              max={100000}
+              formatValue={offsetValueLabelFormat}
+              unit="ms"
+            />
+          )}
         />
         <Controller
           name="interval"

@@ -172,6 +172,7 @@ export class ExtensionOptionsService implements IStoreService {
               fixedSkipSeconds: 90,
               autoDensity: false,
               autoNextEpisode: false,
+              enableFullscreenInteraction: true,
             }
           }),
       })
@@ -336,6 +337,18 @@ export class ExtensionOptionsService implements IStoreService {
             draft.enableMultiSourceMerge ??= false
           })
         },
+      })
+      .version(31, {
+        upgrade: (data) =>
+          produce<ExtensionOptions>(data, (draft) => {
+            draft.playerOptions.enableFullscreenInteraction = true
+          }),
+      })
+      .version(32, {
+        upgrade: (data) =>
+          produce<ExtensionOptions>(data, (draft) => {
+            draft.showFloatingButton = true
+          }),
       })
   }
 

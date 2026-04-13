@@ -56,6 +56,11 @@
     "refreshMetadata": "Refresh Metadata",
     "title": "Title"
   },
+  "bookmark": {
+    "add": "Bookmark",
+    "refreshEpisodes": "Refresh Episodes",
+    "remove": "Remove Bookmark"
+  },
   "common": {
     "acknowledge": "Ok",
     "add": "Add",
@@ -93,6 +98,7 @@
     "pip": "Picture-in-Picture",
     "regexShort": "Regex",
     "reset": "Reset",
+    "restore": "Restore",
     "save": "Save",
     "saved": "Saved",
     "saving": "Saving...",
@@ -184,7 +190,6 @@
       "exported": "Export successful",
       "exportError": "Export failed: {{message}}",
       "fetchError": "Failed to fetch danmaku: {{message}}",
-      "frameListEmpty": "Browser returned an empty frame list, this likely indicates a bug in the browser.",
       "mounted_one": "Danmaku Mounted: {{name}} ({{count}})",
       "mounted_other": "Danmaku Mounted: {{name}} ({{count}})",
       "mountedMultiple_one": "Mounted {{count}} selected danmaku",
@@ -194,7 +199,6 @@
       "mergedMultiple_one": "Merged {{count}} source (total: {{total}})",
       "mergedMultiple_other": "Merged {{count}} sources (total: {{total}})",
       "mountError": "Failed to mount danmaku: {{message}}",
-      "multipleFrames": "Multiple frames with video detected",
       "refreshed_one": "Danmaku Refreshed: {{name}} ({{count}})",
       "refreshed_other": "Danmaku Refreshed: {{name}} ({{count}})",
       "refreshingDanmaku": "Refreshing danmaku",
@@ -297,6 +301,14 @@
     "noSeasonsAllProviders": "No seasons found across all providers",
     "passedToNext": "No match found, passed to next strategy",
     "previousStrategyTerminal": "Skipped: previous strategy returned a terminal result"
+  },
+  "form": {
+    "precision": {
+      "alt": "Alt",
+      "drag": "Drag / Wheel",
+      "shift": "Shift"
+    },
+    "resetToZero": "Reset to 0"
   },
   "importPage": {
     "confirm": "Confirm Import",
@@ -428,8 +440,12 @@
   },
   "mountPage": {
     "alert": {
-      "checkMountConfig": "Check Mount config",
-      "mountingDisabled": "Cannot mount danmaku on this page"
+      "createMountConfig": "Create mount config",
+      "disabledMountConfig": "Mount config \"{{name}}\" is disabled",
+      "enableMountConfig": "Enable config",
+      "extensionDisabled": "Danmaku Anywhere is disabled",
+      "noMountConfig": "No mount config for this site",
+      "pageUnsupported": "This page cannot host danmaku"
     },
     "confirmDeleteMultiple_one": "Are you sure you want to delete {{count}} item?",
     "confirmDeleteMultiple_other": "Are you sure you want to delete {{count}} items?",
@@ -441,17 +457,63 @@
     "selectedCount_one": "{{count}} selected",
     "selectedCount_other": "{{count}} selected"
   },
+  "namingRule": {
+    "create": "Create Naming Rule",
+    "deleteConfirm": "Are you sure you want to delete this naming rule?",
+    "duplicateTitle": "A naming rule with this title already exists",
+    "edit": "Edit Naming Rule",
+    "episodeLabel": "Episode {{number}}",
+    "filesInFolder": "Files in folder",
+    "folder": "Folder",
+    "local": "Local",
+    "matchCount": "{{matched}} / {{total}} matched",
+    "noRules": "No naming rules defined",
+    "rootFolder": "(root)",
+    "ruleCreated": "Naming rule saved",
+    "ruleCreateFailed": "Failed to save naming rule",
+    "ruleDeleted": "Naming rule deleted",
+    "template": "Filename Template",
+    "templateHelp": "Use {episode} for episode number, {episode:02d} for zero-padded",
+    "title": "Title"
+  },
   "optionsPage": {
+    "auth": {
+      "confirmPassword": "Confirm Password",
+      "email": "Email",
+      "emailHelper": "Your email is only used to recover your account",
+      "name": "Name",
+      "nameHelper": "The user name is public and does not need to be unique",
+      "password": "Password",
+      "passwordHelper": "Must be at least 6 characters",
+      "signedInAs": "Signed in as",
+      "signIn": "Sign In",
+      "signOut": "Sign Out",
+      "signUp": "Sign Up",
+      "signUpSuccess": "Sign up successful"
+    },
     "backup": {
       "alert": {
         "exportSuccess": "Export success",
         "importSuccess": "Import success"
       },
-      "export": "Export Backup",
-      "exportDescription": "Export all settings to a JSON file.",
-      "import": "Import Backup",
-      "importDescription": "Restore settings from a JSON file.",
-      "importError": "Import failed"
+      "cloudBackup": "Cloud Backup",
+      "cloudBackupCreate": "Create Cloud Backup",
+      "cloudCreateError": "Cloud backup failed: {{message}}",
+      "cloudCreateSuccess": "Cloud backup created",
+      "cloudDescription": "Sync your settings to the cloud. Up to 3 revisions are kept.",
+      "cloudDownloadError": "Failed to download cloud backup: {{message}}",
+      "cloudListError": "Failed to load cloud backups.",
+      "cloudSignInRequired": "Sign in to use cloud backup.",
+      "exportToFile": "Save to File",
+      "goToSignIn": "Go to Sign In",
+      "importError": "Import failed",
+      "importFromFile": "Restore from File",
+      "latestRevision": "Latest",
+      "localBackup": "Local Backup",
+      "localDescription": "Save and restore your settings as a JSON file.",
+      "noCloudBackups": "No cloud backups yet. Create one to get started.",
+      "restoreConfirmDesc": "Restoring this backup will overwrite your current settings. Are you sure you want to proceed?",
+      "restoreConfirmTitle": "Restore Settings?"
     },
     "chConvert": {
       "name": "Simplified/Traditional Conversion",
@@ -489,6 +551,7 @@
       }
     },
     "enableAnalytics": "Enable anonymous analytics",
+    "enableFullscreenInteraction": "Enable fullscreen interaction",
     "help": {
       "feedback": "Provide feedback",
       "reportBug": "Report Bug"
@@ -528,6 +591,7 @@
     "name": "Options",
     "pages": {
       "advanced": "Advanced",
+      "auth": "Account",
       "backup": "Backup & Restore",
       "dataManagement": "Data Management",
       "help": "About",
@@ -564,6 +628,7 @@
       }
     },
     "searchUsingSimplified": "Search using simplified Chinese",
+    "showFloatingButton": "Show floating button",
     "theme": {
       "colorMode": {
         "dark": "Dark",
@@ -675,7 +740,7 @@
     "interval": "Emission Interval",
     "maxOnScreen": "Maximum Limit",
     "name": "Danmaku Settings",
-    "offset": "Time Offset (milliseconds)",
+    "offset": "Time Offset",
     "opacity": "Opacity",
     "orderDistribution": "Order",
     "overlap": "Overlap",
@@ -710,7 +775,7 @@
       "distribution": "Random: danmaku will be distributed uniformly. Order: danmaku will fill the screen from top to bottom.",
       "interval": "Lower value means more densely packed danmaku. May cause performance issues if set too low.",
       "maxOnScreen": "The maximum number of danmaku that can be displayed on the screen at the same time.",
-      "offset": "How earlier danmaku appears. Positive values make danmaku appear later, negative values make danmaku appear earlier.",
+      "offsetScrubber": "Drag horizontally or use scroll wheel to adjust, double-click to manual entry. Positive values make danmaku appear later, negative values make danmaku appear earlier.",
       "overlap": "Higher values reduce the distance between danmaku, allowing more danmaku to be displayed on the screen at the same time, at the cost of overlapping. Set to 0 to disable overlap.",
       "safeZone": {
         "y": "Y-axis (up and down) display range"
@@ -780,6 +845,9 @@
     "debug": "Debug"
   },
   "titleMapping": {
+    "deleteConfirm_one": "Are you sure you want to delete {{count}} title mapping?",
+    "deleteConfirm_other": "Are you sure you want to delete {{count}} title mappings?",
+    "deleteConfirmOne": "Are you sure you want to delete this title mapping?",
     "empty": "No title mappings found.",
     "noSeasons": "No options for the selected provider",
     "title": "Title Mappings",

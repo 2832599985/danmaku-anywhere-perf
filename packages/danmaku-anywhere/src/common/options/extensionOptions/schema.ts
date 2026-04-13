@@ -63,6 +63,7 @@ export const playerOptionsSchema = z.object({
    * when the current episode reaches 80% playback
    */
   autoNextEpisode: z.boolean(),
+  enableFullscreenInteraction: z.boolean(),
 })
 
 export const retentionPolicySchema = z.object({
@@ -171,6 +172,11 @@ export const extensionOptionsSchema = z.object({
    * and merge all danmaku together with deduplication.
    */
   enableMultiSourceMerge: z.boolean(),
+
+  /**
+   * Whether to show the floating action button on video pages
+   */
+  showFloatingButton: z.boolean(),
 })
 
 export type ExtensionOptions = z.infer<typeof extensionOptionsSchema>

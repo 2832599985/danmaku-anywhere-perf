@@ -12,7 +12,6 @@ import {
   searchMacCmsVod,
 } from '@danmaku-anywhere/danmaku-provider/maccms'
 import type { DanmakuService } from '@/background/services/persistence/DanmakuService'
-import type { DanmakuFetchRequest } from '@/common/danmaku/dto'
 import { DanmakuSourceType } from '@/common/danmaku/enums'
 import { assertProviderType } from '@/common/danmaku/utils'
 import type { ILogger } from '@/common/Logger'

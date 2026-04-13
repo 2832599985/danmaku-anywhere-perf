@@ -1,4 +1,5 @@
 import type { MatchEpisodeResult } from '@/common/anime/dto'
+import type { AuthSessionState } from '@/common/auth/types'
 import type { BackupData, BackupRestoreResult } from '@/common/backup/dto'
 import type { BaseUrlConfig } from '@/common/configs/types'
 import type {
@@ -53,14 +54,31 @@ const standaloneMountConfig: MountConfig = {
   preferredProviders: [],
 }
 
+const standaloneAuthSession: AuthSessionState | null = null
+
+const mockUser = {
+  id: 'standalone-user',
+  email: 'user@example.com',
+  name: 'Standalone User',
+  emailVerified: true,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+}
+
 export const standaloneBackgroundHandlers: StandaloneRpcHandlers<BackgroundMethods> =
   {
+    authGetSession: () => standaloneAuthSession,
+    authSignUp: () => ({ state: 'success', user: mockUser }),
+    authSignIn: () => ({ state: 'success', user: mockUser }),
+    authSignOut: () => ({ state: 'success' }),
+    authDeleteAccount: () => ({ state: 'success' }),
     iconSet: () => ({ state: 'available' }),
     seasonSearch: () => [],
     seasonFilter: () => [],
     seasonGetAll: () => [],
     seasonMapGetAll: () => [],
     seasonMapAdd: () => undefined,
+    seasonMapPut: () => undefined,
     seasonMapDelete: () => undefined,
     seasonDelete: () => undefined,
     seasonRefresh: () => undefined,
@@ -87,10 +105,8 @@ export const standaloneBackgroundHandlers: StandaloneRpcHandlers<BackgroundMetho
     fetchImage: ({ src }) => src,
     getActiveTabUrl: () => 'https://example.com',
     getFrameId: () => 0,
-    getAllFrames: () => [],
     getExtensionManifest: () => standaloneManifest,
     getAlarm: () => null,
-    injectScript: () => undefined,
     remoteLog: () => undefined,
     exportDebugData: () => ({ id: 'standalone' }),
     getFontList: () => [],
@@ -123,6 +139,9 @@ export const standaloneBackgroundHandlers: StandaloneRpcHandlers<BackgroundMetho
     testAiProvider: () => ({ state: 'success' }),
     backupExport: () => standaloneBackupData,
     backupImport: () => standaloneBackupRestoreResult,
+    cloudBackupList: () => [],
+    cloudBackupCreate: () => ({ success: false, id: '' }),
+    cloudBackupDownload: () => standaloneBackupData,
     dataWipeDanmaku: () => undefined,
     bilibiliSetCookies: () => undefined,
   }
@@ -150,13 +169,17 @@ export const standalonePlayerCommandHandlers: StandaloneRpcHandlers<PlayerRelayC
     'relay:command:enterPip': () => undefined,
     'relay:command:show': () => undefined,
     'relay:command:skipOp': () => undefined,
+    'relay:command:controllerReady': () => undefined,
+    'relay:command:debugSkipButton': () => undefined,
   }
 
 export const standalonePlayerEventHandlers: StandaloneRpcHandlers<PlayerRelayEvents> =
   {
     'relay:event:playerReady': () => undefined,
+    'relay:event:playerUnload': () => undefined,
     'relay:event:videoChange': () => undefined,
     'relay:event:videoRemoved': () => undefined,
+    'relay:event:videoStateChange': () => undefined,
     'relay:event:preloadNextEpisode': () => undefined,
     'relay:event:videoEnded': () => undefined,
     'relay:event:showPopover': () => undefined,

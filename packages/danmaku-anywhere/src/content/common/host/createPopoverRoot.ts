@@ -1,16 +1,20 @@
 import shadowCss from './shadow.css?inline'
+import { waitForBody } from './waitForBody'
 
 type PopoverRootOptions = {
   id: string
 }
 
 // create shadow dom for extension ui
-export const createPopoverRoot = ({ id }: PopoverRootOptions) => {
+export async function createPopoverRoot({ id }: PopoverRootOptions) {
+  const body = await waitForBody()
+
   const root = document.createElement('div')
   root.id = id
+  // Use !important to prevent third-party CSS (e.g. userscripts) from hiding the root
   root.setAttribute(
     'style',
-    'position: absolute !important; z-index: 2147483647 !important; left: 0 !important; top: 0 !important; pointer-events: auto !important;'
+    'display: block !important; position: absolute !important; z-index: 2147483647 !important; left: 0 !important; top: 0 !important; pointer-events: auto !important;'
   )
 
   // make the root element a popover so it can be shown on top of everything
@@ -21,7 +25,7 @@ export const createPopoverRoot = ({ id }: PopoverRootOptions) => {
 
   shadowContainer.appendChild(shadowRoot)
 
-  ;(document.body || document.documentElement).append(root)
+  body.append(root)
   root.showPopover()
 
   const shadowStyle = document.createElement('style')

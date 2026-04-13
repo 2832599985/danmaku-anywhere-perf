@@ -5,7 +5,6 @@ import {
 import { setRequestHeaderRule } from '@danmaku-anywhere/web-scraper'
 import { inject, injectable } from 'inversify'
 import { match } from 'ts-pattern'
-import { ScriptingManager } from '@/background/scripting/ScriptingManager'
 import { BackupService } from '@/background/services/Backup/BackupService.service'
 import { DanmakuMergeService } from '@/background/services/DanmakuMergeService'
 import { DataManagementService } from '@/background/services/DataManagementService'
@@ -14,6 +13,7 @@ import { IconService } from '@/background/services/IconService'
 import { ImageCacheService } from '@/background/services/ImageCache/ImageCache.service'
 import { KazumiService } from '@/background/services/KazumiService'
 import { LogService } from '@/background/services/Logging/Log.service'
+import { BookmarkService } from '@/background/services/persistence/BookmarkService'
 import { DanmakuService } from '@/background/services/persistence/DanmakuService'
 import { SeasonService } from '@/background/services/persistence/SeasonService'
 import { TitleMappingService } from '@/background/services/persistence/TitleMappingService'
@@ -21,6 +21,7 @@ import { BilibiliService } from '@/background/services/providers/bilibili/Bilibi
 import { MacCmsProviderService } from '@/background/services/providers/MacCmsProviderService'
 import { TencentService } from '@/background/services/providers/tencent/TencentService'
 import { invalidateContentScriptData } from '@/background/utils/invalidateContentScriptData'
+import { AuthClientService } from '@/common/auth/AuthClientService'
 import type { EpisodeFetchBySeasonParams } from '@/common/danmaku/dto'
 import { DanmakuAnywhereDb } from '@/common/db/db'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
@@ -64,7 +65,6 @@ export class RpcManager {
     @inject(EpisodeMatchingService)
     private episodeMatchingService: EpisodeMatchingService,
     @inject(LogService) private logService: LogService,
-    @inject(ScriptingManager) private scriptingManager: ScriptingManager,
     @inject(DanmakuAnywhereDb) private db: DanmakuAnywhereDb,
     @inject(LoggerSymbol) logger: ILogger,
     @inject(DebugFileService) private debugFileService: DebugFileService,
@@ -73,7 +73,11 @@ export class RpcManager {
     @inject(DataManagementService)
     private dataManagementService: DataManagementService,
     @inject(DanmakuMergeService)
-    private danmakuMergeService: DanmakuMergeService
+    private danmakuMergeService: DanmakuMergeService,
+    @inject(AuthClientService)
+    private authClientService: AuthClientService,
+    @inject(BookmarkService)
+    private bookmarkService: BookmarkService
   ) {
     this.logger = logger.sub('[RpcManager]')
   }
@@ -81,6 +85,21 @@ export class RpcManager {
   setup() {
     const rpcServer = createRpcServer<BackgroundMethods>(
       {
+        authGetSession: async () => {
+          return this.authClientService.getSessionState()
+        },
+        authSignUp: async (input) => {
+          return this.authClientService.signUp(input)
+        },
+        authSignIn: async (input) => {
+          return this.authClientService.signIn(input)
+        },
+        authSignOut: async () => {
+          return this.authClientService.signOut()
+        },
+        authDeleteAccount: async () => {
+          return this.authClientService.deleteAccount()
+        },
         seasonSearch: async (input) => {
           return this.providerService.searchSeason(input)
         },
@@ -160,6 +179,9 @@ export class RpcManager {
         seasonMapAdd: async (data) => {
           return this.titleMappingService.add(SeasonMap.from(data))
         },
+        seasonMapPut: async (data) => {
+          return this.titleMappingService.put(SeasonMap.from(data))
+        },
         seasonMapDelete: async (data) => {
           return this.titleMappingService.remove(data.key)
         },
@@ -168,6 +190,9 @@ export class RpcManager {
             data.key,
             data.providerConfigId
           )
+        },
+        seasonMapDeleteMany: async (data) => {
+          return this.titleMappingService.removeMany(data.keys)
         },
 
         seasonMapGetAll: async () => {
@@ -215,21 +240,6 @@ export class RpcManager {
           void invalidateContentScriptData(sender.tab?.id)
           return result
         },
-        getAllFrames: async (_, sender) => {
-          if (sender.tab?.id === undefined) {
-            throw new RpcException('No tab id found')
-          }
-
-          const tabId = sender.tab.id
-
-          const frames = await chrome.webNavigation.getAllFrames({ tabId })
-
-          if (!frames) {
-            throw new RpcException('No frames found')
-          }
-
-          return frames
-        },
         getExtensionManifest: async () => {
           return chrome.runtime.getManifest() as chrome.runtime.ManifestV3
         },
@@ -246,17 +256,6 @@ export class RpcManager {
           }
 
           return sender.frameId
-        },
-        injectScript: async (frameId, sender) => {
-          this.logger.debug('Injecting script into frame', { frameId })
-
-          if (sender.tab?.id === undefined) {
-            throw new RpcException('No tab id found')
-          }
-
-          const tabId = sender.tab.id
-
-          await this.scriptingManager.injectVideoScript(tabId, frameId)
         },
         remoteLog: async (data) => {
           void this.logService.log(data)
@@ -344,6 +343,7 @@ export class RpcManager {
             this.db.season,
             this.db.episode,
             this.db.seasonMap,
+            this.db.bookmark,
             async () => {
               const seasons = await this.db.season
                 .where({ providerConfigId: id })
@@ -369,6 +369,7 @@ export class RpcManager {
                       val.seasons = snapshot.seasons
                     })
                 }
+                await this.bookmarkService.deleteBySeasonIds(seasonIds)
               }
 
               await this.db.season.where({ providerConfigId: id }).delete()
@@ -387,12 +388,36 @@ export class RpcManager {
           void invalidateContentScriptData(sender.tab?.id)
           return result
         },
+        cloudBackupList: async () => {
+          return this.backupService.getCloudBackups()
+        },
+        cloudBackupCreate: async () => {
+          return this.backupService.createCloudBackup()
+        },
+        cloudBackupDownload: async (id) => {
+          return this.backupService.downloadCloudBackup(id)
+        },
         dataWipeDanmaku: async (data, sender) => {
           await this.dataManagementService.wipeAllData(data)
           void invalidateContentScriptData(sender.tab?.id)
         },
         episodeFetchMultiSource: async (data) => {
           return this.danmakuMergeService.fetchFromOtherProviders(data)
+        },
+        bookmarkGetAll: async () => {
+          return this.bookmarkService.getAll()
+        },
+        bookmarkAdd: async (data) => {
+          return this.bookmarkService.add(data.seasonId, this.providerService)
+        },
+        bookmarkDelete: async (data) => {
+          return this.bookmarkService.delete(data.id)
+        },
+        bookmarkDeleteBySeason: async (data) => {
+          return this.bookmarkService.deleteBySeason(data.seasonId)
+        },
+        bookmarkRefresh: async (data) => {
+          return this.bookmarkService.refresh(data.id, this.providerService)
         },
       },
       {
@@ -403,25 +428,21 @@ export class RpcManager {
     const passThrough = <TRPCDef extends AnyRPCDef>(
       clientMethod: TabRPCClientMethod<TRPCDef>
     ): RRPServerHandler<TRPCDef> => {
-      return async (data, sender, setContext) => {
+      return async (data, sender, setContext, options) => {
         // Apparently tab.index can be -1 in some cases, this will cause an error so we need to handle it
         const tabIndex =
           sender.tab?.index === -1 ? undefined : sender.tab?.index
 
-        const res = await clientMethod(
-          data,
-          {},
-          {
-            tabInfo: { windowId: sender.tab?.windowId, index: tabIndex },
-            getTab: (tabs) => {
-              const tab = tabs.find((tab) => tab.id === sender.tab?.id)
-              if (!tab) {
-                throw new RpcException('Tab not found')
-              }
-              return tab
-            },
-          }
-        )
+        const res = await clientMethod(data, options, {
+          tabInfo: { windowId: sender.tab?.windowId, index: tabIndex },
+          getTab: (tabs) => {
+            const tab = tabs.find((tab) => tab.id === sender.tab?.id)
+            if (!tab) {
+              throw new RpcException('Tab not found')
+            }
+            return tab
+          },
+        })
         setContext(res.context)
         return res.data
       }
@@ -456,14 +477,26 @@ export class RpcManager {
         'relay:command:applyAutoOffset': passThrough(
           relayFrameClient['relay:command:applyAutoOffset']
         ),
+        'relay:command:controllerReady': passThrough(
+          relayFrameClient['relay:command:controllerReady']
+        ),
+        'relay:command:debugSkipButton': passThrough(
+          relayFrameClient['relay:command:debugSkipButton']
+        ),
         'relay:event:playerReady': passThrough(
           relayFrameClient['relay:event:playerReady']
+        ),
+        'relay:event:playerUnload': passThrough(
+          relayFrameClient['relay:event:playerUnload']
         ),
         'relay:event:videoChange': passThrough(
           relayFrameClient['relay:event:videoChange']
         ),
         'relay:event:videoRemoved': passThrough(
           relayFrameClient['relay:event:videoRemoved']
+        ),
+        'relay:event:videoStateChange': passThrough(
+          relayFrameClient['relay:event:videoStateChange']
         ),
         'relay:event:preloadNextEpisode': passThrough(
           relayFrameClient['relay:event:preloadNextEpisode']
@@ -473,6 +506,9 @@ export class RpcManager {
         ),
         'relay:event:showPopover': passThrough(
           relayFrameClient['relay:event:showPopover']
+        ),
+        'relay:event:userInteraction': passThrough(
+          relayFrameClient['relay:event:userInteraction']
         ),
       },
       {

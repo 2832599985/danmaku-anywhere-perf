@@ -56,6 +56,11 @@
     "refreshMetadata": "刷新元数据",
     "title": "标题"
   },
+  "bookmark": {
+    "add": "收藏",
+    "refreshEpisodes": "刷新剧集",
+    "remove": "取消收藏"
+  },
   "common": {
     "acknowledge": "知道了",
     "add": "添加",
@@ -93,6 +98,7 @@
     "pip": "画中画",
     "regexShort": "正则",
     "reset": "重置",
+    "restore": "恢复",
     "save": "保存",
     "saved": "已保存",
     "saving": "正在保存...",
@@ -298,6 +304,14 @@
     "passedToNext": "未找到匹配，已传递给下一策略",
     "previousStrategyTerminal": "已跳过：上一策略返回了终止结果"
   },
+  "form": {
+    "precision": {
+      "alt": "Alt",
+      "drag": "拖拽 / 滚轮",
+      "shift": "Shift"
+    },
+    "resetToZero": "归零"
+  },
   "importPage": {
     "confirm": "确认导入",
     "help": {
@@ -428,8 +442,12 @@
   },
   "mountPage": {
     "alert": {
-      "checkMountConfig": "检查装填配置",
-      "mountingDisabled": "无法在当前页面装填弹幕"
+      "createMountConfig": "创建装填配置",
+      "disabledMountConfig": "装填配置 \"{{name}}\" 已禁用",
+      "enableMountConfig": "启用配置",
+      "extensionDisabled": "弹幕任何地方已禁用",
+      "noMountConfig": "该网站暂无装填配置",
+      "pageUnsupported": "该类型页面无法装填弹幕"
     },
     "confirmDeleteMultiple_one": "确定要删除{{count}}个弹幕吗？",
     "confirmDeleteMultiple_other": "确定要删除{{count}}个弹幕吗？",
@@ -441,17 +459,63 @@
     "selectedCount_one": "已选择{{count}}",
     "selectedCount_other": "已选择{{count}}"
   },
+  "namingRule": {
+    "create": "创建命名规则",
+    "deleteConfirm": "确定要删除此命名规则吗？",
+    "duplicateTitle": "已存在相同标题的命名规则",
+    "edit": "编辑命名规则",
+    "episodeLabel": "第 {{number}} 集",
+    "filesInFolder": "文件夹中的文件",
+    "folder": "文件夹",
+    "local": "本地",
+    "matchCount": "{{matched}} / {{total}} 已匹配",
+    "noRules": "没有定义命名规则",
+    "rootFolder": "（根目录）",
+    "ruleCreated": "命名规则已保存",
+    "ruleCreateFailed": "保存命名规则失败",
+    "ruleDeleted": "命名规则已删除",
+    "template": "文件名模板",
+    "templateHelp": "使用 {episode} 表示集数，{episode:02d} 表示补零",
+    "title": "标题"
+  },
   "optionsPage": {
+    "auth": {
+      "confirmPassword": "确认密码",
+      "email": "电子邮箱",
+      "emailHelper": "邮箱仅用于找回密码",
+      "name": "昵称",
+      "nameHelper": "别的用户可以看到你的昵称",
+      "password": "密码",
+      "passwordHelper": "长度至少为6个字符",
+      "signedInAs": "已登录",
+      "signIn": "登录",
+      "signOut": "退出登录",
+      "signUp": "注册",
+      "signUpSuccess": "注册成功"
+    },
     "backup": {
       "alert": {
         "exportSuccess": "成功导出备份",
         "importSuccess": "成功导入备份"
       },
-      "export": "导出备份",
-      "exportDescription": "导出所有配置到 JSON 文件",
-      "import": "导入备份",
-      "importDescription": "从 JSON 文件导入配置",
-      "importError": "导入失败"
+      "cloudBackup": "云备份",
+      "cloudBackupCreate": "创建云备份",
+      "cloudCreateError": "云备份失败：{{message}}",
+      "cloudCreateSuccess": "云备份已创建",
+      "cloudDescription": "将设置同步到云端。最多保留3个版本。",
+      "cloudDownloadError": "下载云备份失败：{{message}}",
+      "cloudListError": "加载云备份失败。",
+      "cloudSignInRequired": "登录后即可使用云备份。",
+      "exportToFile": "保存到文件",
+      "goToSignIn": "前往登录",
+      "importError": "导入失败",
+      "importFromFile": "从文件恢复",
+      "latestRevision": "最新",
+      "localBackup": "本地备份",
+      "localDescription": "将设置保存为JSON文件，或从文件恢复。",
+      "noCloudBackups": "暂无云备份。创建一个开始使用。",
+      "restoreConfirmDesc": "恢复此备份将覆盖您当前的设置。确定要继续吗？",
+      "restoreConfirmTitle": "恢复设置？"
     },
     "chConvert": {
       "name": "简繁转换",
@@ -489,6 +553,7 @@
       }
     },
     "enableAnalytics": "匿名数据收集",
+    "enableFullscreenInteraction": "全屏时启用交互",
     "help": {
       "feedback": "提交意见或建议",
       "reportBug": "报告Bug"
@@ -528,6 +593,7 @@
     "name": "设置",
     "pages": {
       "advanced": "高级设置",
+      "auth": "账号",
       "backup": "备份",
       "dataManagement": "数据管理",
       "help": "关于",
@@ -564,6 +630,7 @@
       }
     },
     "searchUsingSimplified": "使用简体中文搜索",
+    "showFloatingButton": "显示浮动按钮",
     "theme": {
       "colorMode": {
         "dark": "深色",
@@ -593,13 +660,13 @@
       "headerValue": "请求头值",
       "helper": {
         "authHeaders": "随每个请求发送的自定义请求头 (例如 Authorization、X-AppSecret)",
-        "baseUrl": "弹弹Play或兼容弹弹Play的API地址",
+        "baseUrl": "弹弹play或兼容弹弹play的API地址",
         "builtInName": "内置弹幕源的名称不可更改"
       },
       "name": "名称",
       "title": {
         "add": "添加弹幕源",
-        "addDanDanPlay": "添加弹弹Play弹幕源",
+        "addDanDanPlay": "添加弹弹play弹幕源",
         "addMacCms": "添加MacCMS弹幕源",
         "edit": "编辑弹幕源: {{name}}"
       }
@@ -675,7 +742,7 @@
     "interval": "发射间隔",
     "maxOnScreen": "最大同屏弹幕数",
     "name": "弹幕设置",
-    "offset": "时间轴（毫秒）",
+    "offset": "时间轴",
     "opacity": "不透明度",
     "orderDistribution": "顺序",
     "overlap": "重叠比例",
@@ -710,7 +777,7 @@
       "distribution": "均匀：弹幕将均匀地填充屏幕。顺序：弹幕将从上到下填充屏幕",
       "interval": "值越小弹幕越密集。过低可能导致卡顿。",
       "maxOnScreen": "屏幕上显示的弹幕数量不超过此值。超过此值的弹幕将被丢弃。",
-      "offset": "弹幕出现的时间位移。 正值使弹幕延后出现，负值使弹幕提前出现。",
+      "offsetScrubber": "水平拖动或使用滚轮调整，双击手动输入。正值使弹幕延后出现，负值使弹幕提前出现。",
       "overlap": "允许弹幕重叠以减少弹幕之间的间距，值越高，重叠幅度越大。0表示禁止重叠。",
       "safeZone": {
         "y": "Y轴（上下）的显示范围"
@@ -780,6 +847,8 @@
     "debug": "调试"
   },
   "titleMapping": {
+    "deleteConfirm_other": "确定要删除 {{count}} 个标题映射吗？",
+    "deleteConfirmOne": "确定要删除此标题映射吗？",
     "empty": "没有标题映射",
     "noSeasons": "没有可以映射的番剧",
     "title": "标题映射",

@@ -49,7 +49,7 @@ function getActiveStep(steps: StepData[]) {
 export const MatchingSteps = () => {
   const { t } = useTranslation()
   const activeConfig = useActiveConfig()
-  const videoId = useStore.use.videoId?.()
+  const hasVideo = useStore((s) => s.frame.activeFrame?.hasVideo ?? false)
   const { toggleEditor, toggleAiEditor } = useStore.use.integrationForm()
   const { mediaInfo, foundElements, errorMessage, active, matchResult } =
     useStore.use.integration()
@@ -166,8 +166,6 @@ export const MatchingSteps = () => {
           'Mount config is too permissive, please change the pattern to be more restrictive.'
         ),
     }
-
-    const hasVideo = !!videoId
 
     const checkVideoStep = {
       label: t('integration.steps.checkVideo', 'Check Video'),
@@ -287,7 +285,7 @@ export const MatchingSteps = () => {
   }, [
     t,
     activeIntegration,
-    videoId,
+    hasVideo,
     activeConfig,
     active,
     mediaInfo,

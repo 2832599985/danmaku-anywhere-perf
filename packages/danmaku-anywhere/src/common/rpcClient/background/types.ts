@@ -1,4 +1,5 @@
 import type {
+  Bookmark,
   CommentEntity,
   CustomEpisode,
   CustomEpisodeLite,
@@ -30,8 +31,24 @@ import type {
   SeasonQueryFilter,
   SeasonSearchRequest,
 } from '@/common/anime/dto'
-import type { BackupData, BackupRestoreResult } from '@/common/backup/dto'
-import type { ImageFetchOptions } from '@/common/components/image/types'
+import type {
+  AuthActionResult,
+  AuthSessionState,
+  AuthSignInInput,
+  AuthSignOutResult,
+  AuthSignUpInput,
+} from '@/common/auth/types'
+import type {
+  BackupData,
+  BackupRestoreResult,
+  CloudBackupItem,
+} from '@/common/backup/dto'
+import type {
+  BookmarkAddInput,
+  BookmarkDeleteBySeasonInput,
+  BookmarkDeleteInput,
+  BookmarkRefreshInput,
+} from '@/common/bookmark/dto'
 import type { BaseUrlConfig } from '@/common/configs/types'
 import type {
   CustomEpisodeQueryFilter,
@@ -81,6 +98,11 @@ export type TestAiProviderResponse =
 
 export type BackgroundMethods = {
   iconSet: RPCDef<IconSetDto, void>
+  authGetSession: RPCDef<void, AuthSessionState | null>
+  authSignUp: RPCDef<AuthSignUpInput, AuthActionResult>
+  authSignIn: RPCDef<AuthSignInInput, AuthActionResult>
+  authSignOut: RPCDef<void, AuthSignOutResult>
+  authDeleteAccount: RPCDef<void, AuthSignOutResult>
   mediaParseUrl: RPCDef<{ url: string }, WithSeason<EpisodeMeta>>
   seasonSearch: RPCDef<SeasonSearchRequest, (Season | CustomSeason)[]>
   seasonFilter: RPCDef<SeasonQueryFilter, Season[]>
@@ -105,6 +127,7 @@ export type BackgroundMethods = {
   episodeDeleteCustom: RPCDef<CustomEpisodeQueryFilter, void>
   episodeImport: RPCDef<DanmakuImportData[], DanmakuImportResult>
   seasonMapAdd: RPCDef<SeasonMapSnapshot, void>
+  seasonMapPut: RPCDef<SeasonMapSnapshot, void>
   seasonMapDelete: RPCDef<{ key: string }, void>
   seasonMapRemoveProvider: RPCDef<
     {
@@ -113,19 +136,18 @@ export type BackgroundMethods = {
     },
     void
   >
+  seasonMapDeleteMany: RPCDef<{ keys: string[] }, void>
 
   seasonMapGetAll: RPCDef<void, SeasonMapSnapshot[]>
   danmakuPurgeCache: RPCDef<number, number>
   bilibiliSetCookies: RPCDef<void, void>
   bilibiliGetLoginStatus: RPCDef<void, BilibiliUserInfo>
   tencentTestCookies: RPCDef<void, boolean>
-  fetchImage: RPCDef<{ src: string; options?: ImageFetchOptions }, string>
+  fetchImage: RPCDef<{ src: string }, string | null>
   getActiveTabUrl: RPCDef<void, string | null>
   getFrameId: RPCDef<void, number>
-  getAllFrames: RPCDef<void, chrome.webNavigation.GetAllFrameResultDetails[]>
   getExtensionManifest: RPCDef<void, chrome.runtime.ManifestV3>
   getAlarm: RPCDef<string, chrome.alarms.Alarm | null>
-  injectScript: RPCDef<number, void>
   remoteLog: RPCDef<LogEntry, void>
   exportDebugData: RPCDef<void, { id: string }>
   getFontList: RPCDef<void, chrome.fontSettings.FontName[]>
@@ -151,8 +173,16 @@ export type BackgroundMethods = {
   testAiProvider: RPCDef<AiProviderConfigInput, TestAiProviderResponse>
   backupExport: RPCDef<void, BackupData>
   backupImport: RPCDef<unknown, BackupRestoreResult>
+  cloudBackupList: RPCDef<void, CloudBackupItem[]>
+  cloudBackupCreate: RPCDef<void, { success: boolean; id: string }>
+  cloudBackupDownload: RPCDef<string, BackupData>
   dataWipeDanmaku: RPCDef<{ includeCustomEpisodes: boolean }, void>
   episodeFetchMultiSource: RPCDef<MultiSourceFetchInput, MultiSourceFetchResult>
+  bookmarkAdd: RPCDef<BookmarkAddInput, Bookmark>
+  bookmarkDelete: RPCDef<BookmarkDeleteInput, void>
+  bookmarkDeleteBySeason: RPCDef<BookmarkDeleteBySeasonInput, void>
+  bookmarkGetAll: RPCDef<void, Bookmark[]>
+  bookmarkRefresh: RPCDef<BookmarkRefreshInput, Bookmark>
 }
 
 type InputWithFrameId<TInput> = TInput extends void
@@ -192,6 +222,16 @@ export type PlayerRelayCommands = {
     void,
     FrameContext
   >
+  'relay:command:controllerReady': RPCDef<
+    InputWithFrameId<void>,
+    void,
+    FrameContext
+  >
+  'relay:command:debugSkipButton': RPCDef<
+    InputWithFrameId<void>,
+    void,
+    FrameContext
+  >
 }
 
 export interface AutoOffsetResultDto {
@@ -201,13 +241,32 @@ export interface AutoOffsetResultDto {
   opEndTime: number
 }
 
+type PlayerReadyData = {
+  url: string
+  documentId: string
+}
+
+export interface VideoInfo {
+  src: string
+  width: number
+  height: number
+  playing: boolean
+  muted: boolean
+}
+
 // Player -> Controller communication
 // Here the frameId is used to identify the SOURCE frame
 export type PlayerRelayEvents = {
-  'relay:event:playerReady': RPCDef<InputWithFrameId<void>, void>
-  'relay:event:videoChange': RPCDef<InputWithFrameId<void>, void>
+  'relay:event:playerReady': RPCDef<InputWithFrameId<PlayerReadyData>, void>
+  'relay:event:playerUnload': RPCDef<InputWithFrameId<void>, void>
+  'relay:event:videoChange': RPCDef<InputWithFrameId<VideoInfo>, void>
   'relay:event:videoRemoved': RPCDef<InputWithFrameId<void>, void>
+  'relay:event:videoStateChange': RPCDef<
+    InputWithFrameId<Pick<VideoInfo, 'playing' | 'muted'>>,
+    void
+  >
   'relay:event:preloadNextEpisode': RPCDef<InputWithFrameId<void>, void>
   'relay:event:videoEnded': RPCDef<InputWithFrameId<void>, void>
   'relay:event:showPopover': RPCDef<InputWithFrameId<void>, void>
+  'relay:event:userInteraction': RPCDef<InputWithFrameId<void>, void>
 }

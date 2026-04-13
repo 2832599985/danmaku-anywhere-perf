@@ -87,7 +87,9 @@ export const EpisodeSearchList = ({
 }: SeasonListItemProps) => {
   return (
     <ErrorBoundary
-      fallbackRender={({ error }) => <ErrorMessage message={error.message} />}
+      fallbackRender={({ error }) => (
+        <ErrorMessage message={(error as Error).message} />
+      )}
     >
       <Suspense fallback={<FallbackEpisodeList />}>
         <EpisodeListInner season={season} renderEpisode={renderEpisode} />

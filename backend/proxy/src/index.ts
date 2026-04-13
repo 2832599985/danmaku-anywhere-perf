@@ -1,16 +1,18 @@
+import { Scalar } from '@scalar/hono-api-reference'
 import * as Sentry from '@sentry/cloudflare'
 import { cors } from 'hono/cors'
 import { HTTPException } from 'hono/http-exception'
 import { logger } from 'hono/logger'
 import { poweredBy } from 'hono/powered-by'
 import { prettyJSON } from 'hono/pretty-json'
+import { openAPIRouteHandler } from 'hono-openapi'
+import { factory } from '@/factory'
 import { authContext } from '@/middleware/authContext'
 import { useCache } from '@/middleware/cache'
 import { setContext } from '@/middleware/setContext'
 import { danDanPlay } from '@/routes/api/ddp/danDanPlay'
-import { llmLegacy } from '@/routes/api/llm/llm'
+import { llmLegacy } from '@/routes/api/llm/routes'
 import { getIsTestEnv } from '@/utils/getIsTestEnv'
-import { factory } from './factory'
 import { api } from './routes/api/routes'
 import { serializeError } from './utils/serializeError'
 
@@ -37,8 +39,40 @@ app.use(
   authContext()
 )
 
+app.get(
+  '/docs',
+  openAPIRouteHandler(app, {
+    documentation: {
+      info: {
+        title: 'Danmaku Anywhere API',
+        version: '1.0.0',
+        description: 'Danmaku Anywhere API',
+      },
+      servers: [
+        {
+          url: 'https://api.danmaku.weeblify.app',
+          description: 'Production Server',
+        },
+        { url: 'http://localhost:8787', description: 'Local Server' },
+      ],
+    },
+  })
+)
+
+app.get(
+  '/scalar',
+  Scalar({
+    pageTitle: 'Danmaku Anywhere API',
+    sources: [
+      { url: '/docs', title: 'API' },
+      { url: '/auth/docs', title: 'Auth' },
+    ],
+  })
+)
+
 app.route('/', api)
 
+// legacy routes
 app.use('/proxy/api/*', useCache())
 app.route('/proxy/api', danDanPlay)
 app.route('/proxy/gemini', llmLegacy)
@@ -65,12 +99,12 @@ app.onError((error, c) => {
     )
   }
 
-  // Handle other types of errors
   Sentry.captureException(error)
-  const message = error.message
-  const status = 500
 
-  return c.json({ message, success: false }, { status })
+  const message =
+    c.env.ENVIRONMENT === 'dev' ? error.message : 'Internal server error'
+
+  return c.json({ message, success: false }, { status: 500 })
 })
 
 export default Sentry.withSentry((env: Env) => {
@@ -79,7 +113,7 @@ export default Sentry.withSentry((env: Env) => {
   return {
     dsn: 'https://a57c6ba48bc0da21d4c6f7074e7a6f0e@o4509744978460672.ingest.us.sentry.io/4509744987308032',
     release: versionId,
-    sendDefaultPii: true,
+    sendDefaultPii: false,
     enableLogs: true,
     tracesSampleRate: 1.0,
     environment: env.ENVIRONMENT,

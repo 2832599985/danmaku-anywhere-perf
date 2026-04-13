@@ -7,7 +7,7 @@ import { MountPageContent } from '@/common/components/DanmakuSelector/MountPageC
 import { useToast } from '@/common/components/Toast/toastStore'
 import { tabQueryKeys } from '@/common/queries/queryKeys'
 import { controllerRpcClient } from '@/common/rpcClient/controller/client'
-import { useIsConnected } from '@/popup/hooks/useIsConnected'
+import { useMountAvailability } from '@/popup/hooks/useMountAvailability'
 import { useMountDanmakuPopup } from '@/popup/pages/mount/useMountDanmakuPopup'
 import { useStore } from '@/popup/store'
 
@@ -24,7 +24,8 @@ export const MountPage = (): ReactElement => {
   } = useStore.use.mount()
   const { selectedTypes, setSelectedType } = useStore.use.danmaku()
 
-  const isConnected = useIsConnected()
+  const availability = useMountAvailability()
+  const isConnected = availability.kind === 'connected'
 
   const navigate = useNavigate()
 
@@ -43,7 +44,9 @@ export const MountPage = (): ReactElement => {
 
   const { mutate: unmount } = useMutation({
     mutationFn: () => controllerRpcClient.danmakuUnmount(),
-    mutationKey: tabQueryKeys.getState(),
+    meta: {
+      invalidates: [tabQueryKeys.getState()],
+    },
     onSuccess: () => {
       setIsMounted(false)
       setFilter('')
@@ -60,10 +63,6 @@ export const MountPage = (): ReactElement => {
     navigate('/search')
   }
 
-  function handleGoCreateMountConfig() {
-    navigate('/config')
-  }
-
   return (
     <MountPageContent
       filter={filter}
@@ -78,7 +77,6 @@ export const MountPage = (): ReactElement => {
       isMounted={isMounted}
       isConnected={isConnected}
       onGoSearch={handleGoSearch}
-      onGoCreateMountConfig={handleGoCreateMountConfig}
     />
   )
 }

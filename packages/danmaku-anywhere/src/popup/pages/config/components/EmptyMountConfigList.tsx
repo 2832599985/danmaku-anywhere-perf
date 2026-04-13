@@ -46,7 +46,6 @@ export const EmptyMountConfigList = ({
           transform: 'translateX(-50%)',
         }}
         height={300}
-        cache={false}
       />
       <TemplatePickerDialog
         open={templateDialogOpen}

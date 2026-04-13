@@ -11,6 +11,8 @@ import { ensureStandaloneReady } from '@/common/standalone/ensureStandaloneReady
 import { Theme } from '@/common/theme/Theme'
 import { App } from './App'
 import '@/common/localization/i18n'
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
+import { createPortal } from 'react-dom'
 import { EnvironmentContext } from '@/common/environment/context'
 import { tryCatchSync } from '@/common/utils/tryCatch'
 import { createPopoverRoot } from '@/content/common/host/createPopoverRoot'
@@ -22,7 +24,7 @@ const { data: frameId } = await chromeRpcClient.getFrameId()
 
 Logger.debug(`Controller script loaded in frame ${frameId}`)
 
-const { shadowRoot, shadowStyle, shadowContainer } = createPopoverRoot({
+const { shadowRoot, shadowStyle, shadowContainer } = await createPopoverRoot({
   id: CONTROLLER_ROOT_ID,
 })
 
@@ -45,6 +47,7 @@ const cache = createCache({
   key: 'danmaku-anywhere',
   container: shadowStyle,
   prepend: true,
+  speedy: false,
 })
 
 const themeOptions: ThemeOptions = {
@@ -91,6 +94,11 @@ ReactDOM.createRoot(shadowRoot).render(
             <App />
           </Theme>
         </EnvironmentContext>
+        {import.meta.env.MODE === 'development' &&
+          createPortal(
+            <ReactQueryDevtools initialIsOpen={false} />,
+            document.body
+          )}
       </QueryClientProvider>
     </CacheProvider>
   </React.StrictMode>
