@@ -21,6 +21,10 @@
   pointer-events: none;
 }
 
+.da-density-progress-line {
+  pointer-events: none;
+}
+
 .da-density-tooltip {
   position: absolute;
   pointer-events: none;

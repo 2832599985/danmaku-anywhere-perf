@@ -73,6 +73,12 @@ export class DanmakuDensityChart {
     null,
     undefined
   > | null = null
+  private progressLine: d3.Selection<
+    SVGLineElement,
+    unknown,
+    null,
+    undefined
+  > | null = null
   private hoverLine: d3.Selection<
     SVGLineElement,
     unknown,
@@ -183,6 +189,17 @@ export class DanmakuDensityChart {
     // Legend group (rendered on top)
     const legendGroup = svg.append('g').classed('da-skip-legend', true)
 
+    // Playback progress indicator line
+    const progressLine = svg
+      .append('line')
+      .classed('da-density-progress-line', true)
+      .attr('y1', 0)
+      .attr('y2', this.options.height)
+      .attr('stroke', 'rgba(255, 255, 255, 0.9)')
+      .attr('stroke-width', 1.5)
+      .attr('pointer-events', 'none')
+      .style('display', 'none')
+
     // Hover indicator line
     const hoverLine = svg
       .append('line')
@@ -220,6 +237,7 @@ export class DanmakuDensityChart {
     this.clipRect = clipRect
     this.skipRegionGroup = skipRegionGroup
     this.legendGroup = legendGroup
+    this.progressLine = progressLine
     this.hoverLine = hoverLine
     this.interactionRect = interactionRect
   }
@@ -234,6 +252,7 @@ export class DanmakuDensityChart {
     this.clipRect = null
     this.skipRegionGroup = null
     this.legendGroup = null
+    this.progressLine = null
     this.hoverLine = null
     this.interactionRect = null
   }
@@ -259,6 +278,7 @@ export class DanmakuDensityChart {
       this.svg.attr('height', this.options.height)
       this.clipRect?.attr('height', this.options.height)
       this.hoverLine?.attr('y2', this.options.height)
+      this.progressLine?.attr('y2', this.options.height)
       this.interactionRect?.attr('height', this.options.height)
       this.redraw()
     }
@@ -296,6 +316,14 @@ export class DanmakuDensityChart {
     const playedRatio = Math.min(1, Math.max(0, currentTime / this.duration))
     const clipWidth = Math.round(width * playedRatio)
     this.clipRect.attr('width', clipWidth)
+
+    // Move progress indicator line
+    if (this.progressLine) {
+      this.progressLine
+        .attr('x1', clipWidth)
+        .attr('x2', clipWidth)
+        .style('display', clipWidth > 0 ? null : 'none')
+    }
   }
 
   show() {
