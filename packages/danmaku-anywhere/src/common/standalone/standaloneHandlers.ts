@@ -172,6 +172,8 @@ export const standalonePlayerCommandHandlers: StandaloneRpcHandlers<PlayerRelayC
     'relay:command:skipOp': () => undefined,
     'relay:command:controllerReady': () => undefined,
     'relay:command:debugSkipButton': () => undefined,
+    'relay:command:upscale:toggle': () => undefined,
+    'relay:command:upscale:setMode': () => undefined,
   }
 
 export const standalonePlayerEventHandlers: StandaloneRpcHandlers<PlayerRelayEvents> =

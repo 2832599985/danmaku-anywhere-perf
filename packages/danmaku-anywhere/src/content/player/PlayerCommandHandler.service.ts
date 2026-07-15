@@ -21,6 +21,7 @@ import densityPlotCss from '@/content/player/densityPlot/DanmakuDensityChart.css
 import type { SkipRegion } from '@/content/player/densityPlot/types'
 import { FixedSkipService } from '@/content/player/fixedSkip/FixedSkip.service'
 import { createPipWindow, moveElement } from '@/content/player/pipUtils'
+import { UpscaleService } from '@/content/player/upscaler/Upscale.service'
 import { VideoEventService } from '@/content/player/videoEvent/VideoEvent.service'
 import { VideoNodeObserverService } from '@/content/player/videoObserver/VideoNodeObserver.service'
 import type { SkipTarget } from '@/content/player/videoSkip/SkipTarget'
@@ -70,6 +71,7 @@ export class PlayerCommandHandler {
     @inject(DanmakuDensityService) private density: DanmakuDensityService,
     @inject(FixedSkipService) private fixedSkip: FixedSkipService,
     @inject(AutoOffsetService) private autoOffset: AutoOffsetService,
+    @inject(UpscaleService) private upscale: UpscaleService,
     @inject(DanmakuOptionsService)
     private danmakuOptions: DanmakuOptionsService,
     @inject(ExtensionOptionsService)
@@ -100,6 +102,12 @@ export class PlayerCommandHandler {
       id: PLAYER_ROOT_ID,
     })
     this.root = root
+    this.upscale.setTopLayerRestore(() => {
+      reparentPopover(this.root, document, document.fullscreenElement)
+      void playerRpcClient.controller['relay:event:showPopover']({
+        frameId: this.frameId,
+      })
+    })
 
     // Create a style element for theme CSS variables
     const themeStyleEl = document.createElement('style')
@@ -245,6 +253,27 @@ export class PlayerCommandHandler {
       autoNextEpisode: boolean
       enableFixedSkip: boolean
       fixedSkipSeconds: number
+      upscale: {
+        enabled: boolean
+        modeId:
+          | 'builtin-mode-a'
+          | 'builtin-mode-b'
+          | 'builtin-mode-c'
+          | 'builtin-mode-aa'
+          | 'builtin-mode-bb'
+          | 'builtin-mode-ca'
+        performanceTier: 'performance' | 'balanced' | 'quality' | 'ultra'
+        targetResolution:
+          | 'x2'
+          | 'x4'
+          | 'x8'
+          | '720p'
+          | '1080p'
+          | '2k'
+          | '4k'
+          | 'native'
+        enableCrossOriginFix: boolean
+      }
     }
   }) {
     this.videoSkip.setPlayerOptions({
@@ -283,6 +312,11 @@ export class PlayerCommandHandler {
     } else {
       this.fixedSkip.disable()
     }
+    void this.upscale
+      .applyOptions(options.playerOptions.upscale)
+      .catch((error: unknown) => {
+        this.logger.warn('Failed to apply upscale options', error)
+      })
   }
 
   private wireWindowEvents() {
@@ -381,6 +415,24 @@ export class PlayerCommandHandler {
         'relay:command:debugSkipButton': async () => {
           this.videoSkip.debugShowSkipButton()
         },
+        'relay:command:upscale:toggle': async ({ data: enabled }) => {
+          const options = await this.extensionOptions.get()
+          await this.extensionOptions.update({
+            playerOptions: {
+              ...options.playerOptions,
+              upscale: { ...options.playerOptions.upscale, enabled },
+            },
+          })
+        },
+        'relay:command:upscale:setMode': async ({ data }) => {
+          const options = await this.extensionOptions.get()
+          await this.extensionOptions.update({
+            playerOptions: {
+              ...options.playerOptions,
+              upscale: { ...options.playerOptions.upscale, ...data },
+            },
+          })
+        },
       },
       {
         logger: this.logger,
@@ -432,10 +484,9 @@ export class PlayerCommandHandler {
     }
 
     const restoreWrapper = moveElement(this.manager.getWrapper(), pipContainer)
-    const restoreVideo = moveElement(
-      this.manager.video!,
-      pipWindow.document.body
-    )
+    const video = this.manager.video
+    if (!video) throw new Error('Cannot enter PiP without an active video')
+    const restoreVideo = moveElement(video, pipWindow.document.body)
 
     delayResize()
 

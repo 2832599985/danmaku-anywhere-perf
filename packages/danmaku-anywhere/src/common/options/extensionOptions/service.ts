@@ -173,6 +173,15 @@ export class ExtensionOptionsService implements IStoreService {
               autoDensity: false,
               autoNextEpisode: false,
               enableFullscreenInteraction: true,
+              enableTranslation: false,
+              translationTargetLang: 'en',
+              upscale: {
+                enabled: false,
+                modeId: 'builtin-mode-a',
+                performanceTier: 'balanced',
+                targetResolution: 'x2',
+                enableCrossOriginFix: false,
+              },
             }
           }),
       })
@@ -267,6 +276,16 @@ export class ExtensionOptionsService implements IStoreService {
                 fixedSkipSeconds: 90,
                 autoDensity: false,
                 autoNextEpisode: true,
+                enableFullscreenInteraction: true,
+                enableTranslation: false,
+                translationTargetLang: 'en',
+                upscale: {
+                  enabled: false,
+                  modeId: 'builtin-mode-a',
+                  performanceTier: 'balanced',
+                  targetResolution: 'x2',
+                  enableCrossOriginFix: false,
+                },
               }
               return
             }
@@ -355,6 +374,24 @@ export class ExtensionOptionsService implements IStoreService {
           produce<ExtensionOptions>(data, (draft) => {
             draft.playerOptions.enableTranslation = false
             draft.playerOptions.translationTargetLang = 'en'
+          }),
+      })
+      .version(34, {
+        upgrade: (data) =>
+          produce<ExtensionOptions>(data, (draft) => {
+            draft.playerOptions.upscale ??= {
+              enabled: false,
+              modeId: 'builtin-mode-a',
+              performanceTier: 'balanced',
+              targetResolution: 'x2',
+              enableCrossOriginFix: false,
+            }
+          }),
+      })
+      .version(35, {
+        upgrade: (data) =>
+          produce<ExtensionOptions>(data, (draft) => {
+            draft.playerOptions.upscale.performanceTier ??= 'balanced'
           }),
       })
   }

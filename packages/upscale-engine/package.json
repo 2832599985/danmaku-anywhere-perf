@@ -1,0 +1,24 @@
+{
+  "name": "@danmaku-anywhere/upscale-engine",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Framework-independent Anime4K WebGPU rendering engine",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "lint": "tsc --noEmit && biome check --write",
+    "lint:ci": "biome ci",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "anime4k-webgpu": "^1.0.0"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.64",
+    "vitest": "^4.0.13"
+  }
+}

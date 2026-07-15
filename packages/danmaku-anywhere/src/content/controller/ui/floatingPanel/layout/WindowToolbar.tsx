@@ -42,7 +42,10 @@ export const WindowToolbar = (props: WindowToolbarProps) => {
 
   return (
     <AppBar position="relative" sx={{ zIndex: 1402 }}>
-      <Toolbar variant="dense" sx={{ gap: 2 }}>
+      <Toolbar
+        variant="dense"
+        sx={{ gap: 1, minWidth: 0, overflow: 'visible', flexWrap: 'nowrap' }}
+      >
         {children}
         <Stack direction="row" ml="auto">
           {additionalButtons}

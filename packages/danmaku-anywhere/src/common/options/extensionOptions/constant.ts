@@ -41,6 +41,13 @@ export const defaultExtensionOptions: ExtensionOptions = {
     enableFullscreenInteraction: true,
     enableTranslation: false,
     translationTargetLang: 'en',
+    upscale: {
+      enabled: false,
+      modeId: 'builtin-mode-a',
+      performanceTier: 'balanced',
+      targetResolution: 'x2',
+      enableCrossOriginFix: false,
+    },
   },
   theme: {
     colorMode: ColorMode.System,

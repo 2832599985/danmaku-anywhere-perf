@@ -66,6 +66,30 @@ export const playerOptionsSchema = z.object({
   enableFullscreenInteraction: z.boolean(),
   enableTranslation: z.boolean(),
   translationTargetLang: z.enum(['en', 'ja', 'zh', 'ko']).default('en'),
+  /** Anime4K/WebGPU enhancement settings. Disabled by default for compatibility. */
+  upscale: z.object({
+    enabled: z.boolean(),
+    modeId: z.enum([
+      'builtin-mode-a',
+      'builtin-mode-b',
+      'builtin-mode-c',
+      'builtin-mode-aa',
+      'builtin-mode-bb',
+      'builtin-mode-ca',
+    ]),
+    performanceTier: z.enum(['performance', 'balanced', 'quality', 'ultra']),
+    targetResolution: z.enum([
+      'x2',
+      'x4',
+      'x8',
+      '720p',
+      '1080p',
+      '2k',
+      '4k',
+      'native',
+    ]),
+    enableCrossOriginFix: z.boolean(),
+  }),
 })
 
 export const retentionPolicySchema = z.object({

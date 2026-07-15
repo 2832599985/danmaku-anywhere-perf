@@ -495,6 +495,12 @@ export class RpcManager {
         'relay:command:debugSkipButton': passThrough(
           relayFrameClient['relay:command:debugSkipButton']
         ),
+        'relay:command:upscale:toggle': passThrough(
+          relayFrameClient['relay:command:upscale:toggle']
+        ),
+        'relay:command:upscale:setMode': passThrough(
+          relayFrameClient['relay:command:upscale:setMode']
+        ),
         'relay:event:playerReady': passThrough(
           relayFrameClient['relay:event:playerReady']
         ),

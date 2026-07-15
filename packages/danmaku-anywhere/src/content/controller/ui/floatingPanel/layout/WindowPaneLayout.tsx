@@ -36,7 +36,11 @@ export const WindowPaneLayout = (props: WindowPaneLayoutProps) => {
         padding: 0,
         width: sm ? '100%' : width,
         maxWidth: sm ? '100%' : width,
-        minHeight: height,
+        height: sm
+          ? 'min(85dvh, 720px)'
+          : `min(${height}px, calc(100dvh - 24px))`,
+        maxHeight: 'calc(100dvh - 24px)',
+        minHeight: 0,
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',

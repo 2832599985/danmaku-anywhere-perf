@@ -84,6 +84,7 @@ const BaseWindow = ({
               style={{
                 cursor: 'grab',
                 touchAction: 'none',
+                flexShrink: 0,
               }}
               ref={ref}
             >

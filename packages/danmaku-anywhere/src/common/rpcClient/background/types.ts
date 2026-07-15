@@ -234,6 +234,34 @@ export type PlayerRelayCommands = {
     void,
     FrameContext
   >
+  'relay:command:upscale:toggle': RPCDef<
+    InputWithFrameId<boolean>,
+    void,
+    FrameContext
+  >
+  'relay:command:upscale:setMode': RPCDef<
+    InputWithFrameId<{
+      modeId:
+        | 'builtin-mode-a'
+        | 'builtin-mode-b'
+        | 'builtin-mode-c'
+        | 'builtin-mode-aa'
+        | 'builtin-mode-bb'
+        | 'builtin-mode-ca'
+      performanceTier: 'performance' | 'balanced' | 'quality' | 'ultra'
+      targetResolution:
+        | 'x2'
+        | 'x4'
+        | 'x8'
+        | '720p'
+        | '1080p'
+        | '2k'
+        | '4k'
+        | 'native'
+    }>,
+    void,
+    FrameContext
+  >
 }
 
 export interface AutoOffsetResultDto {

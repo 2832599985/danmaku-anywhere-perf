@@ -29,6 +29,7 @@ This is a performance/UX fork (`2832599985/danmaku-anywhere-perf`) of `Mr-Quin/d
 - DDP comment dedup using `p+m` composite key (`ddp/api.ts`)
 - CID preservation as optional field in `CommentEntity`
 - MacCMS title mapping support (season/episode persistence for automatic matching)
+- Anime4K WebGPU super-resolution (`packages/upscale-engine`, `src/content/player/upscaler/`); integration points are extension options v34-v35, player RPC commands, floating-panel controls, and the optional `anime4k-cors` DNR ruleset
 
 ## Common Commands
 

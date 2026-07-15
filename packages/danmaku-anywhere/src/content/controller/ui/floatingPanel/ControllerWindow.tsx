@@ -5,7 +5,6 @@ import { useDialogStore } from '@/common/components/Dialog/dialogStore'
 import { FullPageSpinner } from '@/common/components/FullPageSpinner'
 import { usePopup } from '@/content/controller/store/popupStore'
 import type { PanelSize } from '@/content/controller/ui/constants/size'
-import { CONTROLLER_WINDOW_CONTENT_HEIGHT } from '@/content/controller/ui/constants/size'
 import { ControllerToolbar } from '@/content/controller/ui/floatingPanel/components/ControllerToolbar'
 import { InfoBar } from '@/content/controller/ui/floatingPanel/components/InfoBar'
 import { MergeSourcesPanel } from '@/content/controller/ui/floatingPanel/components/MergeSourcesPanel'
@@ -16,8 +15,10 @@ import { routes } from '@/content/controller/ui/router/routes'
 
 const WindowPaper = styled(Paper)({
   borderRadius: 0,
-  overflow: 'auto',
-  height: '100%',
+  overflowX: 'hidden',
+  overflowY: 'auto',
+  overscrollBehavior: 'contain',
+  minHeight: 0,
   flex: 1,
   display: 'flex',
 })
@@ -57,13 +58,6 @@ export const ControllerWindow = ({
     resetSize()
   }, [resetSize])
 
-  // Compute content height: total panel height minus toolbar (~48px) and info bar area (~40px)
-  // Use persisted height but ensure minimum of default
-  const contentHeight = Math.max(
-    size.height - 88,
-    CONTROLLER_WINDOW_CONTENT_HEIGHT - 88
-  )
-
   return (
     <Window
       anchorEl={anchorEl}
@@ -83,7 +77,8 @@ export const ControllerWindow = ({
         display="flex"
         position="relative"
         flex={1}
-        minHeight={contentHeight}
+        minHeight={0}
+        overflow="hidden"
       >
         <PanelTabs />
         <WindowPaper ref={setContainer}>
