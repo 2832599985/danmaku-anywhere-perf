@@ -39,3 +39,5 @@ bench-load-danmaku-report.md
 
 .wrangler
 .claude-task.md
+
+*.tsbuildinfo
