@@ -2,6 +2,7 @@ import type { PaperProps } from '@mui/material'
 import { Paper } from '@mui/material'
 import type { ReactNode, Ref } from 'react'
 
+import { getLiquidGlassSx } from '@/common/theme/liquidGlass'
 import { useThemeContext } from '@/common/theme/Theme'
 import { useIsSmallScreen } from '@/content/controller/common/hooks/useIsSmallScreen'
 import {
@@ -45,12 +46,14 @@ export const WindowPaneLayout = (props: WindowPaneLayoutProps) => {
         display: 'flex',
         flexDirection: 'column',
         touchAction: 'manipulation',
-        background: palette.glass.base,
-        backdropFilter: palette.glass.blur,
-        border: isResizing
-          ? '1px dashed rgba(139, 92, 246, 0.6)'
-          : `1px solid ${palette.glass.border}`,
-        borderRadius: '16px',
+        ...getLiquidGlassSx(palette, {
+          variant: 'surface',
+          radius: 24,
+          gradientBorder: !isResizing,
+        }),
+        ...(isResizing && {
+          border: `1px dashed ${palette.primary}`,
+        }),
         color: '#fff',
         transition: isResizing ? 'none' : 'border-color 0.2s',
       }}

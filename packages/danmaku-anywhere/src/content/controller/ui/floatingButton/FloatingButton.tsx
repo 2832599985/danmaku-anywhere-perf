@@ -31,12 +31,14 @@ interface FloatingButtonProps extends FabProps {
   isOpen: boolean
 }
 
-const errorPulse = keyframes`
+// The animated box-shadow replaces the whole stack each frame, so the static
+// specular/depth stack must ride along in every keyframe.
+const makeErrorPulse = (staticShadow: string) => keyframes`
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4);
+    box-shadow: ${staticShadow}, 0 0 0 0 rgba(244, 67, 54, 0.4);
   }
   50% {
-    box-shadow: 0 0 0 8px rgba(244, 67, 54, 0);
+    box-shadow: ${staticShadow}, 0 0 0 8px rgba(244, 67, 54, 0);
   }
 `
 
@@ -64,21 +66,31 @@ const StyledFab = styled(Fab, {
     prop !== 'hover' && prop !== 'palette' && prop !== 'hasError',
 })<{ hover: boolean; palette: ThemePalette; hasError: boolean }>(
   ({ hover, palette, hasError }) => {
+    const g = palette.glass
+    const staticShadow = `${g.specular}, ${g.depth}`
     return {
       transition: 'all 0.2s ease-in-out',
-      transform: hover ? 'rotate(45deg)' : 'rotate(0deg)',
+      transform: hover ? 'rotate(45deg) scale(1.05)' : 'rotate(0deg)',
       touchAction: 'none',
-      background: `${palette.glass.base} !important`,
-      backdropFilter: palette.glass.blur,
-      border: `1px solid ${palette.glass.border}`,
-      boxShadow:
-        '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+      // !important: the Fab color prop injects its own background
+      background: `${g.tint}, ${g.base} !important`,
+      backdropFilter: g.blur,
+      border: `1px solid ${g.border}`,
+      boxShadow: staticShadow,
       color: '#fff',
+      '& svg': {
+        filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))',
+      },
       '&:hover': {
-        background: `${palette.glass.hover} !important`,
+        background: `${g.tint}, ${g.hover} !important`,
+      },
+      '&:active': {
+        transform: hover
+          ? 'rotate(45deg) scale(0.94)'
+          : 'rotate(0deg) scale(0.94)',
       },
       ...(hasError && {
-        animation: `${errorPulse} 1.5s ease-in-out infinite`,
+        animation: `${makeErrorPulse(staticShadow)} 1.5s ease-in-out infinite`,
       }),
     }
   }

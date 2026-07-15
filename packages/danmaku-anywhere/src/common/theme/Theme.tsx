@@ -49,7 +49,7 @@ const getDefaultThemeOptions = (
       MuiPaper: {
         styleOverrides: {
           root: {
-            backgroundColor: palette.glass.base,
+            background: `${palette.glass.tint}, ${palette.glass.scrim}`,
             backdropFilter: palette.glass.blur,
             backgroundImage: 'none',
           },

@@ -8,6 +8,7 @@ import {
   HOTKEY_LABELS,
 } from '@/common/options/extensionOptions/hotkeys'
 import { useHotkeyOptions } from '@/common/options/extensionOptions/useHotkeyOptions'
+import { getLiquidGlassSx } from '@/common/theme/liquidGlass'
 import { useThemeContext } from '@/common/theme/Theme'
 import { getOS, properCase } from '@/common/utils/utils'
 
@@ -110,137 +111,143 @@ export const HotkeyCheatSheet = ({ visible }: HotkeyCheatSheetProps) => {
       >
         <Box
           sx={{
-            background: palette.glass.base,
-            backdropFilter: palette.glass.blur,
-            border: `1px solid ${palette.glass.border}`,
-            borderRadius: 3,
-            padding: 3,
+            ...getLiquidGlassSx(palette, {
+              variant: 'surface',
+              radius: 24,
+              gradientBorder: true,
+            }),
             maxWidth: 640,
             width: '90%',
             maxHeight: '80vh',
-            overflow: 'auto',
-            boxShadow:
-              '0 8px 32px rgba(0, 0, 0, 0.4), 0 0 1px rgba(255, 255, 255, 0.1)',
+            overflow: 'hidden',
           }}
         >
-          <Typography
-            variant="h6"
-            sx={{
-              textAlign: 'center',
-              mb: 2.5,
-              fontWeight: 600,
-              background: palette.gradient,
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-            }}
-          >
-            {t('cheatSheet.title')}
-          </Typography>
-
           <Box
             sx={{
-              display: 'grid',
-              gridTemplateColumns:
-                groups.length > 1
-                  ? 'repeat(auto-fit, minmax(240px, 1fr))'
-                  : '1fr',
-              gap: 2.5,
+              padding: 3,
+              maxHeight: '80vh',
+              overflow: 'auto',
             }}
           >
-            {groups.map((group) => (
-              <Box key={group.label}>
-                <Typography
-                  variant="caption"
-                  sx={{
-                    color: palette.primary,
-                    fontWeight: 600,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                    mb: 1,
-                    display: 'block',
-                  }}
-                >
-                  {group.label}
-                </Typography>
+            <Typography
+              variant="h6"
+              sx={{
+                textAlign: 'center',
+                mb: 2.5,
+                fontWeight: 600,
+                background: palette.gradient,
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              {t('cheatSheet.title')}
+            </Typography>
 
-                <Box
-                  sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}
-                >
-                  {group.items.map((item) => (
-                    <Box
-                      key={item.name}
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: 1.5,
-                        py: 0.5,
-                      }}
-                    >
-                      <Typography
-                        variant="body2"
-                        sx={{
-                          color: 'rgba(255, 255, 255, 0.85)',
-                          flexShrink: 1,
-                          minWidth: 0,
-                        }}
-                      >
-                        {item.label}
-                      </Typography>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns:
+                  groups.length > 1
+                    ? 'repeat(auto-fit, minmax(240px, 1fr))'
+                    : '1fr',
+                gap: 2.5,
+              }}
+            >
+              {groups.map((group) => (
+                <Box key={group.label}>
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: palette.primary,
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.08em',
+                      mb: 1,
+                      display: 'block',
+                    }}
+                  >
+                    {group.label}
+                  </Typography>
 
+                  <Box
+                    sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}
+                  >
+                    {group.items.map((item) => (
                       <Box
+                        key={item.name}
                         sx={{
                           display: 'flex',
-                          gap: 0.5,
-                          flexShrink: 0,
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 1.5,
+                          py: 0.5,
                         }}
                       >
-                        {item.keyCombo.split(' + ').map((key, i) => (
-                          <Box
-                            key={i}
-                            component="kbd"
-                            sx={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              minWidth: 28,
-                              height: 28,
-                              px: 1,
-                              borderRadius: 1,
-                              fontSize: '0.75rem',
-                              fontFamily: 'inherit',
-                              fontWeight: 600,
-                              color: '#fff',
-                              background: 'rgba(255, 255, 255, 0.08)',
-                              border: '1px solid rgba(255, 255, 255, 0.15)',
-                              boxShadow:
-                                '0 2px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
-                              lineHeight: 1,
-                            }}
-                          >
-                            {key}
-                          </Box>
-                        ))}
-                      </Box>
-                    </Box>
-                  ))}
-                </Box>
-              </Box>
-            ))}
-          </Box>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            color: 'rgba(255, 255, 255, 0.85)',
+                            flexShrink: 1,
+                            minWidth: 0,
+                          }}
+                        >
+                          {item.label}
+                        </Typography>
 
-          <Typography
-            variant="caption"
-            sx={{
-              display: 'block',
-              textAlign: 'center',
-              mt: 2.5,
-              color: 'rgba(255, 255, 255, 0.4)',
-            }}
-          >
-            {t('cheatSheet.hint')}
-          </Typography>
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            gap: 0.5,
+                            flexShrink: 0,
+                          }}
+                        >
+                          {item.keyCombo.split(' + ').map((key, i) => (
+                            <Box
+                              key={i}
+                              component="kbd"
+                              sx={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                minWidth: 28,
+                                height: 28,
+                                px: 1,
+                                borderRadius: 1,
+                                fontSize: '0.75rem',
+                                fontFamily: 'inherit',
+                                fontWeight: 600,
+                                color: '#fff',
+                                background: 'rgba(255, 255, 255, 0.08)',
+                                border: '1px solid rgba(255, 255, 255, 0.15)',
+                                boxShadow:
+                                  '0 2px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
+                                lineHeight: 1,
+                              }}
+                            >
+                              {key}
+                            </Box>
+                          ))}
+                        </Box>
+                      </Box>
+                    ))}
+                  </Box>
+                </Box>
+              ))}
+            </Box>
+
+            <Typography
+              variant="caption"
+              sx={{
+                display: 'block',
+                textAlign: 'center',
+                mt: 2.5,
+                color: 'rgba(255, 255, 255, 0.4)',
+              }}
+            >
+              {t('cheatSheet.hint')}
+            </Typography>
+          </Box>
         </Box>
       </Box>
     </Fade>

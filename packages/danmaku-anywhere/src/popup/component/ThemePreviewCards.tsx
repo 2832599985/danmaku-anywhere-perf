@@ -53,10 +53,11 @@ const ThemeCard = ({ palette, selected, onSelect }: ThemeCardProps) => {
           sx={{
             width: '60%',
             height: 28,
-            borderRadius: 1.5,
-            backgroundColor: palette.glass.base,
+            borderRadius: 999,
+            background: `${palette.glass.tint}, ${palette.glass.base}`,
             backdropFilter: palette.glass.blur,
             border: `1px solid ${palette.glass.border}`,
+            boxShadow: palette.glass.specular,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',

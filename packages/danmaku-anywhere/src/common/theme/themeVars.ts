@@ -7,8 +7,13 @@ export function getThemeCssVarsString(palette: ThemePalette): string {
   --da-dark-bg: ${palette.darkBg};
   --da-glass-base: ${palette.glass.base};
   --da-glass-hover: ${palette.glass.hover};
+  --da-glass-scrim: ${palette.glass.scrim};
   --da-glass-border: ${palette.glass.border};
+  --da-glass-border-gradient: ${palette.glass.borderGradient};
   --da-glass-blur: ${palette.glass.blur};
+  --da-glass-specular: ${palette.glass.specular};
+  --da-glass-depth: ${palette.glass.depth};
+  --da-glass-tint: ${palette.glass.tint};
   --da-gradient: ${palette.gradient};
   --da-density-played: ${palette.density.played};
   --da-density-unplayed: ${palette.density.unplayed};
