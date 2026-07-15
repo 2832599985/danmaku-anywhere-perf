@@ -185,6 +185,8 @@ export type BackgroundMethods = {
   bookmarkGetAll: RPCDef<void, Bookmark[]>
   bookmarkRefresh: RPCDef<BookmarkRefreshInput, Bookmark>
   translateBatch: RPCDef<TranslationRequest, string[]>
+  upscaleApplyCorsRule: RPCDef<{ videoUrl: string }, void>
+  upscaleRemoveCorsRule: RPCDef<void, void>
 }
 
 type InputWithFrameId<TInput> = TInput extends void

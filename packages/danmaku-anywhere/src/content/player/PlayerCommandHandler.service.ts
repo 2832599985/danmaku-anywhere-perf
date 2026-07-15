@@ -486,6 +486,13 @@ export class PlayerCommandHandler {
     const restoreWrapper = moveElement(this.manager.getWrapper(), pipContainer)
     const video = this.manager.video
     if (!video) throw new Error('Cannot enter PiP without an active video')
+
+    // The upscale canvas can't follow the video into the PiP document (its
+    // geometry sync is bound to this window), and leaving it behind shows a
+    // transparent video (opacity 0). Pause upscaling for the PiP session.
+    const resumeUpscale = this.upscale.isEnabled
+    if (resumeUpscale) this.upscale.disable()
+
     const restoreVideo = moveElement(video, pipWindow.document.body)
 
     delayResize()
@@ -494,6 +501,7 @@ export class PlayerCommandHandler {
       restoreVideo()
       restoreWrapper()
       delayResize()
+      if (resumeUpscale) void this.upscale.reapply().catch(() => undefined)
     })
   }
 

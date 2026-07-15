@@ -105,11 +105,6 @@ export const manifest = defineManifest({
         enabled: true,
         path: 'rules/danmaku-provider.json',
       },
-      {
-        id: 'anime4k-cors',
-        enabled: false,
-        path: 'rules/anime4k-cors.json',
-      },
     ],
   },
 })

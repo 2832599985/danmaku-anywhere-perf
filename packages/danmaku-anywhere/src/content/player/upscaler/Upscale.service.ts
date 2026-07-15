@@ -9,6 +9,7 @@ import {
 import { inject, injectable } from 'inversify'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
+import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { VideoNodeObserverService } from '@/content/player/videoObserver/VideoNodeObserver.service'
 import { UpscaleCanvas } from './UpscaleCanvas'
 
@@ -54,6 +55,12 @@ export class UpscaleService {
   private video: HTMLVideoElement | undefined
   private options = defaultOptions
   private restoreHostTopLayer: (() => void) | undefined
+  // Monotonic operation epoch: disable() and applyOptions() bump it, async
+  // paths capture it at entry and abort after any await if it moved on. This
+  // prevents a stale enable from resurrecting after a rapid toggle-off and
+  // an older Renderer.create from clobbering a newer renderer.
+  private opEpoch = 0
+  private corsRuleActive = false
   private requestedOptions: StoredUpscaleOptions = {
     enabled: false,
     modeId: 'builtin-mode-a',
@@ -89,6 +96,15 @@ export class UpscaleService {
     video = this.videoObserver.activeVideo,
     options: Partial<UpscaleOptions> = {}
   ) {
+    return this.enableInternal(++this.opEpoch, video, options)
+  }
+
+  private async enableInternal(
+    epoch: number,
+    video: HTMLVideoElement | null | undefined,
+    options: Partial<UpscaleOptions> = {}
+  ) {
+    if (epoch !== this.opEpoch) return
     if (!video) throw new RendererInitializationError('No active video element')
     if (!('gpu' in navigator) || !navigator.gpu) {
       throw new RendererInitializationError(
@@ -111,35 +127,57 @@ export class UpscaleService {
       })
       return
     }
-    this.disable()
+    this.teardown()
     this.options = nextOptions
     this.video = video
-    this.canvas = new UpscaleCanvas(video, this.restoreHostTopLayer)
+    const canvas = new UpscaleCanvas(video, this.restoreHostTopLayer)
+    this.canvas = canvas
     const width = Math.max(1, video.videoWidth || video.clientWidth)
     const height = Math.max(1, video.videoHeight || video.clientHeight)
     const targetDimensions = this.options.targetDimensions ?? {
       width: width * this.options.targetResolution,
       height: height * this.options.targetResolution,
     }
-    this.canvas.setBufferSize(targetDimensions.width, targetDimensions.height)
-    this.renderer = await Renderer.create({
+    canvas.setBufferSize(targetDimensions.width, targetDimensions.height)
+    const renderer = await Renderer.create({
       video,
-      canvas: this.canvas.element,
+      canvas: canvas.element,
       effects: this.options.effects,
       targetDimensions,
-      onFirstFrameRendered: () => this.canvas?.show(),
+      onFirstFrameRendered: () => {
+        if (this.canvas === canvas) canvas.show()
+      },
       onError: (error) => void this.handleRuntimeError(error),
       onProgress: () => undefined,
     })
+    if (epoch !== this.opEpoch) {
+      // A disable() or newer applyOptions() won while we were creating —
+      // destroy the orphan instead of clobbering the current state.
+      renderer.destroy()
+      canvas.cleanup()
+      if (this.canvas === canvas) this.canvas = undefined
+      if (this.video === video && !this.renderer) this.video = undefined
+      return
+    }
+    this.renderer = renderer
   }
 
   disable() {
+    this.opEpoch++
+    this.teardown()
+    this.options = { ...this.options, enabled: false }
+    if (this.corsRuleActive) {
+      this.corsRuleActive = false
+      void chromeRpcClient.upscaleRemoveCorsRule().catch(() => undefined)
+    }
+  }
+
+  private teardown() {
     this.renderer?.destroy()
     this.renderer = undefined
     this.canvas?.cleanup()
     this.canvas = undefined
     this.video = undefined
-    this.options = { ...this.options, enabled: false }
   }
 
   get isEnabled() {
@@ -150,12 +188,18 @@ export class UpscaleService {
     this.restoreHostTopLayer = callback
   }
 
+  /** Re-applies the last requested options, e.g. after PiP restores the video */
+  reapply() {
+    return this.applyOptions(this.requestedOptions)
+  }
+
   async applyOptions(options: StoredUpscaleOptions) {
     this.requestedOptions = options
     if (!options.enabled) {
       this.disable()
       return
     }
+    const epoch = ++this.opEpoch
     const baseModeById = {
       'builtin-mode-a': 'A',
       'builtin-mode-b': 'B',
@@ -170,10 +214,12 @@ export class UpscaleService {
       this.options = { ...this.options, enabled: true }
       return
     }
-    if (options.enableCrossOriginFix) await this.fixCrossOrigin(video)
+    if (options.enableCrossOriginFix) await this.fixCrossOrigin(video, epoch)
+    if (epoch !== this.opEpoch) return
     // videoWidth/videoHeight are 0 until HAVE_METADATA, which would base the
     // buffer size on the element's placeholder CSS box instead of the media.
     await waitForVideoReady(video, HTMLMediaElement.HAVE_METADATA)
+    if (epoch !== this.opEpoch) return
     if (this.videoObserver.activeVideo !== video) return
     const sourceWidth = Math.max(1, video.videoWidth || video.clientWidth)
     const sourceHeight = Math.max(1, video.videoHeight || video.clientHeight)
@@ -197,7 +243,7 @@ export class UpscaleService {
           return { width: sourceWidth, height: sourceHeight }
       }
     })()
-    await this.enable(this.videoObserver.activeVideo, {
+    await this.enableInternal(epoch, this.videoObserver.activeVideo, {
       enabled: true,
       targetResolution: targetDimensions.width / sourceWidth,
       targetDimensions,
@@ -205,7 +251,7 @@ export class UpscaleService {
     })
   }
 
-  private async fixCrossOrigin(video: HTMLVideoElement) {
+  private async fixCrossOrigin(video: HTMLVideoElement, epoch: number) {
     const source = video.currentSrc || video.src
     if (!source || source.startsWith('blob:') || source.startsWith('data:'))
       return
@@ -220,6 +266,16 @@ export class UpscaleService {
       sourceUrl.origin === location.origin
     )
       return
+    // Ask the background to install a tab-scoped DNR session rule for this
+    // video's host before any anonymous request. The rule intentionally
+    // outlives the reload (later seek/segment requests need it) and is
+    // removed in disable() or when the tab closes — so it must be
+    // (re)applied even when crossOrigin is already 'anonymous' from a
+    // previous enable cycle. The background call is idempotent per tab+host.
+    await chromeRpcClient.upscaleApplyCorsRule({ videoUrl: sourceUrl.href })
+    this.corsRuleActive = true
+    if (epoch !== this.opEpoch) return
+
     if (video.crossOrigin === 'anonymous') return
 
     const currentTime = video.currentTime
@@ -253,6 +309,7 @@ export class UpscaleService {
       video.addEventListener('error', onError, { once: true })
       video.load()
     })
+    if (epoch !== this.opEpoch) return
     if (Number.isFinite(currentTime)) video.currentTime = currentTime
     if (!wasPaused) await video.play()
   }

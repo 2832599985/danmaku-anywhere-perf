@@ -40,6 +40,7 @@ import type {
 } from '@/common/rpcClient/background/types'
 import { relayFrameClient } from '@/common/rpcClient/controller/client'
 import { SeasonMap } from '@/common/seasonMap/SeasonMap'
+import { UpscaleRulesetManager } from '../netRequest/UpscaleRulesetManager'
 import { DebugFileService } from '../services/DebugFile/DebugFile.service'
 import { EpisodeMatchingService } from '../services/matching/EpisodeMatchingService'
 import { ProviderService } from '../services/providers/ProviderService'
@@ -80,7 +81,9 @@ export class RpcManager {
     @inject(BookmarkService)
     private bookmarkService: BookmarkService,
     @inject(TranslationService)
-    private translationService: TranslationService
+    private translationService: TranslationService,
+    @inject(UpscaleRulesetManager)
+    private upscaleRulesetManager: UpscaleRulesetManager
   ) {
     this.logger = logger.sub('[RpcManager]')
   }
@@ -430,6 +433,21 @@ export class RpcManager {
             data.texts,
             data.targetLang
           )
+        },
+        upscaleApplyCorsRule: async (data, sender) => {
+          if (sender.tab?.id === undefined) {
+            throw new RpcException('No tab id found')
+          }
+          await this.upscaleRulesetManager.applyForTab(
+            sender.tab.id,
+            data.videoUrl
+          )
+        },
+        upscaleRemoveCorsRule: async (_, sender) => {
+          if (sender.tab?.id === undefined) {
+            throw new RpcException('No tab id found')
+          }
+          await this.upscaleRulesetManager.removeForTab(sender.tab.id)
         },
       },
       {

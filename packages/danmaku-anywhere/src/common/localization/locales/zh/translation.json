@@ -70,7 +70,12 @@
   },
   "cheatSheet": {
     "hint": "按住 ? 显示，松开关闭",
-    "title": "快捷键一览"
+    "title": "快捷键一览",
+    "group": {
+      "danmaku": "弹幕控制",
+      "video": "视频控制",
+      "panel": "面板控制"
+    }
   },
   "common": {
     "acknowledge": "知道了",
@@ -125,7 +130,12 @@
   },
   "community": {
     "inputPlaceholder": "发个弹幕吧~",
-    "title": "社区弹幕"
+    "title": "社区弹幕",
+    "send": "发送",
+    "loginRequired": "请先登录后发送弹幕",
+    "sendSuccess": "发送成功",
+    "sendFailed": "发送失败",
+    "fetchFailed": "获取社区弹幕失败"
   },
   "configPage": {
     "copyShareCode": "复制分享码",
@@ -166,8 +176,8 @@
       "urlPatterns": "URL 模式"
     },
     "exportConfig": {
-      "error": "",
-      "success": ""
+      "error": "导出配置失败",
+      "success": "配置已导出"
     },
     "goCreate": "创建一个",
     "import": {
@@ -179,8 +189,8 @@
       "success": "导入成功"
     },
     "importConfig": {
-      "error": "",
-      "success": ""
+      "error": "导入配置失败",
+      "success": "配置已导入"
     },
     "importShareCode": "导入分享码",
     "importShareCodePlaceholder": "粘贴分享码",
@@ -233,7 +243,8 @@
       "refreshingDanmaku": "正在刷新弹幕",
       "unmounted": "弹幕已卸载",
       "xmlExported": "导出XML成功",
-      "xmlExportError": "导出XML失败：{{message}}"
+      "xmlExportError": "导出XML失败：{{message}}",
+      "multipleFrames": "检测到多个含有视频的Frame"
     },
     "backup": "导出备份",
     "commentContent": "弹幕内容",
@@ -252,7 +263,8 @@
       "sourceCount_one": "已加载{{count}}个弹幕来源",
       "sourceCount_other": "已加载{{count}}个弹幕来源",
       "sources": "已合并来源",
-      "totalMerged_other": ""
+      "totalMerged_other": "总计: {{count}}条弹幕",
+      "totalMerged": "总计: {{count}}条弹幕"
     },
     "mountShort": "装填",
     "noComments": "弹幕列表为空",
@@ -329,10 +341,13 @@
   },
   "highlights": {
     "copied": "已复制到剪贴板",
-    "count_other": "",
+    "count_other": "{{count}}条弹幕",
     "noData": "装填弹幕后可查看高能时刻",
     "share": "复制分享",
-    "title": "高能时刻"
+    "title": "高能时刻",
+    "peakDensity": "弹幕密度",
+    "jumpTo": "跳转",
+    "count": "{{count}}条弹幕"
   },
   "importPage": {
     "confirm": "确认导入",
@@ -369,7 +384,10 @@
       "noIntegration": "未设置自动化配置",
       "search": "搜索番剧：{{title}}",
       "usingAI": "正在使用AI解析",
-      "usingMode": "正在使用模式：{{mode}}"
+      "usingMode": "正在使用模式：{{mode}}",
+      "matchedLocalDanmaku": "以匹配本地弹幕",
+      "noEpisodeMatched": "未找到匹配的剧集（{{title}}）：{{cause}}",
+      "openSearch": "打开搜索页面"
     },
     "autoMode": "自动模式",
     "createConfig": "创建配置",
@@ -619,7 +637,7 @@
       "help": "关于",
       "hotkeys": "快捷键",
       "player": "播放设置",
-      "storage": ""
+      "storage": "存储"
     },
     "player": {
       "autoDensity": "自动调整弹幕密度",
@@ -634,7 +652,10 @@
         "crossOriginFix": "启用跨域视频兼容修复",
         "description": "使用 WebGPU 增强当前视频，并保持弹幕显示在超分画面之上。",
         "title": "视频超分辨率（Anime4K）"
-      }
+      },
+      "densityOpLabel": "片头（OP）",
+      "densityEdLabel": "片尾（ED）",
+      "densitySkipRegionTooltip": "检测到的OP/ED区域会在弹幕密度时间轴上高亮显示"
     },
     "restrictInitiatorDomain": "限制DNR至发起自扩展的请求",
     "retentionPolicy": {
@@ -653,9 +674,9 @@
     "searchUsingSimplified": "使用简体中文搜索",
     "showFloatingButton": "显示浮动按钮",
     "storage": {
-      "overview": "",
-      "seasonBreakdown": "",
-      "warningHigh": ""
+      "overview": "存储概览",
+      "seasonBreakdown": "按季度统计",
+      "warningHigh": "存储占用较高，建议清理不再使用的数据。"
     },
     "theme": {
       "colorMode": {
@@ -665,7 +686,8 @@
       }
     },
     "uploadDebugData": "提交调试数据",
-    "uploadDebugDataSuccess": "提交成功 {{ id }}"
+    "uploadDebugDataSuccess": "提交成功 {{ id }}",
+    "enableMultiSourceMergeDescription": "匹配到集数后，同时搜索其他已启用的弹幕源并合并去重后显示。"
   },
   "providers": {
     "alert": {
@@ -707,18 +729,23 @@
     "batchDownload": {
       "cancelled": "批量下载已停止：已完成 {{done}}/{{total}}",
       "done": "批量下载完成",
-      "download_other": "",
+      "download_other": "下载 ({{count}})",
       "enable": "批量下载",
       "failed": "批量下载失败：{{message}}",
       "progress": "下载进度：{{done}}/{{total}}",
-      "start_other": ""
+      "start_other": "开始批量下载：{{count}} 集",
+      "start": "开始批量下载：{{count}} 集",
+      "download": "下载 ({{count}})"
     },
     "error": {
       "noProviders": "没有启用的弹幕来源，请在设置中启用",
       "noResultFound": "没有找到结果, 请尝试其他关键词"
     },
     "favorites": {
-      "title": "收藏"
+      "title": "收藏",
+      "add": "添加收藏",
+      "empty": "暂无收藏",
+      "remove": "取消收藏"
     },
     "name": "搜索番剧",
     "parse": {
@@ -748,6 +775,10 @@
     "titleMappingDialog": {
       "confirmation": "是否将`{{original}}` 映射为 `{{mapped}}` ?",
       "searchOnly": "不映射，仅搜索"
+    },
+    "history": {
+      "clear": "清除搜索历史",
+      "title": "最近搜索"
     }
   },
   "selectorPage": {
@@ -823,7 +854,14 @@
       "trackHeight": "行高越高，弹幕之间的间距越大"
     },
     "trackHeight": "弹幕行高",
-    "useCustomCss": "使用自定义 CSS"
+    "useCustomCss": "使用自定义 CSS",
+    "strokePresets": {
+      "none": "默认",
+      "thin": "细描边",
+      "thick": "粗描边",
+      "glow": "发光",
+      "3d": "立体阴影"
+    }
   },
   "tabGroups": {
     "content": "内容",
@@ -847,7 +885,11 @@
     "titleMapping": "标题映射"
   },
   "theme": {
-    "selectTheme": "选择主题"
+    "selectTheme": "选择主题",
+    "neonViolet": "霓虹紫",
+    "emberGlow": "琥珀焰",
+    "oceanDepth": "深海蓝",
+    "sakuraNoir": "樱花黑"
   },
   "titleMapping": {
     "deleteConfirm_other": "确定要删除 {{count}} 个标题映射吗？",
@@ -858,7 +900,15 @@
     "unmapped": "未映射"
   },
   "translation": {
-    "enable": "启用弹幕翻译"
+    "enable": "启用弹幕翻译",
+    "targetLang": "翻译目标语言",
+    "translating": "翻译中...",
+    "languages": {
+      "en": "英语",
+      "ja": "日语",
+      "zh": "中文",
+      "ko": "韩语"
+    }
   },
   "upscale": {
     "corsFix": "跨域修复",
@@ -885,8 +935,24 @@
     "invite": "复制邀请链接",
     "join": "加入房间",
     "leave": "离开房间",
-    "members_other": "",
+    "members_other": "{{count}}人在线",
     "roomId": "房间号",
-    "title": "一起看"
+    "title": "一起看",
+    "members": "{{count}}人在线",
+    "disconnected": "已断开",
+    "hostControls": "房主控制",
+    "syncPlayback": "同步播放进度"
+  },
+  "matching": {
+    "allStrategiesExhausted": "所有匹配策略均已尝试，未找到匹配",
+    "episodeNumberUndefined": "无法确定集数",
+    "noSeasonsAllProviders": "所有弹幕源均未找到匹配的番剧",
+    "passedToNext": "未找到匹配，已传递给下一策略",
+    "previousStrategyTerminal": "已跳过：上一策略返回了终止结果"
+  },
+  "densityChart": {
+    "comments_one": "{{count}}条弹幕",
+    "comments_other": "{{count}}条弹幕",
+    "clickToSeek": "点击跳转"
   }
 }

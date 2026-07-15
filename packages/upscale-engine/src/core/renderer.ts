@@ -110,6 +110,8 @@ export class Renderer {
   /** 在单次渲染循环中是否已尝试过自动修复 */
   private fixAttempted = false
   private lastError: Error | null = null
+  // 正在进行的源尺寸重建；渲染循环在此期间必须跳帧（见 processFrame）
+  private resizePromise: Promise<void> | null = null
   /** 是否正在恢复设备（设备丢失后的自动恢复） */
   private isRecovering = false
 
@@ -644,6 +646,14 @@ export class Renderer {
   private async processFrame(): Promise<boolean> {
     if (this.destroyed) return false
 
+    // 管线重建期间必须跳帧：旧管线/绑定组可能引用已销毁的纹理，
+    // 继续渲染会触发 WebGPU validation error。
+    // 同时重置失败计数，避免较慢的重建（>60 帧）误触熔断。
+    if (this.resizePromise) {
+      this.consecutiveFailures = 0
+      return false
+    }
+
     try {
       if (this.video.readyState < this.video.HAVE_CURRENT_DATA) {
         return false // 视频未准备好，跳过此帧
@@ -657,8 +667,8 @@ export class Renderer {
         console.log(
           `[Anime4KWebExt] Resolution changed: ${this.videoFrameTexture.width}x${this.videoFrameTexture.height} -> ${this.video.videoWidth}x${this.video.videoHeight}`
         )
-        this.handleSourceResize()
-        return false // 分辨率已变，跳过此帧的渲染，等待下一帧
+        void this.handleSourceResize()
+        return false // 分辨率已变，跳过此帧的渲染，等待重建完成
       }
 
       // 将视频帧复制到纹理
@@ -717,7 +727,7 @@ export class Renderer {
           console.warn(
             '[Anime4KWebExt] Caught out-of-bounds error. Attempting to recover by resizing resources...'
           )
-          this.handleSourceResize()
+          void this.handleSourceResize()
         }
       } else {
         // 对于所有其他错误，视为不可恢复，并包含原始错误信息
@@ -857,13 +867,32 @@ export class Renderer {
    */
   public async handleSourceResize(): Promise<void> {
     if (this.destroyed) return
-    console.log(
-      '[Anime4KWebExt] Resizing renderer due to video source dimension change...'
-    )
-    this.createResources()
-    await this.buildPipelines()
-    this.createRenderBindGroup()
-    console.log('[Anime4KWebExt] Renderer resized for source.')
+    // 重入安全：渲染循环与外部调用（如视频节点变化）并发触发时共享同一次重建
+    if (this.resizePromise) return this.resizePromise
+    const rebuild = async () => {
+      console.log(
+        '[Anime4KWebExt] Resizing renderer due to video source dimension change...'
+      )
+      this.createResources()
+      await this.buildPipelines()
+      if (this.destroyed) return
+      this.createRenderBindGroup()
+      console.log('[Anime4KWebExt] Renderer resized for source.')
+    }
+    // 存储的 promise 永不 reject：错误写入 lastError 走渲染循环的
+    // 既有错误路径（onError/熔断），避免调用方产生未处理的 rejection。
+    this.resizePromise = rebuild()
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error)
+        this.lastError = new RendererRuntimeError(
+          `Failed to rebuild renderer after source resize: ${message}`,
+          { cause: error as Error }
+        )
+      })
+      .finally(() => {
+        this.resizePromise = null
+      })
+    return this.resizePromise
   }
 
   /**
