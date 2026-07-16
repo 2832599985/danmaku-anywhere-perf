@@ -6,12 +6,21 @@ const mocks = vi.hoisted(() => ({
   rendererCreate: vi.fn(),
   resolveEffectChain: vi.fn(),
   waitForVideoReady: vi.fn(),
+  upscaleApplyCorsRule: vi.fn(),
+  upscaleRemoveCorsRule: vi.fn(),
   canvasInstances: [] as Array<{
     element: HTMLCanvasElement
     setBufferSize: ReturnType<typeof vi.fn>
     cleanup: ReturnType<typeof vi.fn>
     show: ReturnType<typeof vi.fn>
   }>,
+}))
+
+vi.mock('@/common/rpcClient/background/client', () => ({
+  chromeRpcClient: {
+    upscaleApplyCorsRule: mocks.upscaleApplyCorsRule,
+    upscaleRemoveCorsRule: mocks.upscaleRemoveCorsRule,
+  },
 }))
 
 vi.mock('@danmaku-anywhere/upscale-engine', () => ({
@@ -98,7 +107,11 @@ describe('UpscaleService operation coordination', () => {
     mocks.rendererCreate.mockReset()
     mocks.resolveEffectChain.mockReset()
     mocks.waitForVideoReady.mockReset()
+    mocks.upscaleApplyCorsRule.mockReset()
+    mocks.upscaleRemoveCorsRule.mockReset()
     mocks.waitForVideoReady.mockResolvedValue(undefined)
+    mocks.upscaleApplyCorsRule.mockResolvedValue(undefined)
+    mocks.upscaleRemoveCorsRule.mockResolvedValue(undefined)
     mocks.resolveEffectChain.mockImplementation(
       (mode: string, tier: string): EnhancementEffect[] => [
         { className: `${mode}-${tier}` },
@@ -206,5 +219,77 @@ describe('UpscaleService operation coordination', () => {
         targetDimensions: { width: 2560, height: 1440 },
       })
     )
+  })
+
+  describe('cross-origin fix lifecycle', () => {
+    const enableWithCorsFix = async (
+      service: UpscaleService,
+      video: HTMLVideoElement
+    ) => {
+      const applying = service.applyOptions(
+        createStoredOptions({ enableCrossOriginFix: true })
+      )
+      await vi.waitFor(() => expect(video.crossOrigin).toBe('anonymous'))
+      video.dispatchEvent(new Event('loadedmetadata'))
+      await applying
+    }
+
+    it('restores crossOrigin and removes the CORS rule on disable', async () => {
+      const video = createVideo()
+      video.src = 'https://cdn.example.com/video.mp4'
+      const renderer = {
+        destroy: vi.fn(),
+        handleSourceResize: vi.fn(),
+        updateConfiguration: vi.fn(),
+      }
+      mocks.rendererCreate.mockResolvedValue(renderer)
+      const service = createService(video)
+
+      await enableWithCorsFix(service, video)
+      expect(mocks.upscaleApplyCorsRule).toHaveBeenCalledWith({
+        videoUrl: 'https://cdn.example.com/video.mp4',
+      })
+
+      service.disable()
+
+      expect(video.crossOrigin).toBe(null)
+      expect(mocks.upscaleRemoveCorsRule).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps the CORS fix while suspended so playback continues', async () => {
+      const video = createVideo()
+      video.src = 'https://cdn.example.com/video.mp4'
+      const renderer = {
+        destroy: vi.fn(),
+        handleSourceResize: vi.fn(),
+        updateConfiguration: vi.fn(),
+      }
+      mocks.rendererCreate.mockResolvedValue(renderer)
+      const service = createService(video)
+
+      await enableWithCorsFix(service, video)
+
+      service.suspend()
+
+      expect(video.crossOrigin).toBe('anonymous')
+      expect(mocks.upscaleRemoveCorsRule).not.toHaveBeenCalled()
+    })
+
+    it('restores crossOrigin when the anonymous reload fails', async () => {
+      const video = createVideo()
+      video.src = 'https://cdn.example.com/video.mp4'
+      const service = createService(video)
+
+      const applying = service.applyOptions(
+        createStoredOptions({ enableCrossOriginFix: true })
+      )
+      await vi.waitFor(() => expect(video.crossOrigin).toBe('anonymous'))
+      video.dispatchEvent(new Event('error'))
+
+      await expect(applying).rejects.toThrow(
+        'Failed to reload cross-origin video'
+      )
+      expect(video.crossOrigin).toBe(null)
+    })
   })
 })

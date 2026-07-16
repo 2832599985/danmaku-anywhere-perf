@@ -63,6 +63,9 @@ export class UpscaleService {
   private rendererUpdateTail: Promise<void> = Promise.resolve()
   private suspended = false
   private corsRuleActive = false
+  private corsFix:
+    | { video: HTMLVideoElement; previous: string | null }
+    | undefined
   private requestedOptions: StoredUpscaleOptions = {
     enabled: false,
     modeId: 'builtin-mode-a',
@@ -209,10 +212,15 @@ export class UpscaleService {
     await update
   }
 
-  disable() {
+  disable(options: { keepCorsFix?: boolean } = {}) {
     this.opEpoch++
     this.teardown()
     this.options = { ...this.options, enabled: false }
+    // During suspension (e.g. PiP) the video keeps playing, so both the
+    // crossOrigin attribute and the DNR rule must stay — pulling either one
+    // mid-stream turns every later media request into a CORS failure.
+    if (options.keepCorsFix) return
+    this.restoreCrossOriginFix()
     if (this.corsRuleActive) {
       this.corsRuleActive = false
       void chromeRpcClient.upscaleRemoveCorsRule().catch(() => undefined)
@@ -237,7 +245,7 @@ export class UpscaleService {
   suspend() {
     if (this.suspended) return
     this.suspended = true
-    this.disable()
+    this.disable({ keepCorsFix: true })
   }
 
   async resume() {
@@ -346,38 +354,74 @@ export class UpscaleService {
 
     const currentTime = video.currentTime
     const wasPaused = video.paused
+    this.corsFix = { video, previous: video.crossOrigin }
     video.crossOrigin = 'anonymous'
-    await new Promise<void>((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        cleanup()
-        reject(
-          new RendererInitializationError(
-            'Timed out reloading cross-origin video'
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          cleanup()
+          reject(
+            new RendererInitializationError(
+              'Timed out reloading cross-origin video'
+            )
           )
-        )
-      }, 20_000)
-      const cleanup = () => {
-        window.clearTimeout(timeout)
-        video.removeEventListener('loadedmetadata', onLoaded)
-        video.removeEventListener('error', onError)
-      }
-      const onLoaded = () => {
-        cleanup()
-        resolve()
-      }
-      const onError = () => {
-        cleanup()
-        reject(
-          new RendererInitializationError('Failed to reload cross-origin video')
-        )
-      }
-      video.addEventListener('loadedmetadata', onLoaded, { once: true })
-      video.addEventListener('error', onError, { once: true })
-      video.load()
-    })
+        }, 20_000)
+        const cleanup = () => {
+          window.clearTimeout(timeout)
+          video.removeEventListener('loadedmetadata', onLoaded)
+          video.removeEventListener('error', onError)
+        }
+        const onLoaded = () => {
+          cleanup()
+          resolve()
+        }
+        const onError = () => {
+          cleanup()
+          reject(
+            new RendererInitializationError(
+              'Failed to reload cross-origin video'
+            )
+          )
+        }
+        video.addEventListener('loadedmetadata', onLoaded, { once: true })
+        video.addEventListener('error', onError, { once: true })
+        video.load()
+      })
+    } catch (error) {
+      // The anonymous reload failed, so the element can no longer stream —
+      // put it back the way the site had it or playback stays broken.
+      this.restoreCrossOriginFix()
+      throw error
+    }
     if (epoch !== this.opEpoch) return
     if (Number.isFinite(currentTime)) video.currentTime = currentTime
     if (!wasPaused) await video.play()
+  }
+
+  /**
+   * Reverts a crossOrigin='anonymous' switch made by fixCrossOrigin and
+   * reloads the video so it can stream again without the DNR rule.
+   */
+  private restoreCrossOriginFix() {
+    const fix = this.corsFix
+    this.corsFix = undefined
+    if (!fix) return
+    const { video, previous } = fix
+    // The site changed it after us — leave it alone.
+    if (video.crossOrigin !== 'anonymous') return
+    video.crossOrigin = previous
+    if (!video.isConnected) return
+    const currentTime = video.currentTime
+    const wasPaused = video.paused
+    video.addEventListener(
+      'loadedmetadata',
+      () => {
+        if (Number.isFinite(currentTime)) video.currentTime = currentTime
+        if (!wasPaused) void video.play().catch(() => undefined)
+      },
+      { once: true }
+    )
+    video.load()
   }
 
   private async handleRuntimeError(error: Error) {

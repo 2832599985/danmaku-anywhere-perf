@@ -15,12 +15,14 @@ const createLogger = () => {
 
 describe('UpscaleRulesetManager', () => {
   let rules: any[] = []
+  let openTabs: { id?: number }[] = []
   let tabRemovedListeners: ((tabId: number) => void)[] = []
 
   const createManager = () => new UpscaleRulesetManager(createLogger())
 
   beforeEach(() => {
     rules = []
+    openTabs = []
     tabRemovedListeners = []
 
     const declarativeNetRequest = {
@@ -42,6 +44,7 @@ describe('UpscaleRulesetManager', () => {
     vi.stubGlobal('chrome', {
       declarativeNetRequest,
       tabs: {
+        query: vi.fn().mockImplementation(async () => [...openTabs]),
         onRemoved: {
           addListener: vi.fn().mockImplementation((cb) => {
             tabRemovedListeners.push(cb)
@@ -55,14 +58,13 @@ describe('UpscaleRulesetManager', () => {
     vi.unstubAllGlobals()
   })
 
-  it('creates a tab-scoped rule for the video host', async () => {
+  it('creates a tab-scoped media rule', async () => {
     const manager = createManager()
     await manager.applyForTab(42, 'https://cdn.example.com/video.mp4')
 
     expect(rules).toHaveLength(1)
     expect(rules[0].id).toBe(RESERVED_BASE + 42)
     expect(rules[0].condition).toEqual({
-      requestDomains: ['cdn.example.com'],
       resourceTypes: ['media'],
       tabIds: [42],
     })
@@ -92,14 +94,16 @@ describe('UpscaleRulesetManager', () => {
     ).toHaveBeenCalledTimes(1)
   })
 
-  it('replaces the rule when the same tab switches host', async () => {
+  it('keeps a single rule when the same tab switches host', async () => {
     const manager = createManager()
     await manager.applyForTab(1, 'https://cdn-a.example.com/a.mp4')
     await manager.applyForTab(1, 'https://cdn-b.example.com/b.mp4')
 
     expect(rules).toHaveLength(1)
     expect(rules[0].id).toBe(RESERVED_BASE + 1)
-    expect(rules[0].condition.requestDomains).toEqual(['cdn-b.example.com'])
+    expect(
+      chrome.declarativeNetRequest.updateSessionRules
+    ).toHaveBeenCalledTimes(1)
   })
 
   it('keeps rules of different tabs independent', async () => {
@@ -154,7 +158,7 @@ describe('UpscaleRulesetManager', () => {
     await vi.waitFor(() => expect(rules).toHaveLength(0))
   })
 
-  it('sweeps stale rules in the reserved range on setup', async () => {
+  it('sweeps rules for closed tabs on setup', async () => {
     rules.push(
       { id: 3, condition: {} }, // foreign rule, must survive
       { id: RESERVED_BASE + 5, condition: {} },
@@ -165,5 +169,26 @@ describe('UpscaleRulesetManager', () => {
 
     await vi.waitFor(() => expect(rules).toHaveLength(1))
     expect(rules[0].id).toBe(3)
+  })
+
+  it('keeps and re-tracks rules for tabs that are still open', async () => {
+    openTabs = [{ id: 5 }]
+    rules.push(
+      { id: RESERVED_BASE + 5, condition: {} },
+      { id: RESERVED_BASE + 9, condition: {} }
+    )
+    const manager = createManager()
+    manager.setup()
+
+    await vi.waitFor(() => expect(rules).toHaveLength(1))
+    expect(rules[0].id).toBe(RESERVED_BASE + 5)
+
+    // The surviving rule is tracked again, so re-applying is a no-op
+    // instead of a redundant remove+add churn.
+    vi.mocked(chrome.declarativeNetRequest.updateSessionRules).mockClear()
+    await manager.applyForTab(5, 'https://cdn.example.com/a.mp4')
+    expect(
+      chrome.declarativeNetRequest.updateSessionRules
+    ).not.toHaveBeenCalled()
   })
 })
