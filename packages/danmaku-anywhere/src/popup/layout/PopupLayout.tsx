@@ -1,10 +1,12 @@
-import { Container, Paper, useTheme } from '@mui/material'
+import { Container, GlobalStyles, Paper, useTheme } from '@mui/material'
 import type { PropsWithChildren } from 'react'
 import { usePlatformInfo } from '@/common/hooks/usePlatformInfo'
+import { useThemeContext } from '@/common/theme/Theme'
 
 export const PopupLayout = ({ children }: PropsWithChildren<{}>) => {
   const { isMobile } = usePlatformInfo()
   const theme = useTheme()
+  const { palette } = useThemeContext()
 
   const width = isMobile ? '100vw' : 500
   const height = isMobile ? '100vh' : 600
@@ -12,7 +14,7 @@ export const PopupLayout = ({ children }: PropsWithChildren<{}>) => {
   return (
     <Container
       sx={{
-        padding: 0,
+        padding: 1,
         width: width,
         maxWidth: width,
         height: height,
@@ -21,14 +23,24 @@ export const PopupLayout = ({ children }: PropsWithChildren<{}>) => {
       }}
       fixed
     >
+      {/* The extension popup window is an opaque square viewport that cannot
+          be made transparent, so the rounded glass card floats on a frame
+          painted with the theme background instead of the browser canvas */}
+      <GlobalStyles
+        styles={{
+          'html, body': {
+            backgroundColor: theme.palette.background.default,
+          },
+        }}
+      />
       <Paper
         elevation={0}
         sx={{
           height: 1,
           overflow: 'hidden',
           position: 'relative',
-          background: theme.palette.background.default,
           color: theme.palette.text.primary,
+          boxShadow: palette.glass.depth,
         }}
       >
         {children}

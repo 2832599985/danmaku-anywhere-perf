@@ -1,6 +1,16 @@
+/* Fallback canvas color before React mounts; PopupLayout's GlobalStyles
+   takes over with the active theme's background afterwards */
 body {
   margin: 0;
   color: white;
+  background-color: #0f172a;
+}
+
+@media (prefers-color-scheme: light) {
+  body {
+    color: rgba(0, 0, 0, 0.87);
+    background-color: #f4f6fb;
+  }
 }
 
 /* View Transition API — circular expand animation for theme switching */
