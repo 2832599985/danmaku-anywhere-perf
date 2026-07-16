@@ -132,4 +132,8 @@ export class SeasonMap {
     seasons.delete(providerConfigId)
     return new SeasonMap(this.key, seasons, this.local)
   }
+
+  isEmpty() {
+    return this.seasonsByConfig.size === 0 && this.local === undefined
+  }
 }

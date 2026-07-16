@@ -54,7 +54,7 @@ export const WindowPaneLayout = (props: WindowPaneLayoutProps) => {
         ...(isResizing && {
           border: `1px dashed ${palette.primary}`,
         }),
-        color: '#fff',
+        color: 'text.primary',
         transition: isResizing ? 'none' : 'border-color 0.2s',
       }}
       ref={ref}

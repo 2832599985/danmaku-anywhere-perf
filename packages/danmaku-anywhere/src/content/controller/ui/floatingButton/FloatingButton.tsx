@@ -65,7 +65,7 @@ const StyledFab = styled(Fab, {
   shouldForwardProp: (prop) =>
     prop !== 'hover' && prop !== 'palette' && prop !== 'hasError',
 })<{ hover: boolean; palette: ThemePalette; hasError: boolean }>(
-  ({ hover, palette, hasError }) => {
+  ({ hover, palette, hasError, theme }) => {
     const g = palette.glass
     const staticShadow = `${g.specular}, ${g.depth}`
     return {
@@ -73,16 +73,35 @@ const StyledFab = styled(Fab, {
       transform: hover ? 'rotate(45deg) scale(1.05)' : 'rotate(0deg)',
       touchAction: 'none',
       // !important: the Fab color prop injects its own background
-      background: `${g.tint}, ${g.base} !important`,
+      backgroundColor: `${g.base} !important`,
+      backgroundImage: `${g.tint} !important`,
       backdropFilter: g.blur,
-      border: `1px solid ${g.border}`,
+      WebkitBackdropFilter: g.blur,
+      border: 'none',
       boxShadow: staticShadow,
-      color: '#fff',
+      color:
+        theme.palette.mode === 'light' ? theme.palette.text.primary : '#fff',
+      '&::before': {
+        content: '""',
+        position: 'absolute',
+        inset: 0,
+        borderRadius: 'inherit',
+        padding: '1px',
+        background: g.borderGradient,
+        WebkitMask:
+          'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+        WebkitMaskComposite: 'xor',
+        maskComposite: 'exclude',
+        pointerEvents: 'none',
+      },
       '& svg': {
-        filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))',
+        filter:
+          theme.palette.mode === 'dark'
+            ? 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))'
+            : 'drop-shadow(0 1px 1px rgba(255, 255, 255, 0.8))',
       },
       '&:hover': {
-        background: `${g.tint}, ${g.hover} !important`,
+        backgroundColor: `${g.hover} !important`,
       },
       '&:active': {
         transform: hover

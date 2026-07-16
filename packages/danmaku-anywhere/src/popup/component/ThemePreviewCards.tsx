@@ -1,11 +1,12 @@
 import { Check } from '@mui/icons-material'
 import { Box, Typography } from '@mui/material'
+import { alpha } from '@mui/material/styles'
 import type { MouseEvent } from 'react'
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useThemeContext } from '@/common/theme/Theme'
 import type { ThemePalette } from '@/common/theme/themes'
-import { themeIds, themes } from '@/common/theme/themes'
+import { getThemePalette, themeIds } from '@/common/theme/themes'
 import { useViewTransition } from '@/common/theme/useViewTransition'
 
 interface ThemeCardProps {
@@ -54,7 +55,8 @@ const ThemeCard = ({ palette, selected, onSelect }: ThemeCardProps) => {
             width: '60%',
             height: 28,
             borderRadius: 999,
-            background: `${palette.glass.tint}, ${palette.glass.base}`,
+            backgroundColor: palette.glass.base,
+            backgroundImage: palette.glass.tint,
             backdropFilter: palette.glass.blur,
             border: `1px solid ${palette.glass.border}`,
             boxShadow: palette.glass.specular,
@@ -81,7 +83,8 @@ const ThemeCard = ({ palette, selected, onSelect }: ThemeCardProps) => {
                 width: 28,
                 height: 3,
                 borderRadius: 1,
-                backgroundColor: 'rgba(255,255,255,0.6)',
+                backgroundColor: (theme) =>
+                  alpha(theme.palette.text.primary, 0.62),
               }}
             />
             <Box
@@ -89,7 +92,8 @@ const ThemeCard = ({ palette, selected, onSelect }: ThemeCardProps) => {
                 width: 18,
                 height: 3,
                 borderRadius: 1,
-                backgroundColor: 'rgba(255,255,255,0.3)',
+                backgroundColor: (theme) =>
+                  alpha(theme.palette.text.primary, 0.32),
               }}
             />
           </Box>
@@ -121,7 +125,8 @@ const ThemeCard = ({ palette, selected, onSelect }: ThemeCardProps) => {
         sx={{
           px: 1,
           py: 0.5,
-          backgroundColor: palette.darkBg,
+          backgroundColor: palette.glass.scrim,
+          backgroundImage: palette.glass.tint,
           display: 'flex',
           alignItems: 'center',
           gap: 0.5,
@@ -139,7 +144,7 @@ const ThemeCard = ({ palette, selected, onSelect }: ThemeCardProps) => {
         <Typography
           variant="caption"
           sx={{
-            color: 'rgba(255,255,255,0.85)',
+            color: 'text.primary',
             fontSize: '0.65rem',
             lineHeight: 1.2,
             whiteSpace: 'nowrap',
@@ -155,7 +160,7 @@ const ThemeCard = ({ palette, selected, onSelect }: ThemeCardProps) => {
 }
 
 export const ThemePreviewCards = () => {
-  const { themeId, setThemeId } = useThemeContext()
+  const { colorScheme, themeId, setThemeId } = useThemeContext()
   const { startTransition } = useViewTransition()
 
   const handleSelect = useCallback(
@@ -180,7 +185,7 @@ export const ThemePreviewCards = () => {
       {themeIds.map((id) => (
         <ThemeCard
           key={id}
-          palette={themes[id]}
+          palette={getThemePalette(id, colorScheme)}
           selected={id === themeId}
           onSelect={handleSelect}
         />

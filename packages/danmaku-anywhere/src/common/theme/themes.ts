@@ -1,29 +1,35 @@
+import { ColorMode } from '@/common/theme/enums'
+
+export type ThemeColorScheme = 'dark' | 'light'
+
+export interface GlassPalette {
+  /** Transparent fill for chrome elements (buttons, pills, FAB) */
+  base: string
+  /** Chrome hover fill */
+  hover: string
+  /** Heavier fill for text-dense surfaces (panel, menus, dialogs) */
+  scrim: string
+  /** blur + saturate backdrop filter value */
+  blur: string
+  /** Flat 1px border fallback (focus rings, resize state) */
+  border: string
+  /** Top-lit gradient for the 1px rim (::before mask technique) */
+  borderGradient: string
+  /** Inset specular highlight stack (box-shadow list, inset-only) */
+  specular: string
+  /** Outer drop shadow stack for depth (box-shadow list) */
+  depth: string
+  /** Theme-colored gradient overlay, layered over base/scrim via multi-bg */
+  tint: string
+}
+
 export interface ThemePalette {
   id: string
   name: string
   primary: string
   secondary: string
   darkBg: string
-  glass: {
-    /** Transparent fill for chrome elements (buttons, pills, FAB) */
-    base: string
-    /** Chrome hover fill */
-    hover: string
-    /** Heavier fill for text-dense surfaces (panel, menus, dialogs) */
-    scrim: string
-    /** blur + saturate backdrop filter value */
-    blur: string
-    /** Flat 1px border fallback (focus rings, resize state) */
-    border: string
-    /** Top-lit gradient for the 1px rim (::before mask technique) */
-    borderGradient: string
-    /** Inset specular highlight stack (box-shadow list, inset-only) */
-    specular: string
-    /** Outer drop shadow stack for depth (box-shadow list) */
-    depth: string
-    /** Theme-colored gradient overlay, layered over base/scrim via multi-bg */
-    tint: string
-  }
+  glass: GlassPalette
   gradient: string
   density: {
     played: string
@@ -39,25 +45,45 @@ export interface ThemePalette {
   }
 }
 
+const createDarkGlass = (
+  surfaceRgb: string,
+  primaryRgb: string,
+  secondaryRgb: string,
+  highlightRgb = '255, 255, 255'
+): GlassPalette => ({
+  base: `rgba(${surfaceRgb}, 0.28)`,
+  hover: `rgba(${surfaceRgb}, 0.42)`,
+  scrim: `rgba(${surfaceRgb}, 0.54)`,
+  blur: 'blur(28px) saturate(190%)',
+  border: `rgba(${highlightRgb}, 0.22)`,
+  borderGradient: `linear-gradient(155deg, rgba(${highlightRgb}, 0.72) 0%, rgba(${highlightRgb}, 0.16) 34%, rgba(${primaryRgb}, 0.34) 68%, rgba(${secondaryRgb}, 0.18) 100%)`,
+  specular: `inset 0 1px 0 rgba(${highlightRgb}, 0.42), inset 1px 0 0 rgba(${highlightRgb}, 0.12), inset 0 -1px 0 rgba(${highlightRgb}, 0.07), inset 0 0 32px rgba(${primaryRgb}, 0.12)`,
+  depth: `0 14px 44px rgba(0, 0, 0, 0.38), 0 3px 12px rgba(0, 0, 0, 0.24), 0 0 28px rgba(${primaryRgb}, 0.10)`,
+  tint: `radial-gradient(circle at 18% 0%, rgba(${highlightRgb}, 0.24), transparent 34%), linear-gradient(135deg, rgba(${primaryRgb}, 0.18), rgba(${secondaryRgb}, 0.08) 58%, rgba(${highlightRgb}, 0.02))`,
+})
+
+const createLightGlass = (
+  primaryRgb: string,
+  secondaryRgb: string
+): GlassPalette => ({
+  base: 'rgba(255, 255, 255, 0.32)',
+  hover: 'rgba(255, 255, 255, 0.48)',
+  scrim: 'rgba(248, 250, 252, 0.64)',
+  blur: 'blur(30px) saturate(185%) brightness(1.06)',
+  border: 'rgba(255, 255, 255, 0.72)',
+  borderGradient: `linear-gradient(155deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.54) 34%, rgba(${primaryRgb}, 0.30) 70%, rgba(${secondaryRgb}, 0.20) 100%)`,
+  specular: `inset 0 1px 0 rgba(255, 255, 255, 0.92), inset 1px 0 0 rgba(255, 255, 255, 0.48), inset 0 -1px 0 rgba(15, 23, 42, 0.08), inset 0 0 30px rgba(${primaryRgb}, 0.08)`,
+  depth: `0 14px 42px rgba(15, 23, 42, 0.18), 0 3px 12px rgba(15, 23, 42, 0.10), 0 0 26px rgba(${primaryRgb}, 0.10)`,
+  tint: `radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.76), transparent 36%), linear-gradient(135deg, rgba(${primaryRgb}, 0.14), rgba(${secondaryRgb}, 0.07) 58%, rgba(255, 255, 255, 0.12))`,
+})
+
 const neonViolet: ThemePalette = {
   id: 'neon-violet',
   name: 'theme.neonViolet',
   primary: '#8b5cf6',
   secondary: '#d946ef',
   darkBg: '#0f172a',
-  glass: {
-    base: 'rgba(15, 23, 42, 0.40)',
-    hover: 'rgba(30, 41, 59, 0.55)',
-    scrim: 'rgba(15, 23, 42, 0.68)',
-    blur: 'blur(20px) saturate(180%)',
-    border: 'rgba(255, 255, 255, 0.14)',
-    borderGradient:
-      'linear-gradient(165deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0.08) 35%, rgba(139, 92, 246, 0.22) 70%, rgba(255, 255, 255, 0.12) 100%)',
-    specular:
-      'inset 0 1px 0 rgba(255, 255, 255, 0.25), inset 0 -1px 0 rgba(255, 255, 255, 0.05), inset 0 0 24px rgba(139, 92, 246, 0.08)',
-    depth: '0 8px 32px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.25)',
-    tint: 'linear-gradient(135deg, rgba(139, 92, 246, 0.10), rgba(217, 70, 239, 0.05))',
-  },
+  glass: createDarkGlass('15, 23, 42', '139, 92, 246', '217, 70, 239'),
   gradient: 'linear-gradient(135deg, #8b5cf6, #d946ef)',
   density: {
     played: 'rgba(255,255,255,0.6)',
@@ -82,19 +108,12 @@ const emberGlow: ThemePalette = {
   primary: '#f59e0b',
   secondary: '#ef4444',
   darkBg: '#1a0f08',
-  glass: {
-    base: 'rgba(26, 15, 8, 0.42)',
-    hover: 'rgba(46, 28, 16, 0.56)',
-    scrim: 'rgba(26, 15, 8, 0.68)',
-    blur: 'blur(20px) saturate(180%)',
-    border: 'rgba(255, 224, 178, 0.14)',
-    borderGradient:
-      'linear-gradient(165deg, rgba(255, 244, 224, 0.45) 0%, rgba(255, 255, 255, 0.08) 35%, rgba(245, 158, 11, 0.22) 70%, rgba(255, 255, 255, 0.10) 100%)',
-    specular:
-      'inset 0 1px 0 rgba(255, 236, 200, 0.25), inset 0 -1px 0 rgba(255, 255, 255, 0.05), inset 0 0 24px rgba(245, 158, 11, 0.08)',
-    depth: '0 8px 32px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.25)',
-    tint: 'linear-gradient(135deg, rgba(245, 158, 11, 0.10), rgba(239, 68, 68, 0.05))',
-  },
+  glass: createDarkGlass(
+    '26, 15, 8',
+    '245, 158, 11',
+    '239, 68, 68',
+    '255, 236, 200'
+  ),
   gradient: 'linear-gradient(135deg, #f59e0b, #ef4444)',
   density: {
     played: 'rgba(251, 191, 36, 0.5)',
@@ -116,19 +135,12 @@ const oceanDepth: ThemePalette = {
   primary: '#0ea5e9',
   secondary: '#06b6d4',
   darkBg: '#0a1628',
-  glass: {
-    base: 'rgba(10, 22, 40, 0.42)',
-    hover: 'rgba(18, 38, 66, 0.56)',
-    scrim: 'rgba(10, 22, 40, 0.70)',
-    blur: 'blur(20px) saturate(180%)',
-    border: 'rgba(186, 230, 253, 0.14)',
-    borderGradient:
-      'linear-gradient(165deg, rgba(224, 242, 254, 0.45) 0%, rgba(255, 255, 255, 0.08) 35%, rgba(14, 165, 233, 0.22) 70%, rgba(255, 255, 255, 0.10) 100%)',
-    specular:
-      'inset 0 1px 0 rgba(224, 242, 254, 0.25), inset 0 -1px 0 rgba(255, 255, 255, 0.05), inset 0 0 24px rgba(14, 165, 233, 0.08)',
-    depth: '0 8px 32px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.25)',
-    tint: 'linear-gradient(135deg, rgba(14, 165, 233, 0.10), rgba(6, 182, 212, 0.05))',
-  },
+  glass: createDarkGlass(
+    '10, 22, 40',
+    '14, 165, 233',
+    '6, 182, 212',
+    '224, 242, 254'
+  ),
   gradient: 'linear-gradient(135deg, #0ea5e9, #06b6d4)',
   density: {
     played: 'rgba(56, 189, 248, 0.5)',
@@ -153,19 +165,12 @@ const sakuraNoir: ThemePalette = {
   primary: '#ec4899',
   secondary: '#a855f7',
   darkBg: '#150a18',
-  glass: {
-    base: 'rgba(21, 10, 24, 0.42)',
-    hover: 'rgba(38, 18, 44, 0.56)',
-    scrim: 'rgba(21, 10, 24, 0.68)',
-    blur: 'blur(20px) saturate(180%)',
-    border: 'rgba(251, 207, 232, 0.14)',
-    borderGradient:
-      'linear-gradient(165deg, rgba(253, 242, 248, 0.45) 0%, rgba(255, 255, 255, 0.08) 35%, rgba(236, 72, 153, 0.22) 70%, rgba(255, 255, 255, 0.10) 100%)',
-    specular:
-      'inset 0 1px 0 rgba(251, 207, 232, 0.25), inset 0 -1px 0 rgba(255, 255, 255, 0.05), inset 0 0 24px rgba(236, 72, 153, 0.08)',
-    depth: '0 8px 32px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.25)',
-    tint: 'linear-gradient(135deg, rgba(236, 72, 153, 0.10), rgba(168, 85, 247, 0.05))',
-  },
+  glass: createDarkGlass(
+    '21, 10, 24',
+    '236, 72, 153',
+    '168, 85, 247',
+    '253, 242, 248'
+  ),
   gradient: 'linear-gradient(135deg, #ec4899, #a855f7)',
   density: {
     played: 'rgba(236, 72, 153, 0.5)',
@@ -188,10 +193,38 @@ export const themes: Record<string, ThemePalette> = {
   'sakura-noir': sakuraNoir,
 }
 
+const lightGlassPalettes: Record<string, GlassPalette> = {
+  'neon-violet': createLightGlass('139, 92, 246', '217, 70, 239'),
+  'ember-glow': createLightGlass('245, 158, 11', '239, 68, 68'),
+  'ocean-depth': createLightGlass('14, 165, 233', '6, 182, 212'),
+  'sakura-noir': createLightGlass('236, 72, 153', '168, 85, 247'),
+}
+
 export const themeIds = Object.keys(themes)
 
 export const DEFAULT_THEME_ID = 'neon-violet'
 
-export const getThemePalette = (id: string): ThemePalette => {
-  return themes[id] ?? themes[DEFAULT_THEME_ID]
+export const resolveColorScheme = (
+  colorMode: ColorMode,
+  prefersDark: boolean
+): ThemeColorScheme => {
+  if (colorMode === ColorMode.System) return prefersDark ? 'dark' : 'light'
+  return colorMode
+}
+
+export const getThemePalette = (
+  id: string,
+  colorScheme: ThemeColorScheme = 'dark'
+): ThemePalette => {
+  const palette = themes[id] ?? themes[DEFAULT_THEME_ID]
+  if (colorScheme === 'dark') return palette
+
+  return {
+    ...palette,
+    glass: lightGlassPalettes[palette.id],
+    skipButton: {
+      text: 'rgba(15, 23, 42, 0.94)',
+      closeText: 'rgba(15, 23, 42, 0.66)',
+    },
+  }
 }

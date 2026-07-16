@@ -86,9 +86,11 @@ describe('SeasonMap', () => {
       bilibili: 42,
     })
     expect(pruned.getSeasonId('ddp')).toBeUndefined()
+    expect(pruned.isEmpty()).toBe(false)
 
     const empty = pruned.withoutProvider('bilibili')
     expect(empty.seasons).toEqual({})
+    expect(empty.isEmpty()).toBe(true)
   })
 
   describe('local field', () => {
@@ -96,6 +98,7 @@ describe('SeasonMap', () => {
       const map = SeasonMap.empty('test')
       const updated = map.withLocal('anime/show')
       expect(updated.local).toBe('anime/show')
+      expect(updated.isEmpty()).toBe(false)
       expect(map.local).toBeUndefined()
     })
 

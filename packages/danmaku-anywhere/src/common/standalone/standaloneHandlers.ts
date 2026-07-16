@@ -76,6 +76,7 @@ export const standaloneBackgroundHandlers: StandaloneRpcHandlers<BackgroundMetho
     seasonSearch: () => [],
     seasonFilter: () => [],
     seasonGetAll: () => [],
+    bookmarkGetAll: () => [],
     seasonMapGetAll: () => [],
     seasonMapAdd: () => undefined,
     seasonMapPut: () => undefined,

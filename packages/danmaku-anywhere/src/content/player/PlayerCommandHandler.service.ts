@@ -2,11 +2,13 @@ import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
 import { inject, injectable } from 'inversify'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import { DanmakuOptionsService } from '@/common/options/danmakuOptions/service'
+import type { UserTheme } from '@/common/options/extensionOptions/schema'
 import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
 import { createRpcServer } from '@/common/rpc/server'
 import { playerRpcClient } from '@/common/rpcClient/background/client'
 import type { PlayerRelayCommands } from '@/common/rpcClient/background/types'
-import { getThemePalette } from '@/common/theme/themes'
+import { ColorMode } from '@/common/theme/enums'
+import { getThemePalette, resolveColorScheme } from '@/common/theme/themes'
 import { getThemeCssVarsString } from '@/common/theme/themeVars'
 import { createPopoverRoot } from '@/content/common/host/createPopoverRoot'
 import { injectCss } from '@/content/common/injectCss'
@@ -113,14 +115,29 @@ export class PlayerCommandHandler {
     const themeStyleEl = document.createElement('style')
     shadowContainer.appendChild(themeStyleEl)
 
+    const systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    let currentTheme: UserTheme | undefined
+    const applyTheme = (theme: UserTheme) => {
+      currentTheme = theme
+      const colorScheme = resolveColorScheme(
+        theme.colorMode,
+        systemThemeQuery.matches
+      )
+      const palette = getThemePalette(theme.themeId, colorScheme)
+      themeStyleEl.textContent = getThemeCssVarsString(palette)
+    }
+
     // Apply initial theme
     this.extensionOptions.get().then((options) => {
-      const palette = getThemePalette(options.theme.themeId)
-      themeStyleEl.textContent = getThemeCssVarsString(palette)
+      applyTheme(options.theme)
     })
     this.extensionOptions.onChange((options) => {
-      const palette = getThemePalette(options.theme.themeId)
-      themeStyleEl.textContent = getThemeCssVarsString(palette)
+      applyTheme(options.theme)
+    })
+    systemThemeQuery.addEventListener('change', () => {
+      if (currentTheme?.colorMode === ColorMode.System) {
+        applyTheme(currentTheme)
+      }
     })
 
     // Give shadowRoot proper dimensions so absolutely positioned children can reference it
@@ -483,26 +500,40 @@ export class PlayerCommandHandler {
       }, 100)
     }
 
-    const restoreWrapper = moveElement(this.manager.getWrapper(), pipContainer)
     const video = this.manager.video
     if (!video) throw new Error('Cannot enter PiP without an active video')
 
     // The upscale canvas can't follow the video into the PiP document (its
     // geometry sync is bound to this window), and leaving it behind shows a
-    // transparent video (opacity 0). Pause upscaling for the PiP session.
-    const resumeUpscale = this.upscale.isEnabled
-    if (resumeUpscale) this.upscale.disable()
+    // transparent video (opacity 0). Suspend before moving either element so
+    // in-flight initialization is invalidated as well. Option changes made
+    // during PiP are recorded and applied only after resume().
+    this.upscale.suspend()
 
-    const restoreVideo = moveElement(video, pipWindow.document.body)
+    let restoreWrapper: (() => void) | undefined
+    let restoreVideo: (() => void) | undefined
+    try {
+      restoreWrapper = moveElement(this.manager.getWrapper(), pipContainer)
+      restoreVideo = moveElement(video, pipWindow.document.body)
 
-    delayResize()
-
-    pipWindow.addEventListener('pagehide', () => {
-      restoreVideo()
-      restoreWrapper()
       delayResize()
-      if (resumeUpscale) void this.upscale.reapply().catch(() => undefined)
-    })
+
+      pipWindow.addEventListener(
+        'pagehide',
+        () => {
+          restoreVideo?.()
+          restoreWrapper?.()
+          delayResize()
+          void this.upscale.resume().catch(() => undefined)
+        },
+        { once: true }
+      )
+    } catch (error) {
+      restoreVideo?.()
+      restoreWrapper?.()
+      await this.upscale.resume().catch(() => undefined)
+      throw error
+    }
   }
 
   private handleUrlChange() {

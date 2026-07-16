@@ -187,7 +187,7 @@ export const HotkeyCheatSheet = ({ visible }: HotkeyCheatSheetProps) => {
                         <Typography
                           variant="body2"
                           sx={{
-                            color: 'rgba(255, 255, 255, 0.85)',
+                            color: 'text.primary',
                             flexShrink: 1,
                             minWidth: 0,
                           }}
@@ -217,11 +217,14 @@ export const HotkeyCheatSheet = ({ visible }: HotkeyCheatSheetProps) => {
                                 fontSize: '0.75rem',
                                 fontFamily: 'inherit',
                                 fontWeight: 600,
-                                color: '#fff',
-                                background: 'rgba(255, 255, 255, 0.08)',
-                                border: '1px solid rgba(255, 255, 255, 0.15)',
-                                boxShadow:
-                                  '0 2px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
+                                color: 'text.primary',
+                                backgroundColor: 'action.hover',
+                                border: '1px solid',
+                                borderColor: 'divider',
+                                boxShadow: (theme) =>
+                                  theme.palette.mode === 'dark'
+                                    ? '0 2px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08)'
+                                    : '0 2px 0 rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.8)',
                                 lineHeight: 1,
                               }}
                             >
@@ -242,7 +245,7 @@ export const HotkeyCheatSheet = ({ visible }: HotkeyCheatSheetProps) => {
                 display: 'block',
                 textAlign: 'center',
                 mt: 2.5,
-                color: 'rgba(255, 255, 255, 0.4)',
+                color: 'text.secondary',
               }}
             >
               {t('cheatSheet.hint')}

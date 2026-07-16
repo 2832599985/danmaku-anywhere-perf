@@ -32,9 +32,9 @@ export const getLiquidGlassSx = (
 
   return {
     position: 'relative',
-    // multi-layer background: theme tint gradient over the translucent fill;
-    // the color layer must come last in the shorthand
-    background: `${g.tint}, ${fill}`,
+    backgroundColor: fill,
+    backgroundImage: g.tint,
+    backgroundClip: 'padding-box',
     backdropFilter: g.blur,
     WebkitBackdropFilter: g.blur,
     borderRadius: typeof radius === 'number' ? `${radius}px` : radius,
@@ -64,9 +64,9 @@ export const getLiquidGlassSx = (
         }),
     ...(interactive && {
       transition:
-        'background 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease, filter 0.2s ease',
+        'background-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease, filter 0.2s ease',
       '&:hover': {
-        background: `${g.tint}, ${g.hover}`,
+        backgroundColor: g.hover,
         filter: 'brightness(1.08)',
       },
       '&:active': {

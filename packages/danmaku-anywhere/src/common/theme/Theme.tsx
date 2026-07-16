@@ -17,7 +17,7 @@ import type { UserTheme } from '@/common/options/extensionOptions/schema'
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
 import { ColorMode } from '@/common/theme/enums'
 import type { ThemePalette } from '@/common/theme/themes'
-import { getThemePalette } from '@/common/theme/themes'
+import { getThemePalette, resolveColorScheme } from '@/common/theme/themes'
 import { getThemeCssVarsString } from '@/common/theme/themeVars'
 
 import { tryCatchSync } from '@/common/utils/tryCatch'
@@ -34,28 +34,33 @@ const getDefaultThemeOptions = (
     secondary: {
       main: palette.secondary,
     },
-    ...(mode === 'dark' && {
-      background: {
-        default: palette.darkBg,
-        paper: palette.darkBg,
-      },
-    }),
+    background:
+      mode === 'dark'
+        ? {
+            default: palette.darkBg,
+            paper: palette.darkBg,
+          }
+        : {
+            default: '#f4f6fb',
+            paper: '#f8fafc',
+          },
   },
   shape: {
     borderRadius: 16,
   },
   components: {
-    ...(mode === 'dark' && {
-      MuiPaper: {
-        styleOverrides: {
-          root: {
-            background: `${palette.glass.tint}, ${palette.glass.scrim}`,
-            backdropFilter: palette.glass.blur,
-            backgroundImage: 'none',
-          },
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+          backgroundColor: palette.glass.scrim,
+          backgroundImage: palette.glass.tint,
+          backdropFilter: palette.glass.blur,
+          WebkitBackdropFilter: palette.glass.blur,
+          border: `1px solid ${palette.glass.border}`,
+          backgroundClip: 'padding-box',
         },
       },
-    }),
+    },
     MuiButton: {
       styleOverrides: {
         root: {
@@ -127,7 +132,11 @@ export const Theme = ({ children, options = {}, themeStyleEl }: ThemeProps) => {
 
   const colorMode = data.theme.colorMode
   const themeId = data.theme.themeId
-  const currentPalette = useMemo(() => getThemePalette(themeId), [themeId])
+  const colorScheme = resolveColorScheme(colorMode, prefersDarkMode ?? true)
+  const currentPalette = useMemo(
+    () => getThemePalette(themeId, colorScheme),
+    [themeId, colorScheme]
+  )
 
   // Sync theme CSS variables to the shadow DOM style element
   useEffect(() => {
@@ -135,10 +144,6 @@ export const Theme = ({ children, options = {}, themeStyleEl }: ThemeProps) => {
       themeStyleEl.textContent = getThemeCssVarsString(currentPalette)
     }
   }, [themeStyleEl, currentPalette])
-
-  const preferredColorScheme = (prefersDarkMode ?? true) ? 'dark' : 'light'
-  const colorScheme: 'dark' | 'light' =
-    colorMode === 'system' ? preferredColorScheme : colorMode
 
   const theme = useMemo(() => {
     const languageMap: Record<string, Localization> = {
@@ -148,11 +153,9 @@ export const Theme = ({ children, options = {}, themeStyleEl }: ThemeProps) => {
 
     const base = getDefaultThemeOptions(colorScheme, currentPalette)
     return createTheme(
-      produce(base, (draft) => {
-        Object.assign(draft, options)
-        if (!draft.palette) draft.palette = {}
-        draft.palette.mode = colorScheme
-      }),
+      base,
+      options,
+      { palette: { mode: colorScheme } },
       languageMap[i18n.language]
     )
   }, [colorScheme, options, i18n.language, currentPalette])

@@ -1,6 +1,8 @@
 import { Box } from '@mui/material'
+import { alpha, useTheme } from '@mui/material/styles'
 import { useDrag } from '@use-gesture/react'
 import { useCallback, useRef, useState } from 'react'
+import { useThemeContext } from '@/common/theme/Theme'
 import type { PanelSize } from '@/content/controller/ui/constants/size'
 import {
   PANEL_MAX_HEIGHT_RATIO,
@@ -23,8 +25,13 @@ export const ResizeHandle = ({
   onDoubleClick,
 }: ResizeHandleProps) => {
   const [isDragging, setIsDragging] = useState(false)
+  const theme = useTheme()
+  const { palette } = useThemeContext()
   const sizeRef = useRef(size)
   sizeRef.current = size
+
+  const idleHandleColor = alpha(theme.palette.text.primary, 0.28)
+  const activeHandleColor = alpha(palette.primary, 0.82)
 
   const clampSize = useCallback((width: number, height: number): PanelSize => {
     const maxW = window.innerWidth * PANEL_MAX_WIDTH_RATIO
@@ -84,9 +91,11 @@ export const ResizeHandle = ({
         justifyContent: 'center',
         borderRadius: '0 0 16px 0',
         transition: 'background-color 0.2s',
-        backgroundColor: isDragging ? 'rgba(139, 92, 246, 0.3)' : 'transparent',
+        backgroundColor: isDragging
+          ? alpha(palette.primary, 0.24)
+          : 'transparent',
         '&:hover': {
-          backgroundColor: 'rgba(139, 92, 246, 0.2)',
+          backgroundColor: alpha(palette.primary, 0.16),
         },
         '&::before': {
           content: '""',
@@ -94,15 +103,15 @@ export const ResizeHandle = ({
           width: 10,
           height: 10,
           borderRight: isDragging
-            ? '2px solid rgba(139, 92, 246, 0.8)'
-            : '2px solid rgba(255, 255, 255, 0.3)',
+            ? `2px solid ${activeHandleColor}`
+            : `2px solid ${idleHandleColor}`,
           borderBottom: isDragging
-            ? '2px solid rgba(139, 92, 246, 0.8)'
-            : '2px solid rgba(255, 255, 255, 0.3)',
+            ? `2px solid ${activeHandleColor}`
+            : `2px solid ${idleHandleColor}`,
           transition: 'border-color 0.2s',
         },
         '&:hover::before': {
-          borderColor: 'rgba(139, 92, 246, 0.6)',
+          borderColor: alpha(palette.primary, 0.64),
         },
       }}
     />

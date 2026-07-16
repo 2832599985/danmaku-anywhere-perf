@@ -60,6 +60,8 @@ export class UpscaleService {
   // prevents a stale enable from resurrecting after a rapid toggle-off and
   // an older Renderer.create from clobbering a newer renderer.
   private opEpoch = 0
+  private rendererUpdateTail: Promise<void> = Promise.resolve()
+  private suspended = false
   private corsRuleActive = false
   private requestedOptions: StoredUpscaleOptions = {
     enabled: false,
@@ -104,7 +106,7 @@ export class UpscaleService {
     video: HTMLVideoElement | null | undefined,
     options: Partial<UpscaleOptions> = {}
   ) {
-    if (epoch !== this.opEpoch) return
+    if (epoch !== this.opEpoch || this.suspended) return
     if (!video) throw new RendererInitializationError('No active video element')
     if (!('gpu' in navigator) || !navigator.gpu) {
       throw new RendererInitializationError(
@@ -113,18 +115,21 @@ export class UpscaleService {
     }
     const nextOptions = { ...this.options, ...options, enabled: true }
     if (this.video === video && this.renderer && this.canvas) {
+      const renderer = this.renderer
+      const canvas = this.canvas
       const width = Math.max(1, video.videoWidth || video.clientWidth)
       const height = Math.max(1, video.videoHeight || video.clientHeight)
       const targetDimensions = nextOptions.targetDimensions ?? {
         width: width * nextOptions.targetResolution,
         height: height * nextOptions.targetResolution,
       }
-      this.options = nextOptions
-      this.canvas.setBufferSize(targetDimensions.width, targetDimensions.height)
-      await this.renderer.updateConfiguration({
-        effects: nextOptions.effects,
-        targetDimensions,
-      })
+      await this.queueRendererUpdate(
+        epoch,
+        renderer,
+        canvas,
+        nextOptions,
+        targetDimensions
+      )
       return
     }
     this.teardown()
@@ -162,6 +167,48 @@ export class UpscaleService {
     this.renderer = renderer
   }
 
+  private async queueRendererUpdate(
+    epoch: number,
+    renderer: Renderer,
+    canvas: UpscaleCanvas,
+    nextOptions: UpscaleOptions,
+    targetDimensions: Dimensions
+  ) {
+    const update = this.rendererUpdateTail.then(async () => {
+      if (
+        epoch !== this.opEpoch ||
+        this.suspended ||
+        this.renderer !== renderer ||
+        this.canvas !== canvas
+      ) {
+        return
+      }
+
+      this.options = nextOptions
+      canvas.setBufferSize(targetDimensions.width, targetDimensions.height)
+
+      try {
+        await renderer.updateConfiguration({
+          effects: nextOptions.effects,
+          targetDimensions,
+        })
+      } catch (error) {
+        if (
+          epoch !== this.opEpoch ||
+          this.suspended ||
+          this.renderer !== renderer ||
+          this.canvas !== canvas
+        ) {
+          return
+        }
+        throw error
+      }
+    })
+
+    this.rendererUpdateTail = update.catch(() => undefined)
+    await update
+  }
+
   disable() {
     this.opEpoch++
     this.teardown()
@@ -178,10 +225,25 @@ export class UpscaleService {
     this.canvas?.cleanup()
     this.canvas = undefined
     this.video = undefined
+    // Updates for the destroyed renderer still settle in the background, but
+    // a new renderer must not wait behind them.
+    this.rendererUpdateTail = Promise.resolve()
   }
 
   get isEnabled() {
     return this.renderer !== undefined
+  }
+
+  suspend() {
+    if (this.suspended) return
+    this.suspended = true
+    this.disable()
+  }
+
+  async resume() {
+    if (!this.suspended) return
+    this.suspended = false
+    await this.reapply()
   }
 
   setTopLayerRestore(callback: () => void) {
@@ -195,6 +257,10 @@ export class UpscaleService {
 
   async applyOptions(options: StoredUpscaleOptions) {
     this.requestedOptions = options
+    if (this.suspended) {
+      this.disable()
+      return
+    }
     if (!options.enabled) {
       this.disable()
       return
