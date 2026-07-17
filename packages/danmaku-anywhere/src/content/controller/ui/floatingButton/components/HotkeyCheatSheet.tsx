@@ -10,6 +10,7 @@ import {
 import { useHotkeyOptions } from '@/common/options/extensionOptions/useHotkeyOptions'
 import { getLiquidGlassSx } from '@/common/theme/liquidGlass'
 import { useThemeContext } from '@/common/theme/Theme'
+import { RADIUS } from '@/common/theme/tokens'
 import { getOS, properCase } from '@/common/utils/utils'
 
 interface HotkeyGroup {
@@ -213,7 +214,7 @@ export const HotkeyCheatSheet = ({ visible }: HotkeyCheatSheetProps) => {
                                 minWidth: 28,
                                 height: 28,
                                 px: 1,
-                                borderRadius: 1,
+                                borderRadius: `${RADIUS.s}px`,
                                 fontSize: '0.75rem',
                                 fontFamily: 'inherit',
                                 fontWeight: 600,
@@ -221,10 +222,8 @@ export const HotkeyCheatSheet = ({ visible }: HotkeyCheatSheetProps) => {
                                 backgroundColor: 'action.hover',
                                 border: '1px solid',
                                 borderColor: 'divider',
-                                boxShadow: (theme) =>
-                                  theme.palette.mode === 'dark'
-                                    ? '0 2px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08)'
-                                    : '0 2px 0 rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.8)',
+                                boxShadow:
+                                  '0 2px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08)',
                                 lineHeight: 1,
                               }}
                             >

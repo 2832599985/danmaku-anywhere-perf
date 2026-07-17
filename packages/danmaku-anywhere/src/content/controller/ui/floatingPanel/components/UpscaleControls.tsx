@@ -6,7 +6,6 @@ import {
   Divider,
   FormControlLabel,
   IconButton,
-  Paper,
   Popper,
   Stack,
   Switch,
@@ -17,9 +16,13 @@ import {
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
+import { getLiquidGlassSx } from '@/common/theme/liquidGlass'
+import { useThemeContext } from '@/common/theme/Theme'
+import { RADIUS } from '@/common/theme/tokens'
 
 export const UpscaleControls = () => {
   const { t } = useTranslation()
+  const { palette } = useThemeContext()
   const { data: options, partialUpdate } = useExtensionOptions()
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLDivElement>(null)
@@ -87,15 +90,15 @@ export const UpscaleControls = () => {
         sx={{ zIndex: 1600 }}
       >
         <ClickAwayListener onClickAway={() => setOpen(false)}>
-          <Paper
-            elevation={12}
+          <Box
             sx={{
+              ...getLiquidGlassSx(palette, {
+                variant: 'surface',
+                radius: 'l',
+                gradientBorder: false,
+              }),
               width: 330,
               p: 1.5,
-              borderRadius: 2,
-              border: '1px solid',
-              borderColor: 'divider',
-              bgcolor: 'background.paper',
               color: 'text.primary',
             }}
           >
@@ -124,7 +127,9 @@ export const UpscaleControls = () => {
                   sx={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(3, 1fr)',
-                    '& .MuiToggleButton-root': { borderRadius: 1 },
+                    '& .MuiToggleButton-root': {
+                      borderRadius: `${RADIUS.s}px`,
+                    },
                   }}
                   onChange={(_, modeId: typeof upscale.modeId | null) => {
                     if (modeId) update({ modeId })
@@ -150,7 +155,9 @@ export const UpscaleControls = () => {
                   sx={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(2, 1fr)',
-                    '& .MuiToggleButton-root': { borderRadius: 1 },
+                    '& .MuiToggleButton-root': {
+                      borderRadius: `${RADIUS.s}px`,
+                    },
                   }}
                   onChange={(
                     _,
@@ -185,7 +192,9 @@ export const UpscaleControls = () => {
                   sx={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(4, 1fr)',
-                    '& .MuiToggleButton-root': { borderRadius: 1 },
+                    '& .MuiToggleButton-root': {
+                      borderRadius: `${RADIUS.s}px`,
+                    },
                   }}
                   onChange={(
                     _,
@@ -220,7 +229,7 @@ export const UpscaleControls = () => {
                 label={t('upscale.corsFix', 'CORS fix')}
               />
             </Stack>
-          </Paper>
+          </Box>
         </ClickAwayListener>
       </Popper>
     </Box>

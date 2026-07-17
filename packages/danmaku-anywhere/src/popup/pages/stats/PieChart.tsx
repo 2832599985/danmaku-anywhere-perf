@@ -1,5 +1,6 @@
 import { useTheme } from '@mui/material'
 import { useMemo } from 'react'
+import { useThemeContext } from '@/common/theme/Theme'
 import type { TypeDistribution } from './statsUtils'
 
 interface PieChartProps {
@@ -8,15 +9,21 @@ interface PieChartProps {
   size?: number
 }
 
-const COLORS = [
-  'var(--da-pie-0, #8b5cf6)',
-  'var(--da-pie-1, #d946ef)',
-  'var(--da-pie-2, #06b6d4)',
-  'var(--da-pie-3, #f59e0b)',
-]
-
 export const PieChart = ({ data, labels, size = 140 }: PieChartProps) => {
   const theme = useTheme()
+  const { palette } = useThemeContext()
+
+  // Categorical slice palette derived from the active theme so the chart
+  // tracks the user's chosen mood instead of a fixed violet set.
+  const colors = useMemo(
+    () => [
+      palette.primary,
+      palette.secondary,
+      palette.status.info,
+      palette.status.warning,
+    ],
+    [palette]
+  )
 
   const slices = useMemo(() => {
     const allEntries: { key: keyof TypeDistribution; value: number }[] = [
@@ -73,7 +80,7 @@ export const PieChart = ({ data, labels, size = 140 }: PieChartProps) => {
       return {
         key: entry.key,
         path,
-        color: COLORS[i % COLORS.length],
+        color: colors[i % colors.length],
         label: labels[entry.key],
         percent: `${(fraction * 100).toFixed(1)}%`,
         lx,
@@ -81,7 +88,7 @@ export const PieChart = ({ data, labels, size = 140 }: PieChartProps) => {
         showLabel: fraction > 0.08,
       }
     })
-  }, [data, labels, size])
+  }, [data, labels, size, colors])
 
   if (slices.length === 0) return null
 
@@ -110,7 +117,7 @@ export const PieChart = ({ data, labels, size = 140 }: PieChartProps) => {
               y={s.ly}
               textAnchor="middle"
               dominantBaseline="central"
-              fill="#fff"
+              fill={palette.glass.border}
               fontSize={10}
               fontWeight={600}
               style={{ pointerEvents: 'none' }}

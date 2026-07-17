@@ -1,8 +1,9 @@
 import { SvgIcon } from '@mui/material'
+import { BRAND_COLORS } from '@/common/theme/brandColors'
 
 export const BiliBiliIcon = () => {
   return (
-    <SvgIcon sx={{ color: '#00aeec' }} fill="currentColor">
+    <SvgIcon sx={{ color: BRAND_COLORS.bilibili }} fill="currentColor">
       <svg
         width="800px"
         height="800px"

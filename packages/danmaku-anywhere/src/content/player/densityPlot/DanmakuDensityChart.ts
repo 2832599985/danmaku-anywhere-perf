@@ -117,6 +117,38 @@ export class DanmakuDensityChart {
     return value || fallback
   }
 
+  /** Reduce opacity of a color to create a dimmer version. Accepts hex
+   * (#rgb / #rrggbb), rgb() and rgba() — the injected --da-primary is hex, so
+   * an rgba-only parse would silently no-op and flatten the density band. */
+  private dimColor(color: string, opacityMultiplier: number): string {
+    const c = color.trim()
+    const hex = c.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
+    if (hex) {
+      const h = hex[1]
+      const full =
+        h.length === 3
+          ? h
+              .split('')
+              .map((ch) => ch + ch)
+              .join('')
+          : h
+      const r = Number.parseInt(full.slice(0, 2), 16)
+      const g = Number.parseInt(full.slice(2, 4), 16)
+      const b = Number.parseInt(full.slice(4, 6), 16)
+      return `rgba(${r}, ${g}, ${b}, ${opacityMultiplier.toFixed(2)})`
+    }
+    const rgba = c.match(
+      /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)/
+    )
+    if (!rgba) {
+      return color
+    }
+    const [, r, g, b, a] = rgba
+    const base = a === undefined ? 1 : Number.parseFloat(a)
+    const newOpacity = (base * opacityMultiplier).toFixed(2)
+    return `rgba(${r}, ${g}, ${b}, ${newOpacity})`
+  }
+
   onTooltip(callback: TooltipCallback | null) {
     this.tooltipCallback = callback
   }
@@ -147,7 +179,7 @@ export class DanmakuDensityChart {
       .attr('width', 0)
       .attr('height', this.options.height)
 
-    // Color gradient for density (cool -> warm)
+    // Theme-derived single-hue light band: density maps to brightness/opacity
     const gradient = defs
       .append('linearGradient')
       .attr('id', this.gradientId)
@@ -157,18 +189,62 @@ export class DanmakuDensityChart {
       .attr('x2', 0)
       .attr('y2', 0)
 
+    // Read theme colors from CSS variables
+    const primaryColor = this.getCssVar(
+      '--da-primary',
+      'rgba(139, 92, 246, 0.6)'
+    )
+    const secondaryColor = this.getCssVar(
+      '--da-secondary',
+      'rgba(217, 70, 239, 0.8)'
+    )
+
+    // Gradient: dim primary at base → bright primary → secondary bloom at peak
     gradient
       .append('stop')
       .attr('offset', '0%')
-      .attr('stop-color', 'rgba(56, 189, 248, 0.6)')
+      .attr('stop-color', this.dimColor(primaryColor, 0.3))
     gradient
       .append('stop')
-      .attr('offset', '50%')
-      .attr('stop-color', 'rgba(250, 204, 21, 0.7)')
+      .attr('offset', '55%')
+      .attr('stop-color', this.dimColor(primaryColor, 0.7))
     gradient
       .append('stop')
       .attr('offset', '100%')
-      .attr('stop-color', 'rgba(239, 68, 68, 0.85)')
+      .attr('stop-color', this.dimColor(secondaryColor, 0.95))
+
+    // Diagonal hatch patterns for OP/ED regions: opposite stroke directions so
+    // the two are distinguishable by texture, not hue alone (color-blind safe).
+    const opHatch = defs
+      .append('pattern')
+      .attr('id', `${this.gradientId}-op-hatch`)
+      .attr('patternUnits', 'userSpaceOnUse')
+      .attr('width', 6)
+      .attr('height', 6)
+      .attr('patternTransform', 'rotate(45)')
+    opHatch
+      .append('line')
+      .attr('x1', 0)
+      .attr('y1', 0)
+      .attr('x2', 0)
+      .attr('y2', 6)
+      .attr('stroke-width', 1.4)
+      .classed('da-region-hatch-op', true)
+    const edHatch = defs
+      .append('pattern')
+      .attr('id', `${this.gradientId}-ed-hatch`)
+      .attr('patternUnits', 'userSpaceOnUse')
+      .attr('width', 6)
+      .attr('height', 6)
+      .attr('patternTransform', 'rotate(-45)')
+    edHatch
+      .append('line')
+      .attr('x1', 0)
+      .attr('y1', 0)
+      .attr('x2', 0)
+      .attr('y2', 6)
+      .attr('stroke-width', 1.4)
+      .classed('da-region-hatch-ed', true)
 
     // Skip region overlays (rendered below density paths)
     const skipRegionGroup = svg.append('g').classed('da-skip-regions', true)
@@ -190,23 +266,31 @@ export class DanmakuDensityChart {
     const legendGroup = svg.append('g').classed('da-skip-legend', true)
 
     // Playback progress indicator line
+    const progressLineColor = this.getCssVar(
+      '--da-secondary',
+      'rgba(217, 70, 239, 0.9)'
+    )
     const progressLine = svg
       .append('line')
       .classed('da-density-progress-line', true)
       .attr('y1', 0)
       .attr('y2', this.options.height)
-      .attr('stroke', 'rgba(255, 255, 255, 0.9)')
+      .attr('stroke', progressLineColor)
       .attr('stroke-width', 1.5)
       .attr('pointer-events', 'none')
       .style('display', 'none')
 
     // Hover indicator line
+    const hoverLineColor = this.getCssVar(
+      '--da-primary',
+      'rgba(139, 92, 246, 0.6)'
+    )
     const hoverLine = svg
       .append('line')
       .classed('da-density-hover-line', true)
       .attr('y1', 0)
       .attr('y2', this.options.height)
-      .attr('stroke', 'rgba(255, 255, 255, 0.6)')
+      .attr('stroke', hoverLineColor)
       .attr('stroke-width', 1)
       .attr('pointer-events', 'none')
       .style('display', 'none')
@@ -521,6 +605,17 @@ export class DanmakuDensityChart {
         .attr('stroke-width', 1)
         .classed('da-skip-region', true)
         .classed(isOp ? 'da-skip-region-op' : 'da-skip-region-ed', true)
+
+      // Diagonal hatch overlay — texture cue on top of the fill so OP/ED read
+      // apart without depending on color.
+      this.skipRegionGroup
+        .append('rect')
+        .attr('x', x1)
+        .attr('y', 0)
+        .attr('width', regionWidth)
+        .attr('height', height)
+        .attr('fill', `url(#${this.gradientId}-${isOp ? 'op' : 'ed'}-hatch)`)
+        .attr('pointer-events', 'none')
 
       // Label inside region (only if wide enough)
       if (regionWidth > 24) {

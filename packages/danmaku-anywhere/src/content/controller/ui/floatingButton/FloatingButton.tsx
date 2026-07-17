@@ -15,6 +15,7 @@ import { forwardRef, useEffect, useRef, useState } from 'react'
 import { useAnyLoading } from '@/common/hooks/useAnyLoading'
 import { useMergeRefs } from '@/common/hooks/useMergeRefs'
 import { isConfigIncomplete } from '@/common/options/mountConfig/isPermissive'
+import { GLASS_TEXT_SHADOW } from '@/common/theme/liquidGlass'
 import { useThemeContext } from '@/common/theme/Theme'
 import type { ThemePalette } from '@/common/theme/themes'
 import { createVirtualElement } from '@/common/utils/utils'
@@ -32,13 +33,26 @@ interface FloatingButtonProps extends FabProps {
 }
 
 // The animated box-shadow replaces the whole stack each frame, so the static
-// specular/depth stack must ride along in every keyframe.
-const makeErrorPulse = (staticShadow: string) => keyframes`
+// specular/depth stack must ride along in every keyframe. status.error is hex,
+// so alpha rides as an 8-digit hex suffix (…66 ≈ 0.4, …00 = 0) — a prior
+// rgba-only fade left the ring fully opaque and it never faded out.
+const makeErrorPulse = (staticShadow: string, errorColor: string) => keyframes`
   0%, 100% {
-    box-shadow: ${staticShadow}, 0 0 0 0 rgba(244, 67, 54, 0.4);
+    box-shadow: ${staticShadow}, 0 0 0 0 ${errorColor}66;
   }
   50% {
-    box-shadow: ${staticShadow}, 0 0 0 8px rgba(244, 67, 54, 0);
+    box-shadow: ${staticShadow}, 0 0 0 8px ${errorColor}00;
+  }
+`
+
+// Mounted = danmaku is live: a slow bloom breathing in and out of the static
+// stack signals the active state without stealing attention.
+const makeMountedGlow = (staticShadow: string, glow: string) => keyframes`
+  0%, 100% {
+    box-shadow: ${staticShadow};
+  }
+  50% {
+    box-shadow: ${staticShadow}, ${glow};
   }
 `
 
@@ -63,57 +77,65 @@ const checkFadeInOut = keyframes`
 
 const StyledFab = styled(Fab, {
   shouldForwardProp: (prop) =>
-    prop !== 'hover' && prop !== 'palette' && prop !== 'hasError',
-})<{ hover: boolean; palette: ThemePalette; hasError: boolean }>(
-  ({ hover, palette, hasError, theme }) => {
-    const g = palette.glass
-    const staticShadow = `${g.specular}, ${g.depth}`
-    return {
-      transition: 'all 0.2s ease-in-out',
-      transform: hover ? 'rotate(45deg) scale(1.05)' : 'rotate(0deg)',
-      touchAction: 'none',
-      // !important: the Fab color prop injects its own background
-      backgroundColor: `${g.base} !important`,
-      backgroundImage: `${g.tint} !important`,
-      backdropFilter: g.blur,
-      WebkitBackdropFilter: g.blur,
-      border: 'none',
-      boxShadow: staticShadow,
-      color:
-        theme.palette.mode === 'light' ? theme.palette.text.primary : '#fff',
-      '&::before': {
-        content: '""',
-        position: 'absolute',
-        inset: 0,
-        borderRadius: 'inherit',
-        padding: '1px',
-        background: g.borderGradient,
-        WebkitMask:
-          'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-        WebkitMaskComposite: 'xor',
-        maskComposite: 'exclude',
-        pointerEvents: 'none',
-      },
-      '& svg': {
-        filter:
-          theme.palette.mode === 'dark'
-            ? 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))'
-            : 'drop-shadow(0 1px 1px rgba(255, 255, 255, 0.8))',
-      },
-      '&:hover': {
-        backgroundColor: `${g.hover} !important`,
-      },
-      '&:active': {
-        transform: hover
-          ? 'rotate(45deg) scale(0.94)'
-          : 'rotate(0deg) scale(0.94)',
-      },
-      ...(hasError && {
-        animation: `${makeErrorPulse(staticShadow)} 1.5s ease-in-out infinite`,
-      }),
-    }
+    prop !== 'hover' &&
+    prop !== 'palette' &&
+    prop !== 'hasError' &&
+    prop !== 'mounted',
+})<{
+  hover: boolean
+  palette: ThemePalette
+  hasError: boolean
+  mounted: boolean
+}>(({ hover, palette, hasError, mounted, theme }) => {
+  const g = palette.glass
+  const staticShadow = `${g.specular}, ${g.depth}`
+  const animation = hasError
+    ? `${makeErrorPulse(staticShadow, palette.status.error)} 1.5s ease-in-out infinite`
+    : mounted
+      ? `${makeMountedGlow(staticShadow, g.glow)} 4s ease-in-out infinite`
+      : undefined
+  return {
+    transition: 'all 0.2s ease-in-out',
+    transform: hover ? 'rotate(45deg) scale(1.05)' : 'rotate(0deg)',
+    touchAction: 'none',
+    // !important: the Fab color prop injects its own background
+    backgroundColor: `${g.base} !important`,
+    backgroundImage: `${g.tint} !important`,
+    backdropFilter: g.blur,
+    WebkitBackdropFilter: g.blur,
+    border: 'none',
+    boxShadow: staticShadow,
+    color: theme.palette.mode === 'light' ? theme.palette.text.primary : '#fff',
+    '&::before': {
+      content: '""',
+      position: 'absolute',
+      inset: 0,
+      borderRadius: 'inherit',
+      padding: '1px',
+      background: g.borderGradient,
+      WebkitMask:
+        'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+      WebkitMaskComposite: 'xor',
+      maskComposite: 'exclude',
+      pointerEvents: 'none',
+    },
+    '& svg': {
+      filter: GLASS_TEXT_SHADOW,
+    },
+    '&:hover': {
+      backgroundColor: `${g.hover} !important`,
+    },
+    '&:active': {
+      transform: hover
+        ? 'rotate(45deg) scale(0.94)'
+        : 'rotate(0deg) scale(0.94)',
+    },
+    ...(animation && { animation }),
+    '@media (prefers-reduced-motion: reduce)': {
+      animation: 'none',
+    },
   }
-)
+})
 
 const useInitialAnchor = () => {
   // bottom 12, left 3
@@ -277,6 +299,7 @@ export const FloatingButton = forwardRef<
                         hover={fabHover}
                         palette={palette}
                         hasError={isDisconnected}
+                        mounted={isMounted && !isDisconnected}
                         onMouseOver={() => setFabHover(true)}
                         onMouseOut={() => setFabHover(false)}
                       >
@@ -306,9 +329,8 @@ export const FloatingButton = forwardRef<
                             <Check
                               sx={{
                                 fontSize: 24,
-                                color: '#4caf50',
-                                filter:
-                                  'drop-shadow(0 0 4px rgba(76, 175, 80, 0.6))',
+                                color: palette.status.success,
+                                filter: `drop-shadow(0 0 4px ${palette.status.success}80)`,
                               }}
                             />
                           </Box>

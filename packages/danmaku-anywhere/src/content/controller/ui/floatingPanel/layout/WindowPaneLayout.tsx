@@ -48,7 +48,7 @@ export const WindowPaneLayout = (props: WindowPaneLayoutProps) => {
         touchAction: 'manipulation',
         ...getLiquidGlassSx(palette, {
           variant: 'surface',
-          radius: 24,
+          radius: 'l',
           gradientBorder: !isResizing,
         }),
         ...(isResizing && {

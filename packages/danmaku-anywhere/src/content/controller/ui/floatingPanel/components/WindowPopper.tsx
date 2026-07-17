@@ -1,9 +1,10 @@
 import type { PopperProps } from '@mui/material'
-import { Fade } from '@mui/material'
+import { Grow } from '@mui/material'
 import type { useDrag } from '@use-gesture/react'
 import type { ReactElement } from 'react'
 import { useEffect, useRef, useState } from 'react'
 
+import { MOTION } from '@/common/theme/tokens'
 import type { DraggableContainerMethods } from '@/content/controller/ui/components/DraggableContainer'
 import { DraggableContainer } from '@/content/controller/ui/components/DraggableContainer'
 import type { PanelSize } from '@/content/controller/ui/constants/size'
@@ -75,7 +76,14 @@ export const WindowPopper = ({
     >
       {({ bind, isDragging }) => {
         return (
-          <Fade in={open} unmountOnExit={unmountOnExit}>
+          // Grow from the FAB corner (anchored bottom-left) so the panel reads
+          // as unfolding from the button rather than fading in place.
+          <Grow
+            in={open}
+            unmountOnExit={unmountOnExit}
+            style={{ transformOrigin: 'bottom left' }}
+            timeout={MOTION.durSlow}
+          >
             <div>
               <WindowPaneLayout
                 width={panelSize?.width}
@@ -93,7 +101,7 @@ export const WindowPopper = ({
                 )}
               </WindowPaneLayout>
             </div>
-          </Fade>
+          </Grow>
         )
       }}
     </DraggableContainer>

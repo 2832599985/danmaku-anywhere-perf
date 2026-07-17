@@ -1,5 +1,6 @@
 import { Box, Typography } from '@mui/material'
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
+import { RADIUS } from '@/common/theme/tokens'
 
 export const OptionsPanel = () => {
   const { data: options } = useExtensionOptions()
@@ -26,7 +27,7 @@ export const OptionsPanel = () => {
             bgcolor: 'background.paper',
             border: '1px solid',
             borderColor: 'divider',
-            borderRadius: 1,
+            borderRadius: `${RADIUS.s}px`,
             overflow: 'auto',
             color: 'text.secondary',
           }}

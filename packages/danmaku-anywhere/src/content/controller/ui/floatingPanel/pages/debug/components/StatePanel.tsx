@@ -1,6 +1,7 @@
 import { Box, Typography } from '@mui/material'
 import { useDialogStore } from '@/common/components/Dialog/dialogStore'
 import { useToast } from '@/common/components/Toast/toastStore'
+import { RADIUS } from '@/common/theme/tokens'
 import { useStore } from '@/content/controller/store/store'
 
 // biome-ignore lint/suspicious/noExplicitAny: debug serialization
@@ -25,7 +26,7 @@ const JsonBlock = ({ title, data }: { title: string; data: any }) => (
         bgcolor: 'background.paper',
         border: '1px solid',
         borderColor: 'divider',
-        borderRadius: 1,
+        borderRadius: `${RADIUS.s}px`,
         overflow: 'auto',
         color: 'text.secondary',
         '& span.key': { color: 'primary.main' },

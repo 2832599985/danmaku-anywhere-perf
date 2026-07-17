@@ -5,6 +5,7 @@ import {
   Chip,
   Divider,
   IconButton,
+  keyframes,
   Stack,
   Typography,
 } from '@mui/material'
@@ -16,6 +17,7 @@ import { TabToolbar } from '@/common/components/layout/TabToolbar'
 import { NothingHere } from '@/common/components/NothingHere'
 import { useToast } from '@/common/components/Toast/toastStore'
 import { useThemeContext } from '@/common/theme/Theme'
+import { MOTION, RADIUS } from '@/common/theme/tokens'
 import { copyToClipboard } from '@/common/utils/copyToClipboard'
 import { useStore } from '@/content/controller/store/store'
 import { getAdaptiveBinSize } from '@/content/player/densityPlot/adaptiveDensity'
@@ -33,6 +35,19 @@ function withAlpha(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
+// Staggered rise-in for the highlight list — each card enters slightly after
+// the one above, so the panel content assembles instead of appearing at once.
+const riseIn = keyframes`
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+`
+
 const HighlightCard = ({
   highlight,
   index,
@@ -49,13 +64,19 @@ const HighlightCard = ({
     <Box
       sx={{
         p: 1.5,
-        borderRadius: 2,
+        borderRadius: `${RADIUS.m}px`,
         backgroundColor: withAlpha(palette.primary, 0.08),
         border: `1px solid ${withAlpha(palette.primary, 0.15)}`,
         cursor: 'pointer',
-        transition: 'background-color 0.2s',
+        transition: `background-color ${MOTION.durBase}ms ${MOTION.easeSwift}`,
+        // Cap the stagger so a long list doesn't crawl in; first 8 cascade.
+        animation: `${riseIn} ${MOTION.durBase}ms ${MOTION.easeSwift} both`,
+        animationDelay: `${Math.min(index, 8) * 40}ms`,
         '&:hover': {
           backgroundColor: withAlpha(palette.primary, 0.15),
+        },
+        '@media (prefers-reduced-motion: reduce)': {
+          animation: 'none',
         },
       }}
       onClick={() => onJump(highlight.time)}

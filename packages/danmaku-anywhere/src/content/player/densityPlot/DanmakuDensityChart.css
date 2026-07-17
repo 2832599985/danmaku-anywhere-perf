@@ -13,6 +13,16 @@
   pointer-events: none;
 }
 
+/* Diagonal hatch strokes for OP/ED regions — texture cue layered over the
+   fill so the two are distinguishable without relying on color. */
+.da-region-hatch-op {
+  stroke: var(--da-region-op-border, rgba(96, 165, 250, 0.7));
+}
+
+.da-region-hatch-ed {
+  stroke: var(--da-region-ed-border, rgba(251, 113, 133, 0.7));
+}
+
 .da-skip-legend {
   pointer-events: none;
 }
@@ -28,14 +38,16 @@
 .da-density-tooltip {
   position: absolute;
   pointer-events: none;
-  background: rgba(0, 0, 0, 0.8);
-  color: #fff;
+  /* Use glass variables for dark OSD tooltip */
+  background:
+    var(--da-glass-tint, none), var(--da-glass-overlay, rgba(0, 0, 0, 0.78));
+  color: var(--da-skip-text, #fff);
   font-size: 11px;
-  font-family: sans-serif;
+  font-family: var(--da-font-data, sans-serif);
   padding: 3px 7px;
-  border-radius: 4px;
+  border-radius: var(--da-radius-s, 10px);
   white-space: nowrap;
   z-index: 10;
   transition: opacity 0.15s ease-in-out;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--da-glass-border, rgba(255, 255, 255, 0.15));
 }

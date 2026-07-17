@@ -56,7 +56,7 @@ const CardCornerInfo = styled('div', {
     backgroundColor: alpha(theme.palette.background.paper, 0.8),
     padding: theme.spacing(1),
     color: theme.palette.text.primary,
-    boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)',
+    boxShadow: `0px 2px 8px ${alpha(theme.palette.common.black, 0.15)}`,
   }
 
   switch (position) {

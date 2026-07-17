@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { useThemeContext } from '@/common/theme/Theme'
 import type { ThemePalette } from '@/common/theme/themes'
 import { getThemePalette, themeIds } from '@/common/theme/themes'
+import { RADIUS } from '@/common/theme/tokens'
 import { useViewTransition } from '@/common/theme/useViewTransition'
 
 interface ThemeCardProps {
@@ -54,7 +55,7 @@ const ThemeCard = ({ palette, selected, onSelect }: ThemeCardProps) => {
           sx={{
             width: '60%',
             height: 28,
-            borderRadius: 999,
+            borderRadius: RADIUS.pill,
             backgroundColor: palette.glass.base,
             backgroundImage: palette.glass.tint,
             backdropFilter: palette.glass.blur,
@@ -115,7 +116,7 @@ const ThemeCard = ({ palette, selected, onSelect }: ThemeCardProps) => {
               justifyContent: 'center',
             }}
           >
-            <Check sx={{ fontSize: 12, color: '#fff' }} />
+            <Check sx={{ fontSize: 12, color: palette.glass.border }} />
           </Box>
         )}
       </Box>

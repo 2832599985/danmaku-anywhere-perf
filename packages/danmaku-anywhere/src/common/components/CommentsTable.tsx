@@ -36,6 +36,7 @@ import {
   getSourceInfoFromEpisodes,
   providerColors,
 } from '@/common/danmaku/providerColors'
+import { dataFigures } from '@/common/theme/tokens'
 import { compareLocale } from '@/common/utils/collator'
 import { ScrollBox } from './layout/ScrollBox'
 
@@ -327,6 +328,7 @@ export const CommentsTable = ({
                         isTimeClickable && timeValid && isHovering
                           ? 'primary.main'
                           : 'text.primary',
+                      ...dataFigures,
                     }}
                     onClick={() => {
                       if (!timeValid) return

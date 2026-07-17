@@ -22,8 +22,8 @@ describe('theme palette resolution', () => {
       const dark = getThemePalette(themeId, 'dark')
       const light = getThemePalette(themeId, 'light')
 
-      expect(Object.keys(dark.glass)).toHaveLength(9)
-      expect(Object.keys(light.glass)).toHaveLength(9)
+      expect(Object.keys(dark.glass)).toHaveLength(12)
+      expect(Object.keys(light.glass)).toHaveLength(12)
       expect(light.glass).not.toEqual(dark.glass)
       expect(light.glass.base).toContain('255, 255, 255')
       expect(light.skipButton.text).not.toBe(dark.skipButton.text)

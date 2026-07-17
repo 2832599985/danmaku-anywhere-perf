@@ -29,7 +29,7 @@ export const PopupLayout = ({ children }: PropsWithChildren<{}>) => {
       <GlobalStyles
         styles={{
           'html, body': {
-            backgroundColor: theme.palette.background.default,
+            backgroundImage: palette.canvas.backdrop,
           },
         }}
       />

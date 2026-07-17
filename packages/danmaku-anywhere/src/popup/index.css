@@ -1,5 +1,7 @@
 /* Fallback canvas color before React mounts; PopupLayout's GlobalStyles
-   takes over with the active theme's background afterwards */
+   takes over with the active theme's canvas.backdrop afterwards.
+   These values mirror the neon-violet theme defaults: #0f172a (dark) and #f4f6fb (light).
+   Pre-React phase: theme is not loaded yet, so hardcoding these defaults is necessary. */
 body {
   margin: 0;
   color: white;

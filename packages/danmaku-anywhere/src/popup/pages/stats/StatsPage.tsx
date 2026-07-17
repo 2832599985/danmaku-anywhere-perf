@@ -9,6 +9,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { TabLayout } from '@/common/components/layout/TabLayout'
 import { TabToolbar } from '@/common/components/layout/TabToolbar'
+import { useThemeContext } from '@/common/theme/Theme'
 import { DensityChart } from './DensityChart'
 import { KeywordBarChart } from './KeywordBarChart'
 import { PieChart } from './PieChart'
@@ -81,6 +82,7 @@ const PieLegend = ({
 export const StatsPage = () => {
   const { t } = useTranslation()
   const { isLoading, isComputing, stats } = useStats()
+  const { palette } = useThemeContext()
 
   const loading = isLoading || isComputing
 
@@ -91,11 +93,12 @@ export const StatsPage = () => {
     ltr: t('statsPage.modeLtr'),
   }
 
+  // Legend swatches mirror PieChart's theme-derived categorical palette.
   const pieColors = [
-    'var(--da-pie-0, #8b5cf6)',
-    'var(--da-pie-1, #d946ef)',
-    'var(--da-pie-2, #06b6d4)',
-    'var(--da-pie-3, #f59e0b)',
+    palette.primary,
+    palette.secondary,
+    palette.status.info,
+    palette.status.warning,
   ]
 
   return (
