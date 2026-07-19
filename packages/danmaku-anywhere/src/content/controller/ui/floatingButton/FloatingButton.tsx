@@ -45,14 +45,17 @@ const makeErrorPulse = (staticShadow: string, errorColor: string) => keyframes`
   }
 `
 
-// Mounted = danmaku is live: a slow bloom breathing in and out of the static
-// stack signals the active state without stealing attention.
-const makeMountedGlow = (staticShadow: string, glow: string) => keyframes`
+// Mounted = danmaku is live. The glow shadow is painted ONCE on the ::after
+// pseudo-element and only its opacity animates — opacity runs on the
+// compositor, so the breathing costs no repaint. Animating box-shadow here
+// would re-blur the backdrop-filter FAB every frame, which is measurable when
+// the GPU is already saturated by Anime4K upscaling.
+const breatheOpacity = keyframes`
   0%, 100% {
-    box-shadow: ${staticShadow};
+    opacity: 0;
   }
   50% {
-    box-shadow: ${staticShadow}, ${glow};
+    opacity: 1;
   }
 `
 
@@ -89,11 +92,6 @@ const StyledFab = styled(Fab, {
 }>(({ hover, palette, hasError, mounted, theme }) => {
   const g = palette.glass
   const staticShadow = `${g.specular}, ${g.depth}`
-  const animation = hasError
-    ? `${makeErrorPulse(staticShadow, palette.status.error)} 1.5s ease-in-out infinite`
-    : mounted
-      ? `${makeMountedGlow(staticShadow, g.glow)} 4s ease-in-out infinite`
-      : undefined
   return {
     transition: 'all 0.2s ease-in-out',
     transform: hover ? 'rotate(45deg) scale(1.05)' : 'rotate(0deg)',
@@ -119,6 +117,20 @@ const StyledFab = styled(Fab, {
       maskComposite: 'exclude',
       pointerEvents: 'none',
     },
+    // Breathing glow carrier: shadow painted once, only opacity animates
+    '&::after': {
+      content: '""',
+      position: 'absolute',
+      inset: 0,
+      borderRadius: 'inherit',
+      boxShadow: g.glow,
+      opacity: 0,
+      pointerEvents: 'none',
+      ...(mounted &&
+        !hasError && {
+          animation: `${breatheOpacity} 4s ease-in-out infinite`,
+        }),
+    },
     '& svg': {
       filter: GLASS_TEXT_SHADOW,
     },
@@ -130,9 +142,12 @@ const StyledFab = styled(Fab, {
         ? 'rotate(45deg) scale(0.94)'
         : 'rotate(0deg) scale(0.94)',
     },
-    ...(animation && { animation }),
+    ...(hasError && {
+      animation: `${makeErrorPulse(staticShadow, palette.status.error)} 1.5s ease-in-out infinite`,
+    }),
     '@media (prefers-reduced-motion: reduce)': {
       animation: 'none',
+      '&::after': { animation: 'none' },
     },
   }
 })

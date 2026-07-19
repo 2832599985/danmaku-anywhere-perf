@@ -49,6 +49,11 @@ export default defineConfig({
   },
   build: {
     emptyOutDir: true,
+    // Extension chunks load from local disk, so modulepreload gains nothing —
+    // and in content scripts the preload helper resolves dep URLs against the
+    // HOST PAGE origin, spamming 404s (e.g. https://<site>/assets/vendor-*.js)
+    // every time the upscaler lazy-loads anime4k-webgpu.
+    modulePreload: false,
     rollupOptions: {
       input: {
         app: 'pages/popup.html',

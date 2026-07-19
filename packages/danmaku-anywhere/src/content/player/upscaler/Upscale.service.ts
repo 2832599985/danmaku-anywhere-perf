@@ -104,6 +104,29 @@ export class UpscaleService {
     return this.enableInternal(++this.opEpoch, video, options)
   }
 
+  /**
+   * Cap the render target at the physical screen size (device pixels, aspect
+   * preserved). Pixels beyond the display can never be shown — a 2x target on
+   * a 1080p source against a 1080p monitor would otherwise compute 4x the
+   * pixels for zero visible gain, and that waste is the bulk of the "page
+   * feels sluggish while upscaling" cost. Screen size is re-read on every
+   * enable/applyOptions/resolution change, so moving the window to a larger
+   * monitor picks up the new bound on the next reconfiguration.
+   */
+  private clampToDisplayBounds(dims: Dimensions): Dimensions {
+    const dpr = window.devicePixelRatio || 1
+    const maxWidth = Math.round((window.screen?.width ?? 0) * dpr)
+    const maxHeight = Math.round((window.screen?.height ?? 0) * dpr)
+    // jsdom and exotic embeds report 0 — no reliable bound, leave untouched
+    if (!maxWidth || !maxHeight) return dims
+    const scale = Math.min(maxWidth / dims.width, maxHeight / dims.height)
+    if (scale >= 1) return dims
+    return {
+      width: Math.max(1, Math.round(dims.width * scale)),
+      height: Math.max(1, Math.round(dims.height * scale)),
+    }
+  }
+
   private async enableInternal(
     epoch: number,
     video: HTMLVideoElement | null | undefined,
@@ -122,10 +145,12 @@ export class UpscaleService {
       const canvas = this.canvas
       const width = Math.max(1, video.videoWidth || video.clientWidth)
       const height = Math.max(1, video.videoHeight || video.clientHeight)
-      const targetDimensions = nextOptions.targetDimensions ?? {
-        width: width * nextOptions.targetResolution,
-        height: height * nextOptions.targetResolution,
-      }
+      const targetDimensions = this.clampToDisplayBounds(
+        nextOptions.targetDimensions ?? {
+          width: width * nextOptions.targetResolution,
+          height: height * nextOptions.targetResolution,
+        }
+      )
       await this.queueRendererUpdate(
         epoch,
         renderer,
@@ -142,10 +167,12 @@ export class UpscaleService {
     this.canvas = canvas
     const width = Math.max(1, video.videoWidth || video.clientWidth)
     const height = Math.max(1, video.videoHeight || video.clientHeight)
-    const targetDimensions = this.options.targetDimensions ?? {
-      width: width * this.options.targetResolution,
-      height: height * this.options.targetResolution,
-    }
+    const targetDimensions = this.clampToDisplayBounds(
+      this.options.targetDimensions ?? {
+        width: width * this.options.targetResolution,
+        height: height * this.options.targetResolution,
+      }
+    )
     canvas.setBufferSize(targetDimensions.width, targetDimensions.height)
     const renderer = await Renderer.create({
       video,

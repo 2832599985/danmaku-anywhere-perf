@@ -292,4 +292,77 @@ describe('UpscaleService operation coordination', () => {
       expect(video.crossOrigin).toBe(null)
     })
   })
+
+  describe('display bounds clamping', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    const setupRenderer = () => {
+      const renderer = {
+        destroy: vi.fn(),
+        handleSourceResize: vi.fn(),
+        updateConfiguration: vi.fn(),
+      }
+      mocks.rendererCreate.mockResolvedValue(renderer)
+      return renderer
+    }
+
+    it('caps the render target at the physical screen size', async () => {
+      vi.stubGlobal('screen', { width: 1920, height: 1080 })
+      vi.stubGlobal('devicePixelRatio', 1)
+      setupRenderer()
+      const video = createVideo()
+      const service = createService(video)
+
+      // x8 of 640×360 requests 5120×2880 — far beyond a 1080p display
+      await service.applyOptions(
+        createStoredOptions({ targetResolution: 'x8' })
+      )
+
+      expect(mocks.rendererCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          targetDimensions: { width: 1920, height: 1080 },
+        })
+      )
+    })
+
+    it('multiplies the screen bound by devicePixelRatio', async () => {
+      vi.stubGlobal('screen', { width: 1280, height: 720 })
+      vi.stubGlobal('devicePixelRatio', 2)
+      setupRenderer()
+      const video = createVideo()
+      const service = createService(video)
+
+      // bound = 1280×2 by 720×2 = 2560×1440; x8 (5120×2880) halves to fit
+      await service.applyOptions(
+        createStoredOptions({ targetResolution: 'x8' })
+      )
+
+      expect(mocks.rendererCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          targetDimensions: { width: 2560, height: 1440 },
+        })
+      )
+    })
+
+    it('leaves the target untouched when it already fits the display', async () => {
+      vi.stubGlobal('screen', { width: 3840, height: 2160 })
+      vi.stubGlobal('devicePixelRatio', 1)
+      setupRenderer()
+      const video = createVideo()
+      const service = createService(video)
+
+      // x2 of 640×360 = 1280×720, well within a 4K display
+      await service.applyOptions(
+        createStoredOptions({ targetResolution: 'x2' })
+      )
+
+      expect(mocks.rendererCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          targetDimensions: { width: 1280, height: 720 },
+        })
+      )
+    })
+  })
 })
