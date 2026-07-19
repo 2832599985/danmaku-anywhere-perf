@@ -301,4 +301,13 @@ export type PlayerRelayEvents = {
   'relay:event:videoEnded': RPCDef<InputWithFrameId<void>, void>
   'relay:event:showPopover': RPCDef<InputWithFrameId<void>, void>
   'relay:event:userInteraction': RPCDef<InputWithFrameId<void>, void>
+  /**
+   * Upscaling failed to start (or died at runtime) and was turned off.
+   * 'cross-origin' means the video's CDN rejected the anonymous CORS
+   * reload, so this source can never be upscaled.
+   */
+  'relay:event:upscaleError': RPCDef<
+    InputWithFrameId<{ kind: 'cross-origin' | 'error' }>,
+    void
+  >
 }

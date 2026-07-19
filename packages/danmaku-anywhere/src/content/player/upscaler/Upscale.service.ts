@@ -48,6 +48,21 @@ const defaultOptions: UpscaleOptions = {
   effects: [],
 }
 
+/**
+ * The CORS-mode reload of a cross-origin video was rejected — typically the
+ * CDN 403s the anonymous re-request (hotlink protection, cookie-bound or
+ * single-use signed URLs). WebGPU cannot read tainted video pixels, so
+ * upscaling is impossible on this source.
+ */
+export class CrossOriginReloadError extends RendererInitializationError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'CrossOriginReloadError'
+  }
+}
+
+export type UpscaleFailureKind = 'cross-origin' | 'error'
+
 @injectable('Singleton')
 export class UpscaleService {
   private renderer: Renderer | undefined
@@ -73,6 +88,7 @@ export class UpscaleService {
     targetResolution: 'x2',
     enableCrossOriginFix: false,
   }
+  private notifyFailure: ((kind: UpscaleFailureKind) => void) | undefined
   private readonly logger: ILogger
 
   constructor(
@@ -285,6 +301,12 @@ export class UpscaleService {
     this.restoreHostTopLayer = callback
   }
 
+  /** Called whenever upscaling fails to start or dies at runtime, so the
+   * controller can surface it to the user instead of failing silently. */
+  setFailureNotifier(callback: (kind: UpscaleFailureKind) => void) {
+    this.notifyFailure = callback
+  }
+
   /** Re-applies the last requested options, e.g. after PiP restores the video */
   reapply() {
     return this.applyOptions(this.requestedOptions)
@@ -315,41 +337,83 @@ export class UpscaleService {
       this.options = { ...this.options, enabled: true }
       return
     }
-    if (options.enableCrossOriginFix) await this.fixCrossOrigin(video, epoch)
-    if (epoch !== this.opEpoch) return
-    // videoWidth/videoHeight are 0 until HAVE_METADATA, which would base the
-    // buffer size on the element's placeholder CSS box instead of the media.
-    await waitForVideoReady(video, HTMLMediaElement.HAVE_METADATA)
-    if (epoch !== this.opEpoch) return
-    if (this.videoObserver.activeVideo !== video) return
-    const sourceWidth = Math.max(1, video.videoWidth || video.clientWidth)
-    const sourceHeight = Math.max(1, video.videoHeight || video.clientHeight)
-    const targetDimensions = (() => {
-      switch (options.targetResolution) {
-        case 'x2':
-          return { width: sourceWidth * 2, height: sourceHeight * 2 }
-        case 'x4':
-          return { width: sourceWidth * 4, height: sourceHeight * 4 }
-        case 'x8':
-          return { width: sourceWidth * 8, height: sourceHeight * 8 }
-        case '720p':
-          return { width: 1280, height: 720 }
-        case '1080p':
-          return { width: 1920, height: 1080 }
-        case '2k':
-          return { width: 2560, height: 1440 }
-        case '4k':
-          return { width: 3840, height: 2160 }
-        case 'native':
-          return { width: sourceWidth, height: sourceHeight }
-      }
-    })()
-    await this.enableInternal(epoch, this.videoObserver.activeVideo, {
-      enabled: true,
-      targetResolution: targetDimensions.width / sourceWidth,
-      targetDimensions,
-      effects: resolveEffectChain(baseMode, options.performanceTier),
-    })
+    try {
+      if (options.enableCrossOriginFix) await this.fixCrossOrigin(video, epoch)
+      if (epoch !== this.opEpoch) return
+      // videoWidth/videoHeight are 0 until HAVE_METADATA, which would base the
+      // buffer size on the element's placeholder CSS box instead of the media.
+      await waitForVideoReady(video, HTMLMediaElement.HAVE_METADATA)
+      if (epoch !== this.opEpoch) return
+      if (this.videoObserver.activeVideo !== video) return
+      const sourceWidth = Math.max(1, video.videoWidth || video.clientWidth)
+      const sourceHeight = Math.max(1, video.videoHeight || video.clientHeight)
+      const targetDimensions = (() => {
+        switch (options.targetResolution) {
+          case 'x2':
+            return { width: sourceWidth * 2, height: sourceHeight * 2 }
+          case 'x4':
+            return { width: sourceWidth * 4, height: sourceHeight * 4 }
+          case 'x8':
+            return { width: sourceWidth * 8, height: sourceHeight * 8 }
+          case '720p':
+            return { width: 1280, height: 720 }
+          case '1080p':
+            return { width: 1920, height: 1080 }
+          case '2k':
+            return { width: 2560, height: 1440 }
+          case '4k':
+            return { width: 3840, height: 2160 }
+          case 'native':
+            return { width: sourceWidth, height: sourceHeight }
+        }
+      })()
+      await this.enableInternal(epoch, this.videoObserver.activeVideo, {
+        enabled: true,
+        targetResolution: targetDimensions.width / sourceWidth,
+        targetDimensions,
+        effects: resolveEffectChain(baseMode, options.performanceTier),
+      })
+    } catch (error) {
+      // A newer operation superseded this attempt while it was in flight —
+      // its outcome is the one that matters, so stay silent here.
+      if (epoch !== this.opEpoch) throw error
+      // Clean up the half-built state (orphan canvas, CORS rule) and make
+      // the failure visible: without this the panel toggle stays on while
+      // nothing renders, which reads as "upscaling has no effect".
+      this.disable()
+      await this.reportEnableFailure(error)
+      throw error
+    }
+  }
+
+  /**
+   * Surfaces an enable failure to the controller (toast) and flips the
+   * stored option off so the UI stops claiming upscaling is active.
+   * Never throws — the original enable error must propagate unchanged.
+   */
+  private async reportEnableFailure(error: unknown) {
+    const kind: UpscaleFailureKind =
+      error instanceof CrossOriginReloadError ? 'cross-origin' : 'error'
+    try {
+      this.notifyFailure?.(kind)
+    } catch {
+      // the notifier must not mask the enable error
+    }
+    try {
+      const options = await this.extensionOptions.get()
+      if (!options.playerOptions.upscale.enabled) return
+      await this.extensionOptions.update({
+        playerOptions: {
+          ...options.playerOptions,
+          upscale: { ...options.playerOptions.upscale, enabled: false },
+        },
+      })
+    } catch (updateError) {
+      this.logger.warn(
+        'Failed to reset upscale option after enable failure',
+        updateError
+      )
+    }
   }
 
   private async fixCrossOrigin(video: HTMLVideoElement, epoch: number) {
@@ -388,9 +452,7 @@ export class UpscaleService {
         const timeout = window.setTimeout(() => {
           cleanup()
           reject(
-            new RendererInitializationError(
-              'Timed out reloading cross-origin video'
-            )
+            new CrossOriginReloadError('Timed out reloading cross-origin video')
           )
         }, 20_000)
         const cleanup = () => {
@@ -405,9 +467,7 @@ export class UpscaleService {
         const onError = () => {
           cleanup()
           reject(
-            new RendererInitializationError(
-              'Failed to reload cross-origin video'
-            )
+            new CrossOriginReloadError('Failed to reload cross-origin video')
           )
         }
         video.addEventListener('loadedmetadata', onLoaded, { once: true })
@@ -454,6 +514,11 @@ export class UpscaleService {
   private async handleRuntimeError(error: Error) {
     this.logger.error('Anime4K rendering stopped', error)
     this.disable()
+    try {
+      this.notifyFailure?.('error')
+    } catch {
+      // notifier failures must not break the shutdown path
+    }
     const options = await this.extensionOptions.get()
     if (!options.playerOptions.upscale.enabled) return
     await this.extensionOptions.update({

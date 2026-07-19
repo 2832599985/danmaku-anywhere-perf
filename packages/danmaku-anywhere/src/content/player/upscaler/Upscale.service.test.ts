@@ -77,14 +77,16 @@ const createStoredOptions = (
   ...overrides,
 })
 
-const createService = (video: HTMLVideoElement) => {
+const createServiceHarness = (video: HTMLVideoElement) => {
   const videoObserver = {
     activeVideo: video,
     addEventListener: vi.fn(),
   }
   const extensionOptions = {
-    get: vi.fn(),
-    update: vi.fn(),
+    get: vi.fn().mockResolvedValue({
+      playerOptions: { upscale: { enabled: true } },
+    }),
+    update: vi.fn().mockResolvedValue(undefined),
   }
   const logger = {
     debug: vi.fn(),
@@ -94,12 +96,16 @@ const createService = (video: HTMLVideoElement) => {
   }
   logger.sub.mockReturnValue(logger)
 
-  return new UpscaleService(
+  const service = new UpscaleService(
     videoObserver as never,
     extensionOptions as never,
     logger as never
   )
+  return { service, extensionOptions }
 }
+
+const createService = (video: HTMLVideoElement) =>
+  createServiceHarness(video).service
 
 describe('UpscaleService operation coordination', () => {
   beforeEach(() => {
@@ -290,6 +296,50 @@ describe('UpscaleService operation coordination', () => {
         'Failed to reload cross-origin video'
       )
       expect(video.crossOrigin).toBe(null)
+    })
+  })
+
+  describe('enable failure reporting', () => {
+    it('notifies cross-origin failures and turns the stored option off', async () => {
+      const video = createVideo()
+      video.src = 'https://cdn.example.com/video.mp4'
+      const { service, extensionOptions } = createServiceHarness(video)
+      const onFailure = vi.fn()
+      service.setFailureNotifier(onFailure)
+
+      const applying = service.applyOptions(
+        createStoredOptions({ enableCrossOriginFix: true })
+      )
+      await vi.waitFor(() => expect(video.crossOrigin).toBe('anonymous'))
+      video.dispatchEvent(new Event('error'))
+
+      await expect(applying).rejects.toThrow(
+        'Failed to reload cross-origin video'
+      )
+      expect(onFailure).toHaveBeenCalledWith('cross-origin')
+      expect(extensionOptions.update).toHaveBeenCalledWith({
+        playerOptions: { upscale: { enabled: false } },
+      })
+      // The failed attempt must also release the CORS session rule.
+      expect(mocks.upscaleRemoveCorsRule).toHaveBeenCalledTimes(1)
+    })
+
+    it('notifies generic failures when renderer creation fails', async () => {
+      const video = createVideo()
+      const { service, extensionOptions } = createServiceHarness(video)
+      const onFailure = vi.fn()
+      service.setFailureNotifier(onFailure)
+      mocks.rendererCreate.mockRejectedValue(new Error('boom'))
+
+      await expect(service.applyOptions(createStoredOptions())).rejects.toThrow(
+        'boom'
+      )
+      expect(onFailure).toHaveBeenCalledWith('error')
+      expect(extensionOptions.update).toHaveBeenCalledWith({
+        playerOptions: { upscale: { enabled: false } },
+      })
+      // The half-built canvas from the failed enable must be cleaned up.
+      expect(mocks.canvasInstances.at(-1)?.cleanup).toHaveBeenCalled()
     })
   })
 

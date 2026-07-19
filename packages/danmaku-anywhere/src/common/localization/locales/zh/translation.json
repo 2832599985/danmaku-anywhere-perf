@@ -911,6 +911,10 @@
     }
   },
   "upscale": {
+    "alert": {
+      "crossOriginBlocked": "该视频源跨域受限，无法超分",
+      "failed": "超分出错，已自动关闭"
+    },
     "corsFix": "跨域修复",
     "enable": "超分辨率",
     "mode": "模式",

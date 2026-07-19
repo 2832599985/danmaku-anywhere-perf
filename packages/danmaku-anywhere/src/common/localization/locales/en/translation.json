@@ -915,6 +915,10 @@
     }
   },
   "upscale": {
+    "alert": {
+      "crossOriginBlocked": "This video source blocks cross-origin access, upscaling is unavailable here",
+      "failed": "Upscaling hit an error and was turned off"
+    },
     "corsFix": "CORS fix",
     "enable": "Super resolution",
     "mode": "Mode",

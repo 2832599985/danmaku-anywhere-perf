@@ -198,6 +198,19 @@ export const FrameManager = () => {
         'relay:event:userInteraction': async () => {
           window.dispatchEvent(new Event('touchmove'))
         },
+        'relay:event:upscaleError': async ({ data }) => {
+          toast.error(
+            data.kind === 'cross-origin'
+              ? t(
+                  'upscale.alert.crossOriginBlocked',
+                  'This video source blocks cross-origin access, upscaling is unavailable here'
+                )
+              : t(
+                  'upscale.alert.failed',
+                  'Upscaling hit an error and was turned off'
+                )
+          )
+        },
       },
       { logger }
     )

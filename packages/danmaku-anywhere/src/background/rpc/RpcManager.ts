@@ -546,6 +546,9 @@ export class RpcManager {
         'relay:event:userInteraction': passThrough(
           relayFrameClient['relay:event:userInteraction']
         ),
+        'relay:event:upscaleError': passThrough(
+          relayFrameClient['relay:event:upscaleError']
+        ),
       },
       {
         logger: this.logger,

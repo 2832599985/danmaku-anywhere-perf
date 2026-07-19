@@ -110,6 +110,12 @@ export class PlayerCommandHandler {
         frameId: this.frameId,
       })
     })
+    this.upscale.setFailureNotifier((kind) => {
+      void playerRpcClient.controller['relay:event:upscaleError']({
+        frameId: this.frameId,
+        data: { kind },
+      })
+    })
 
     // Create a style element for theme CSS variables
     const themeStyleEl = document.createElement('style')

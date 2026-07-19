@@ -63,6 +63,14 @@ export class UpscaleRulesetManager {
             id: ruleId,
             action: {
               type: 'modifyHeaders',
+              // A CORS-mode reload adds an Origin header that the original
+              // no-cors media request never carried — some CDNs' hotlink
+              // protection rejects exactly that with a 403 (seen on signed
+              // download URLs). Stripping it restores request parity with
+              // normal playback; the browser-side CORS check is satisfied
+              // by the injected ACAO:* below, which doesn't require the
+              // server to have seen an Origin.
+              requestHeaders: [{ header: 'Origin', operation: 'remove' }],
               responseHeaders: [
                 {
                   header: 'Access-Control-Allow-Origin',
