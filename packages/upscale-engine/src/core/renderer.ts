@@ -3,6 +3,16 @@ import type { Dimensions, EnhancementEffect } from '../types'
 import { waitForVideoReady } from '../utils/video-ready'
 
 type DestroyablePipeline = Anime4KPipeline & { destroy?: () => void }
+
+/**
+ * 一套与特定源分辨率绑定的完整渲染资源：
+ * 输入纹理 + 效果链管线 + 最终绘制绑定组。三者互相引用，必须整体换入换出。
+ */
+type PipelineSet = {
+  videoFrameTexture: GPUTexture
+  pipelines: Anime4KPipeline[]
+  renderBindGroup: GPUBindGroup
+}
 type Anime4KEffectConstructor = new (options: {
   device: GPUDevice
   inputTexture: GPUTexture
@@ -123,6 +133,16 @@ export class Renderer {
   private videoFrameTexture!: GPUTexture
   /** 效果处理管线链 */
   private pipelines: Anime4KPipeline[] = []
+  /**
+   * 按源分辨率缓存的整套管线。自适应码率在固定几档清晰度间来回切换
+   * （如 1080p→720p→1080p），每次切换原本都要完整重建：逐效果编译着色器
+   * + 预热，期间渲染循环持续跳帧、画面停顿数百毫秒。缓存后切回见过的
+   * 分辨率零重建。键为 `${srcW}x${srcH}`；效果链/目标分辨率/设备任一
+   * 变化即整体失效（见 clearPipelineCache 调用点）。
+   */
+  private pipelineCache = new Map<string, PipelineSet>()
+  /** 缓存容量上限。每套管线持有整链中间纹理（VRAM 数十至数百 MB），从紧。 */
+  private static readonly MAX_CACHED_PIPELINE_SETS = 3
   /** 设备支持的最大 2D 纹理边长，用于把目标分辨率钳制在 GPU 能力内 */
   private maxTextureDimension = 8192
   /** 连续渲染失败计数，触发熔断以防止无限刷错卡死页面 */
@@ -241,7 +261,9 @@ export class Renderer {
       this.context.configure({
         device: this.device,
         format: this.presentationFormat,
-        alphaMode: 'premultiplied',
+        // 输出每个像素都不透明（clear a=1 + 全屏四边形覆盖），声明 opaque
+        // 可让合成器跳过整幅画布的逐帧透明混合
+        alphaMode: 'opaque',
       })
 
       // 创建初始资源
@@ -316,9 +338,10 @@ export class Renderer {
   /**
    * 创建（或重新创建）依赖于视频源分辨率的核心资源。
    * 主要是 videoFrameTexture——用于从视频逐帧拷贝像素的中间纹理。
+   * 注意：不销毁旧纹理——旧纹理的所有权归调用方处置（源尺寸变化时
+   * 已随整套管线移入缓存，设备丢失时随旧设备一并失效）。
    */
   private createResources(): void {
-    this.videoFrameTexture?.destroy() // 销毁旧纹理
     this.videoFrameTexture = this.device.createTexture({
       size: [this.video.videoWidth, this.video.videoHeight, 1],
       format: 'rgba16float', // 使用 float 格式以获得更高精度
@@ -327,6 +350,61 @@ export class Renderer {
         GPUTextureUsage.COPY_DST | // 可以作为拷贝目的地
         GPUTextureUsage.RENDER_ATTACHMENT, // 可以作为渲染目标
     })
+  }
+
+  /** 销毁一套管线资源（效果链 + 输入纹理；绑定组无需显式销毁） */
+  private destroyPipelineSet(set: PipelineSet): void {
+    for (const p of set.pipelines) {
+      try {
+        ;(p as DestroyablePipeline).destroy?.()
+      } catch {
+        // 忽略单个管道销毁错误
+      }
+    }
+    set.videoFrameTexture.destroy()
+  }
+
+  /**
+   * 把当前整套管线按其源分辨率存入缓存并移交所有权（清空 this.pipelines，
+   * 防止后续 buildPipelines 把缓存中的管线当旧管线销毁）。超容量时按
+   * 插入序淘汰最旧的一套（命中时取出、再次换出时重新插入，即为 LRU）。
+   */
+  private stashCurrentPipelineSet(): void {
+    if (
+      !this.videoFrameTexture ||
+      !this.renderBindGroup ||
+      this.pipelines.length === 0
+    ) {
+      return
+    }
+    const key = `${this.videoFrameTexture.width}x${this.videoFrameTexture.height}`
+    const existing = this.pipelineCache.get(key)
+    if (existing) {
+      // 防御：同尺寸旧条目不应存在，若有则先销毁避免泄漏
+      this.pipelineCache.delete(key)
+      this.destroyPipelineSet(existing)
+    }
+    this.pipelineCache.set(key, {
+      videoFrameTexture: this.videoFrameTexture,
+      pipelines: this.pipelines,
+      renderBindGroup: this.renderBindGroup,
+    })
+    this.pipelines = []
+    while (this.pipelineCache.size > Renderer.MAX_CACHED_PIPELINE_SETS) {
+      const oldestKey = this.pipelineCache.keys().next().value
+      if (oldestKey === undefined) break
+      const oldest = this.pipelineCache.get(oldestKey)
+      this.pipelineCache.delete(oldestKey)
+      if (oldest) this.destroyPipelineSet(oldest)
+    }
+  }
+
+  /** 清空管线缓存。效果链、目标分辨率或 GPU 设备变化后，旧管线全部失效。 */
+  private clearPipelineCache(): void {
+    for (const set of this.pipelineCache.values()) {
+      this.destroyPipelineSet(set)
+    }
+    this.pipelineCache.clear()
   }
 
   /**
@@ -420,19 +498,6 @@ export class Renderer {
         })
         pipelines.push(pipeline)
 
-        // === 逐个效果预热：编译着色器并运行一帧 ===
-        try {
-          const commandEncoder = this.device.createCommandEncoder()
-          pipeline.pass(commandEncoder)
-          this.device.queue.submit([commandEncoder.finish()])
-          await this.device.queue.onSubmittedWorkDone()
-        } catch (e) {
-          console.warn(
-            `[Anime4KWebExt] Failed to warmup effect ${effect.className}:`,
-            e
-          )
-        }
-
         currentTexture = pipeline.getOutputTexture()
 
         if (effect.upscaleFactor) {
@@ -460,16 +525,6 @@ export class Renderer {
               })
               pipelines.push(intermediateDownscale)
 
-              // 预热 Downscale 效果
-              try {
-                const commandEncoder = this.device.createCommandEncoder()
-                intermediateDownscale.pass(commandEncoder)
-                this.device.queue.submit([commandEncoder.finish()])
-                await this.device.queue.onSubmittedWorkDone()
-              } catch (e) {
-                console.warn('[Anime4KWebExt] Failed to warmup Downscale:', e)
-              }
-
               currentTexture = intermediateDownscale.getOutputTexture()
               curWidth = Math.ceil(idealIntermediateWidth)
               curHeight = Math.ceil(idealIntermediateHeight)
@@ -480,6 +535,23 @@ export class Renderer {
         console.warn(
           `[Anime4KWebExt] Effect class "${effect.className}" not found in anime4k-webgpu module.`
         )
+      }
+    }
+
+    // === 整链一次性预热：单次提交跑完全部 pass，只做一次 CPU⇄GPU 同步 ===
+    // 预热的目的只是逼驱动提前编译着色器；原先逐效果 submit +
+    // onSubmittedWorkDone，5 个效果就是 5 次串行全队列往返，合并后
+    // 编译触发效果相同，重建耗时显著缩短。
+    if (pipelines.length > 0) {
+      try {
+        const commandEncoder = this.device.createCommandEncoder()
+        for (const pipeline of pipelines) {
+          pipeline.pass(commandEncoder)
+        }
+        this.device.queue.submit([commandEncoder.finish()])
+        await this.device.queue.onSubmittedWorkDone()
+      } catch (e) {
+        console.warn('[Anime4KWebExt] Pipeline warmup failed:', e)
       }
     }
 
@@ -873,6 +945,19 @@ export class Renderer {
       console.log(
         '[Anime4KWebExt] Resizing renderer due to video source dimension change...'
       )
+      // 当前整套管线移入缓存而非销毁——自适应码率大概率很快切回这一档
+      this.stashCurrentPipelineSet()
+      const key = `${this.video.videoWidth}x${this.video.videoHeight}`
+      const cached = this.pipelineCache.get(key)
+      if (cached) {
+        // 命中：整套换回，零着色器编译、零预热，下一帧即恢复渲染
+        this.pipelineCache.delete(key)
+        this.videoFrameTexture = cached.videoFrameTexture
+        this.pipelines = cached.pipelines
+        this.renderBindGroup = cached.renderBindGroup
+        console.log('[Anime4KWebExt] Renderer resized for source (cache hit).')
+        return
+      }
       this.createResources()
       await this.buildPipelines()
       if (this.destroyed) return
@@ -936,6 +1021,8 @@ export class Renderer {
     console.log(
       '[Anime4KWebExt] Rebuilding pipeline due to configuration update.'
     )
+    // 缓存中的管线组都绑定旧效果链/旧目标分辨率，整体失效
+    this.clearPipelineCache()
     await this.buildPipelines()
     this.createRenderBindGroup()
     console.log('[Anime4KWebExt] Renderer configuration updated.')
@@ -999,10 +1086,11 @@ export class Renderer {
       this.context.configure({
         device: this.device,
         format: this.presentationFormat,
-        alphaMode: 'premultiplied',
+        alphaMode: 'opaque',
       })
 
-      // 重建资源和管道
+      // 重建资源和管道（缓存中的管线组属于已丢失的旧设备，整体失效）
+      this.clearPipelineCache()
       this.createResources()
       await this.buildPipelines()
       await this.createRenderPipeline()
@@ -1043,6 +1131,7 @@ export class Renderer {
 
     // 安全地销毁所有 GPU 资源
     try {
+      this.clearPipelineCache()
       this.pipelines.forEach((pipeline) => {
         ;(pipeline as DestroyablePipeline).destroy?.()
       })
