@@ -109,6 +109,7 @@ const createService = (video: HTMLVideoElement) =>
 
 describe('UpscaleService operation coordination', () => {
   beforeEach(() => {
+    window.history.replaceState({}, '', '/')
     mocks.canvasInstances.length = 0
     mocks.rendererCreate.mockReset()
     mocks.resolveEffectChain.mockReset()
@@ -130,7 +131,45 @@ describe('UpscaleService operation coordination', () => {
   })
 
   afterEach(() => {
+    window.history.replaceState({}, '', '/')
     vi.restoreAllMocks()
+  })
+
+  it('uses animation-frame presentation by default', async () => {
+    const video = createVideo()
+    const renderer = {
+      destroy: vi.fn(),
+      handleSourceResize: vi.fn(),
+      updateConfiguration: vi.fn(),
+    }
+    mocks.rendererCreate.mockResolvedValue(renderer)
+    const service = createService(video)
+
+    await service.applyOptions(createStoredOptions())
+
+    expect(mocks.rendererCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ presentationMode: 'raf' })
+    )
+  })
+
+  it('allows the legacy rVFC presentation path from the diagnostic query', async () => {
+    window.history.replaceState({}, '', '/?daUpscalePresentation=rvfc')
+    const video = createVideo()
+    const renderer = {
+      destroy: vi.fn(),
+      handleSourceResize: vi.fn(),
+      updateConfiguration: vi.fn(),
+    }
+    mocks.rendererCreate.mockResolvedValue(renderer)
+    const service = createService(video)
+
+    await service.applyOptions(createStoredOptions())
+
+    expect(mocks.rendererCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        presentationMode: 'rvfc',
+      })
+    )
   })
 
   it('serializes configuration rebuilds and leaves the newest options last', async () => {

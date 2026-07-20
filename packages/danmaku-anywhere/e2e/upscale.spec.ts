@@ -197,13 +197,25 @@ test('renders an Anime4K canvas while keeping the player popover above it', asyn
       videoHeight: video?.videoHeight,
       canvasWidth: upscaleCanvas?.width,
       canvasHeight: upscaleCanvas?.height,
+      screenWidth: window.screen.width,
+      screenHeight: window.screen.height,
+      devicePixelRatio: window.devicePixelRatio,
       playerPopoverOpen: playerRoot?.matches(':popover-open'),
       canvasPopoverOpen: upscaleCanvas?.matches(':popover-open'),
     }
   })
   expect(state.videoOpacity).toBe('0')
-  expect(state.canvasWidth).toBe((state.videoWidth ?? 0) * 2)
-  expect(state.canvasHeight).toBe((state.videoHeight ?? 0) * 2)
+  const requestedWidth = (state.videoWidth ?? 0) * 2
+  const requestedHeight = (state.videoHeight ?? 0) * 2
+  const maxWidth = state.screenWidth * state.devicePixelRatio
+  const maxHeight = state.screenHeight * state.devicePixelRatio
+  const scale = Math.min(
+    1,
+    maxWidth / requestedWidth,
+    maxHeight / requestedHeight
+  )
+  expect(state.canvasWidth).toBe(Math.round(requestedWidth * scale))
+  expect(state.canvasHeight).toBe(Math.round(requestedHeight * scale))
   expect(state.playerPopoverOpen).toBe(true)
   expect(state.canvasPopoverOpen).toBe(false)
 })

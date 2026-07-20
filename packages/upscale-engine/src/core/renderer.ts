@@ -86,12 +86,58 @@ export interface RendererOptions {
   effects: EnhancementEffect[]
   /** 渲染的目标分辨率 */
   targetDimensions: Dimensions
+  /** Decouple canvas presentation from video callbacks by default. */
+  presentationMode?: RendererPresentationMode
   /** 发生运行时错误时的回调函数 */
   onError?: (error: Error) => void
   /** 成功渲染第一帧时的回调函数 */
   onFirstFrameRendered?: () => void
   /** 初始化进度回调函数 */
   onProgress?: (stage: string | null, current?: number, total?: number) => void
+  /** Optional diagnostics. Defaults preserve the production render path. */
+  diagnostics?: RendererDiagnosticsOptions
+  onDiagnostics?: (summary: RendererDiagnosticsSummary) => void
+}
+
+export type RendererDiagnosticMode =
+  | 'full'
+  | 'copy-only'
+  | 'canvas-only'
+  | 'freeze-input'
+
+export type RendererPresentationMode = 'rvfc' | 'raf'
+
+export interface RendererDiagnosticsOptions {
+  mode?: RendererDiagnosticMode
+  inputTextureFormat?: 'rgba16float' | 'rgba8unorm'
+  earlyResubscribe?: boolean
+  reportIntervalMs?: number
+  queueProbeEveryFrames?: number
+}
+
+export interface RendererDiagnosticsSummary {
+  mode: RendererDiagnosticMode
+  inputTextureFormat: 'rgba16float' | 'rgba8unorm'
+  presentationMode: RendererPresentationMode
+  frames: number
+  presentedFrameGaps: number
+  rendererBusyDrops: number
+  lateCallbacks: number
+  averageHeadroomMs: number
+  minimumHeadroomMs: number
+  averageCallbackDeltaMs: number
+  maximumCallbackDeltaMs: number
+  averageCopyCallMs: number
+  maximumCopyCallMs: number
+  averageEncodeMs: number
+  maximumEncodeMs: number
+  averageSubmitMs: number
+  maximumSubmitMs: number
+  averageCpuFrameMs: number
+  maximumCpuFrameMs: number
+  latestQueueDrainMs: number | null
+  videoDroppedFrames: number
+  videoTotalFrames: number
 }
 
 /**
@@ -111,10 +157,42 @@ export class Renderer {
     current?: number,
     total?: number
   ) => void
+  private readonly diagnostics: Required<RendererDiagnosticsOptions>
+  private readonly diagnosticsEnabled: boolean
+  private readonly presentationMode: RendererPresentationMode
+  private readonly onDiagnostics?: (summary: RendererDiagnosticsSummary) => void
+  private hasCopiedInputFrame = false
+  private hasProcessedFrame = false
+  private hasPresentedFirstFrame = false
+  private processedFrameGeneration = 0
+  private presentedFrameGeneration = -1
+  private frameInFlight = false
+  private diagnosticsWindowStartedAt = performance.now()
+  private diagnosticsFrames = 0
+  private diagnosticsPresentedFrameGaps = 0
+  private diagnosticsBusyDrops = 0
+  private diagnosticsLateCallbacks = 0
+  private diagnosticsHeadroomTotal = 0
+  private diagnosticsHeadroomMin = Number.POSITIVE_INFINITY
+  private diagnosticsCallbackDeltaTotal = 0
+  private diagnosticsCallbackDeltaMax = 0
+  private diagnosticsCopyTotal = 0
+  private diagnosticsCopyMax = 0
+  private diagnosticsEncodeTotal = 0
+  private diagnosticsEncodeMax = 0
+  private diagnosticsSubmitTotal = 0
+  private diagnosticsSubmitMax = 0
+  private diagnosticsCpuTotal = 0
+  private diagnosticsCpuMax = 0
+  private diagnosticsLastCallbackAt: number | null = null
+  private diagnosticsLastPresentedFrames: number | null = null
+  private diagnosticsLatestQueueDrainMs: number | null = null
+  private diagnosticsQueueProbePending = false
 
   // --- 状态标志 ---
   private destroyed = false
   private animationFrameId: number | null = null
+  private presentationAnimationFrameId: number | null = null
   /** 是否使用 ImageBitmap 作为回退方案来复制视频帧 */
   private useImageBitmapFallback = false
   /** 在单次渲染循环中是否已尝试过自动修复 */
@@ -170,11 +248,26 @@ export class Renderer {
   private constructor(options: RendererOptions) {
     this.video = options.video
     this.canvas = options.canvas
-    this.effects = options.effects
+    this.effects =
+      options.diagnostics?.mode === 'copy-only' ||
+      options.diagnostics?.mode === 'canvas-only'
+        ? []
+        : options.effects
     this.targetDimensions = options.targetDimensions
     this.onError = options.onError
     this.onFirstFrameRendered = options.onFirstFrameRendered
     this.onProgress = options.onProgress
+    this.diagnostics = {
+      mode: options.diagnostics?.mode ?? 'full',
+      inputTextureFormat:
+        options.diagnostics?.inputTextureFormat ?? 'rgba16float',
+      earlyResubscribe: options.diagnostics?.earlyResubscribe ?? false,
+      reportIntervalMs: options.diagnostics?.reportIntervalMs ?? 1000,
+      queueProbeEveryFrames: options.diagnostics?.queueProbeEveryFrames ?? 30,
+    }
+    this.diagnosticsEnabled = options.diagnostics !== undefined
+    this.presentationMode = options.presentationMode ?? 'raf'
+    this.onDiagnostics = options.onDiagnostics
   }
 
   /**
@@ -342,9 +435,10 @@ export class Renderer {
    * 已随整套管线移入缓存，设备丢失时随旧设备一并失效）。
    */
   private createResources(): void {
+    this.hasProcessedFrame = false
     this.videoFrameTexture = this.device.createTexture({
       size: [this.video.videoWidth, this.video.videoHeight, 1],
-      format: 'rgba16float', // 使用 float 格式以获得更高精度
+      format: this.diagnostics.inputTextureFormat,
       usage:
         GPUTextureUsage.TEXTURE_BINDING | // 可以作为着色器输入
         GPUTextureUsage.COPY_DST | // 可以作为拷贝目的地
@@ -711,6 +805,24 @@ export class Renderer {
     })
   }
 
+  /** Encode only the final textured-quad pass targeting the WebGPU canvas. */
+  private encodeCanvasPresentation(commandEncoder: GPUCommandEncoder): void {
+    const passEncoder = commandEncoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: this.context.getCurrentTexture().createView(),
+          clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        },
+      ],
+    })
+    passEncoder.setPipeline(this.renderPipeline)
+    passEncoder.setBindGroup(0, this.renderBindGroup)
+    passEncoder.draw(6)
+    passEncoder.end()
+  }
+
   /**
    * 处理单帧渲染的核心逻辑。
    * @returns {boolean} 如果成功渲染了一帧则返回 true，否则返回 false。
@@ -743,8 +855,12 @@ export class Renderer {
         return false // 分辨率已变，跳过此帧的渲染，等待重建完成
       }
 
-      // 将视频帧复制到纹理
-      if (this.useImageBitmapFallback) {
+      const frameStartedAt = this.diagnosticsEnabled ? performance.now() : 0
+      const shouldCopy =
+        this.diagnostics.mode !== 'canvas-only' &&
+        (this.diagnostics.mode !== 'freeze-input' || !this.hasCopiedInputFrame)
+      const copyStartedAt = this.diagnosticsEnabled ? performance.now() : 0
+      if (shouldCopy && this.useImageBitmapFallback) {
         // 使用 ImageBitmap 回退方案（用于兼容 Firefox 等不支持直接从 video 复制的浏览器）
         const bitmap = await createImageBitmap(this.video)
         this.device.queue.copyExternalImageToTexture(
@@ -753,31 +869,40 @@ export class Renderer {
           [this.video.videoWidth, this.video.videoHeight]
         )
         bitmap.close() // 复制完成后立即关闭，无需缓存
-      } else {
+        this.hasCopiedInputFrame = true
+      } else if (shouldCopy) {
         this.device.queue.copyExternalImageToTexture(
           { source: this.video },
           { texture: this.videoFrameTexture },
           [this.video.videoWidth, this.video.videoHeight]
         )
+        this.hasCopiedInputFrame = true
       }
+      const copyMs = this.diagnosticsEnabled
+        ? performance.now() - copyStartedAt
+        : 0
 
+      const encodeStartedAt = this.diagnosticsEnabled ? performance.now() : 0
       const commandEncoder = this.device.createCommandEncoder()
-      this.pipelines.forEach((pipeline) => pipeline.pass(commandEncoder))
-      const passEncoder = commandEncoder.beginRenderPass({
-        colorAttachments: [
-          {
-            view: this.context.getCurrentTexture().createView(),
-            clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
-            loadOp: 'clear',
-            storeOp: 'store',
-          },
-        ],
-      })
-      passEncoder.setPipeline(this.renderPipeline)
-      passEncoder.setBindGroup(0, this.renderBindGroup)
-      passEncoder.draw(6)
-      passEncoder.end()
+      if (this.diagnostics.mode !== 'copy-only') {
+        this.pipelines.forEach((pipeline) => pipeline.pass(commandEncoder))
+      }
+      if (this.presentationMode === 'rvfc') {
+        this.encodeCanvasPresentation(commandEncoder)
+      }
+      const encodeMs = this.diagnosticsEnabled
+        ? performance.now() - encodeStartedAt
+        : 0
+      const submitStartedAt = this.diagnosticsEnabled ? performance.now() : 0
       this.device.queue.submit([commandEncoder.finish()])
+      this.hasProcessedFrame = true
+      this.processedFrameGeneration++
+      if (this.diagnosticsEnabled) {
+        const submitMs = performance.now() - submitStartedAt
+        const cpuMs = performance.now() - frameStartedAt
+        this.recordCpuTimings(copyMs, encodeMs, submitMs, cpuMs)
+        this.maybeProbeQueue()
+      }
 
       return true // 成功渲染
     } catch (error) {
@@ -815,6 +940,204 @@ export class Renderer {
     }
   }
 
+  private recordCpuTimings(
+    copyMs: number,
+    encodeMs: number,
+    submitMs: number,
+    cpuMs: number
+  ): void {
+    this.diagnosticsCopyTotal += copyMs
+    this.diagnosticsCopyMax = Math.max(this.diagnosticsCopyMax, copyMs)
+    this.diagnosticsEncodeTotal += encodeMs
+    this.diagnosticsEncodeMax = Math.max(this.diagnosticsEncodeMax, encodeMs)
+    this.diagnosticsSubmitTotal += submitMs
+    this.diagnosticsSubmitMax = Math.max(this.diagnosticsSubmitMax, submitMs)
+    this.diagnosticsCpuTotal += cpuMs
+    this.diagnosticsCpuMax = Math.max(this.diagnosticsCpuMax, cpuMs)
+  }
+
+  private maybeProbeQueue(): void {
+    if (
+      this.diagnosticsQueueProbePending ||
+      this.diagnosticsFrames === 0 ||
+      this.diagnosticsFrames % this.diagnostics.queueProbeEveryFrames !== 0
+    ) {
+      return
+    }
+    this.diagnosticsQueueProbePending = true
+    const startedAt = performance.now()
+    void this.device.queue
+      .onSubmittedWorkDone()
+      .then(() => {
+        this.diagnosticsLatestQueueDrainMs = performance.now() - startedAt
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.diagnosticsQueueProbePending = false
+        this.frameInFlight = false
+      })
+  }
+
+  private recordFrameCallback(
+    now: number,
+    metadata: VideoFrameCallbackMetadata
+  ): void {
+    this.diagnosticsFrames++
+    const headroom = metadata.expectedDisplayTime - now
+    this.diagnosticsHeadroomTotal += headroom
+    this.diagnosticsHeadroomMin = Math.min(
+      this.diagnosticsHeadroomMin,
+      headroom
+    )
+    if (headroom <= 0) this.diagnosticsLateCallbacks++
+    if (this.diagnosticsLastCallbackAt !== null) {
+      const delta = now - this.diagnosticsLastCallbackAt
+      this.diagnosticsCallbackDeltaTotal += delta
+      this.diagnosticsCallbackDeltaMax = Math.max(
+        this.diagnosticsCallbackDeltaMax,
+        delta
+      )
+    }
+    if (this.diagnosticsLastPresentedFrames !== null) {
+      this.diagnosticsPresentedFrameGaps += Math.max(
+        0,
+        metadata.presentedFrames - this.diagnosticsLastPresentedFrames - 1
+      )
+    }
+    this.diagnosticsLastCallbackAt = now
+    this.diagnosticsLastPresentedFrames = metadata.presentedFrames
+    if (
+      performance.now() - this.diagnosticsWindowStartedAt >=
+      this.diagnostics.reportIntervalMs
+    ) {
+      this.emitDiagnostics()
+    }
+  }
+
+  private emitDiagnostics(): void {
+    const frames = this.diagnosticsFrames
+    if (frames === 0) return
+    const callbackIntervals = Math.max(1, frames - 1)
+    const quality = this.video.getVideoPlaybackQuality?.()
+    this.onDiagnostics?.({
+      mode: this.diagnostics.mode,
+      inputTextureFormat: this.diagnostics.inputTextureFormat,
+      presentationMode: this.presentationMode,
+      frames,
+      presentedFrameGaps: this.diagnosticsPresentedFrameGaps,
+      rendererBusyDrops: this.diagnosticsBusyDrops,
+      lateCallbacks: this.diagnosticsLateCallbacks,
+      averageHeadroomMs: this.diagnosticsHeadroomTotal / frames,
+      minimumHeadroomMs: this.diagnosticsHeadroomMin,
+      averageCallbackDeltaMs:
+        this.diagnosticsCallbackDeltaTotal / callbackIntervals,
+      maximumCallbackDeltaMs: this.diagnosticsCallbackDeltaMax,
+      averageCopyCallMs: this.diagnosticsCopyTotal / frames,
+      maximumCopyCallMs: this.diagnosticsCopyMax,
+      averageEncodeMs: this.diagnosticsEncodeTotal / frames,
+      maximumEncodeMs: this.diagnosticsEncodeMax,
+      averageSubmitMs: this.diagnosticsSubmitTotal / frames,
+      maximumSubmitMs: this.diagnosticsSubmitMax,
+      averageCpuFrameMs: this.diagnosticsCpuTotal / frames,
+      maximumCpuFrameMs: this.diagnosticsCpuMax,
+      latestQueueDrainMs: this.diagnosticsLatestQueueDrainMs,
+      videoDroppedFrames: quality?.droppedVideoFrames ?? 0,
+      videoTotalFrames: quality?.totalVideoFrames ?? 0,
+    })
+    this.diagnosticsWindowStartedAt = performance.now()
+    this.diagnosticsFrames = 0
+    this.diagnosticsPresentedFrameGaps = 0
+    this.diagnosticsBusyDrops = 0
+    this.diagnosticsLateCallbacks = 0
+    this.diagnosticsHeadroomTotal = 0
+    this.diagnosticsHeadroomMin = Number.POSITIVE_INFINITY
+    this.diagnosticsCallbackDeltaTotal = 0
+    this.diagnosticsCallbackDeltaMax = 0
+    this.diagnosticsCopyTotal = 0
+    this.diagnosticsCopyMax = 0
+    this.diagnosticsEncodeTotal = 0
+    this.diagnosticsEncodeMax = 0
+    this.diagnosticsSubmitTotal = 0
+    this.diagnosticsSubmitMax = 0
+    this.diagnosticsCpuTotal = 0
+    this.diagnosticsCpuMax = 0
+  }
+
+  private notifyFirstFrameRendered(): void {
+    if (this.hasPresentedFirstFrame) return
+    this.hasPresentedFirstFrame = true
+    this.onFirstFrameRendered?.()
+  }
+
+  /**
+   * Draw the most recently processed texture to the canvas. GPU queue ordering
+   * guarantees that an earlier copy/compute submission completes before this
+   * pass. Re-presenting the latest completed texture on every display cadence
+   * keeps canvas swapchain pacing independent from irregular video callbacks.
+   */
+  private presentLatestProcessedFrame(): boolean {
+    if (
+      this.destroyed ||
+      this.isRecovering ||
+      this.resizePromise ||
+      !this.hasProcessedFrame ||
+      (this.video.paused &&
+        this.presentedFrameGeneration === this.processedFrameGeneration)
+    ) {
+      return false
+    }
+
+    try {
+      const commandEncoder = this.device.createCommandEncoder()
+      this.encodeCanvasPresentation(commandEncoder)
+      this.device.queue.submit([commandEncoder.finish()])
+      this.presentedFrameGeneration = this.processedFrameGeneration
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const runtimeError = new RendererRuntimeError(
+        `Failed to present processed frame: ${message}`,
+        { cause: error as Error }
+      )
+      console.error('[Anime4KWebExt] Frame presentation failed:', error)
+      this.onError?.(runtimeError)
+      this.destroy()
+      return false
+    }
+  }
+
+  private presentationLoop: FrameRequestCallback = () => {
+    this.presentationAnimationFrameId = null
+    if (this.destroyed) return
+
+    if (this.presentLatestProcessedFrame()) this.notifyFirstFrameRendered()
+
+    if (!this.destroyed) {
+      this.presentationAnimationFrameId = requestAnimationFrame(
+        this.presentationLoop
+      )
+    }
+  }
+
+  private startPresentationLoop(): void {
+    if (
+      this.presentationMode !== 'raf' ||
+      this.destroyed ||
+      this.presentationAnimationFrameId !== null
+    ) {
+      return
+    }
+    this.presentationAnimationFrameId = requestAnimationFrame(
+      this.presentationLoop
+    )
+  }
+
+  private stopPresentationLoop(): void {
+    if (this.presentationAnimationFrameId === null) return
+    cancelAnimationFrame(this.presentationAnimationFrameId)
+    this.presentationAnimationFrameId = null
+  }
+
   /**
    * 尝试渲染第一帧。成功后，调用回调并切换到常规渲染循环。
    * 如果不成功（例如视频暂停），则重新调度自身。
@@ -823,8 +1146,12 @@ export class Renderer {
     if (this.destroyed) return
 
     if (await this.processFrame()) {
-      // 第一帧成功渲染
-      this.onFirstFrameRendered?.()
+      // 第一帧成功处理。rAF 模式要等到它真正提交到 canvas 后再通知上层。
+      if (this.presentationMode === 'raf') {
+        this.startPresentationLoop()
+      } else {
+        this.notifyFirstFrameRendered()
+      }
       this.fixAttempted = false
       this.lastError = null
       this.consecutiveFailures = 0
@@ -872,8 +1199,20 @@ export class Renderer {
   /**
    * 常规渲染循环，处理第一帧之后的所有帧。
    */
-  private renderLoop = async (): Promise<void> => {
+  private renderLoop: VideoFrameRequestCallback = async (now, metadata) => {
     if (this.destroyed) return
+
+    if (this.diagnosticsEnabled) this.recordFrameCallback(now, metadata)
+    if (this.diagnostics.earlyResubscribe) {
+      this.animationFrameId = this.video.requestVideoFrameCallback(
+        this.renderLoop
+      )
+      if (this.frameInFlight) {
+        this.diagnosticsBusyDrops++
+        return
+      }
+      this.frameInFlight = true
+    }
 
     if (await this.processFrame()) {
       // 帧渲染成功
@@ -926,11 +1265,12 @@ export class Renderer {
     }
 
     // 持续调度自身
-    if (!this.destroyed) {
+    if (!this.destroyed && !this.diagnostics.earlyResubscribe) {
       this.animationFrameId = this.video.requestVideoFrameCallback(
         this.renderLoop
       )
     }
+    if (this.diagnostics.earlyResubscribe) this.frameInFlight = false
   }
 
   /**
@@ -941,6 +1281,7 @@ export class Renderer {
     if (this.destroyed) return
     // 重入安全：渲染循环与外部调用（如视频节点变化）并发触发时共享同一次重建
     if (this.resizePromise) return this.resizePromise
+    this.hasProcessedFrame = false
     const rebuild = async () => {
       console.log(
         '[Anime4KWebExt] Resizing renderer due to video source dimension change...'
@@ -955,6 +1296,7 @@ export class Renderer {
         this.videoFrameTexture = cached.videoFrameTexture
         this.pipelines = cached.pipelines
         this.renderBindGroup = cached.renderBindGroup
+        this.hasProcessedFrame = false
         console.log('[Anime4KWebExt] Renderer resized for source (cache hit).')
         return
       }
@@ -1021,6 +1363,7 @@ export class Renderer {
     console.log(
       '[Anime4KWebExt] Rebuilding pipeline due to configuration update.'
     )
+    this.hasProcessedFrame = false
     // 缓存中的管线组都绑定旧效果链/旧目标分辨率，整体失效
     this.clearPipelineCache()
     await this.buildPipelines()
@@ -1058,10 +1401,13 @@ export class Renderer {
 
     try {
       // 停止当前渲染循环
-      if (this.animationFrameId) {
+      if (this.animationFrameId !== null) {
         this.video.cancelVideoFrameCallback(this.animationFrameId)
         this.animationFrameId = null
       }
+      this.stopPresentationLoop()
+      this.hasProcessedFrame = false
+      this.frameInFlight = false
 
       // 重新请求 GPU 适配器和设备
       const adapter = await navigator.gpu.requestAdapter()
@@ -1124,10 +1470,11 @@ export class Renderer {
     this.destroyed = true
 
     // 停止渲染循环
-    if (this.animationFrameId) {
+    if (this.animationFrameId !== null) {
       this.video.cancelVideoFrameCallback(this.animationFrameId)
       this.animationFrameId = null
     }
+    this.stopPresentationLoop()
 
     // 安全地销毁所有 GPU 资源
     try {

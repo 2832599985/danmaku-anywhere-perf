@@ -2,7 +2,10 @@ import {
   type Dimensions,
   type EnhancementEffect,
   Renderer,
+  type RendererDiagnosticMode,
+  type RendererDiagnosticsOptions,
   RendererInitializationError,
+  type RendererPresentationMode,
   resolveEffectChain,
   waitForVideoReady,
 } from '@danmaku-anywhere/upscale-engine'
@@ -18,6 +21,12 @@ export interface UpscaleOptions {
   targetResolution: number
   targetDimensions?: Dimensions
   effects: EnhancementEffect[]
+}
+
+type UpscaleDiagnosticConfig = {
+  renderer?: RendererDiagnosticsOptions
+  presentationMode: RendererPresentationMode
+  showProcessedCanvas: boolean
 }
 
 type StoredUpscaleOptions = {
@@ -143,6 +152,41 @@ export class UpscaleService {
     }
   }
 
+  private getDiagnosticConfig(): UpscaleDiagnosticConfig {
+    const params = new URLSearchParams(location.search)
+    const requestedMode = params.get('daUpscaleMode')
+    const enabled =
+      requestedMode !== null ||
+      params.has('daUpscaleFormat') ||
+      params.has('daUpscaleEarly') ||
+      params.has('daUpscalePresentation') ||
+      params.has('daUpscaleView')
+    const modes: RendererDiagnosticMode[] = [
+      'full',
+      'copy-only',
+      'canvas-only',
+      'freeze-input',
+    ]
+    const mode = modes.includes(requestedMode as RendererDiagnosticMode)
+      ? (requestedMode as RendererDiagnosticMode)
+      : 'full'
+    return {
+      renderer: enabled
+        ? {
+            mode,
+            inputTextureFormat:
+              params.get('daUpscaleFormat') === 'rgba8unorm'
+                ? 'rgba8unorm'
+                : 'rgba16float',
+            earlyResubscribe: params.get('daUpscaleEarly') === '1',
+          }
+        : undefined,
+      presentationMode:
+        params.get('daUpscalePresentation') === 'rvfc' ? 'rvfc' : 'raf',
+      showProcessedCanvas: params.get('daUpscaleView') !== 'video',
+    }
+  }
+
   private async enableInternal(
     epoch: number,
     video: HTMLVideoElement | null | undefined,
@@ -190,14 +234,25 @@ export class UpscaleService {
       }
     )
     canvas.setBufferSize(targetDimensions.width, targetDimensions.height)
+    const diagnosticConfig = this.getDiagnosticConfig()
     const renderer = await Renderer.create({
       video,
       canvas: canvas.element,
       effects: this.options.effects,
       targetDimensions,
+      presentationMode: diagnosticConfig.presentationMode,
       onFirstFrameRendered: () => {
-        if (this.canvas === canvas) canvas.show()
+        if (this.canvas === canvas && diagnosticConfig.showProcessedCanvas)
+          canvas.show()
       },
+      diagnostics: diagnosticConfig.renderer,
+      onDiagnostics: diagnosticConfig.renderer
+        ? (summary) => {
+            if (this.canvas !== canvas) return
+            canvas.element.dataset.danmakuAnywhereUpscaleDiagnostics =
+              JSON.stringify(summary)
+          }
+        : undefined,
       onError: (error) => void this.handleRuntimeError(error),
       onProgress: () => undefined,
     })
