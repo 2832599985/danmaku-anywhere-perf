@@ -19,7 +19,7 @@ Danmaku Anywhere is a monorepo for a browser extension and web app that displays
 
 ### Fork Info
 
-This is a performance/UX fork (`2832599985/danmaku-anywhere-perf`) of `Mr-Quin/danmaku-anywhere`. Branch: `feat/ui-beautification`.
+This is a performance/UX fork (`2832599985/danmaku-anywhere-perf`) of `Mr-Quin/danmaku-anywhere`. Active feature branch: `feat/anime4k-upscale`.
 
 **Fork-specific features** (preserve during upstream merges):
 - Glass/neon UI theme (violet/fuchsia palette, `backdropFilter: blur(12px)`, dark mode only)
@@ -30,6 +30,7 @@ This is a performance/UX fork (`2832599985/danmaku-anywhere-perf`) of `Mr-Quin/d
 - CID preservation as optional field in `CommentEntity`
 - MacCMS title mapping support (season/episode persistence for automatic matching)
 - Anime4K WebGPU super-resolution (`packages/upscale-engine`, `src/content/player/upscaler/`); integration points are extension options v34-v35, player RPC commands, floating-panel controls, and the optional `anime4k-cors` DNR ruleset
+- Optional Framegen 2× video interpolation before Anime4K; extension options v36 stores the 480p/720p preference, model assets live in `public/assets/framegen/`, and unsupported GPUs fall back to Anime4K without disabling super-resolution
 
 ## Common Commands
 
@@ -47,6 +48,13 @@ corepack pnpm -C packages/danmaku-anywhere test
 
 # Run single test file
 corepack pnpm -C packages/danmaku-anywhere test -- src/path/to/file.test.ts
+
+# Test and type-check the WebGPU upscale engine
+corepack pnpm --filter @danmaku-anywhere/upscale-engine test
+corepack pnpm --filter @danmaku-anywhere/upscale-engine type-check
+
+# Run the real-browser upscale and package-asset checks
+corepack pnpm -C packages/danmaku-anywhere exec playwright test e2e/upscale.spec.ts e2e/package-assets.spec.ts --workers=1
 
 # Package extension (Chrome/Edge) — output: packages/danmaku-anywhere/package/
 corepack pnpm -C packages/danmaku-anywhere package
@@ -72,8 +80,11 @@ danmaku-anywhere/
 │   ├── danmaku-converter/  # Danmaku format conversion + canonical types
 │   ├── danmaku-engine/     # Canvas rendering engine + plugins
 │   ├── danmaku-provider/   # API wrappers (Bilibili, DanDanPlay, MacCMS)
-│   ├── web-scraper/        # Web scraping utilities
-│   └── shared-ui/          # Shared UI components
+│   ├── upscale-engine/     # Anime4K WebGPU super-resolution engine (fork)
+│   ├── bangumi-api/        # Bangumi API client with auto-generated schemas
+│   ├── integration-policy/ # XPath/AI integration policy types
+│   ├── result/             # Result<T, E> type (@danmaku-anywhere/result)
+│   └── web-scraper/        # Web scraping utilities
 ├── app/web/                # Angular web application
 ├── backend/                # Cloudflare Workers backend
 └── docs/                   # Astro documentation
@@ -142,10 +153,13 @@ Each entry point wraps in `EnvironmentContext` (`popup`, `controller`, etc.) to 
 | Player Entry | `src/content/player/index.ts` | RPC server + service initialization |
 | RPC Types | `src/common/rpcClient/background/types.ts` | All RPC method definitions |
 | Popover Host | `src/content/common/host/createPopoverRoot.ts` | Shadow DOM + Popover setup |
-| Database | `src/common/db/db.ts` | Dexie DB (`DanmakuAnywhereDb`) with 12 migration versions |
+| Database | `src/common/db/db.ts` | Dexie DB (`DanmakuAnywhereDb`) with 13 migration versions |
 | Theme | `src/common/theme/Theme.tsx` | Glass/neon theme (fork feature) |
 | Fixed Skip | `src/content/player/fixedSkip/FixedSkip.service.ts` | Timed skip button (fork feature) |
 | Video Skip | `src/content/player/videoSkip/VideoSkip.service.ts` | Auto OP skip (fork feature) |
+| Upscale Service | `src/content/player/upscaler/Upscale.service.ts` | Connects extension options, video lifecycle, Anime4K, and Framegen fallback reporting |
+| WebGPU Renderer | `packages/upscale-engine/src/core/renderer.ts` | Anime4K pipeline, presentation loop, resource rebuild serialization |
+| Frame Interpolator | `packages/upscale-engine/src/core/frame-interpolator.ts` | Framegen capture, timeline/seek handling, overload bypass, and generated-frame queue |
 | DDP API | `packages/danmaku-provider/src/providers/ddp/api.ts` | DanDanPlay API + dedup |
 | Batch Download | `src/popup/pages/search/seasonDetails/SeasonDetailsPage.tsx` | Multi-episode download |
 
@@ -183,7 +197,7 @@ MacCMS uses an in-memory `episodeCache` (Map keyed by `indexedId`). On cache mis
 ### Data Storage
 
 **Dexie.js** (IndexedDB wrapper) with three databases:
-- `danmaku-anywhere`: Main DB — tables: `episode`, `season`, `customEpisode`, `seasonMap` (12 migration versions)
+- `danmaku-anywhere`: Main DB — tables: `episode`, `season`, `customEpisode`, `seasonMap` (13 migration versions)
 - `danmaku-anywhere-logs`: Logging DB — table: `logs`
 - `danmaku-anywhere-image`: Image cache DB — table: `image`
 
@@ -266,6 +280,10 @@ Two-layer i18n:
 - Validate all user inputs; no `eval()` or `innerHTML`
 - External RPC whitelist: only expose safe read-only methods via `onMessageExternal`
 - Always add cleanup in `ResizeObserver`/event listener teardown (disconnect observers, remove listeners, clear intervals)
+- Treat Framegen as optional. Initialization or GPU-capacity failures must keep Anime4K active, reset the interpolation preference, and notify the user.
+- Keep resize, configuration, and interpolation resource rebuilds serialized. Rendering must skip frames while shared GPU resources are being replaced.
+- Frame interpolation timing must use rVFC `mediaTime` and `expectedDisplayTime`; clear queued frames on seeks and discard stale frame-pair work before GPU readback.
+- Keep `public/assets/framegen/LICENSE` and `WEIGHTS_LICENSE.md` beside the bundled model. The weights are restricted to personal, non-commercial use.
 
 ## Release Workflow
 
