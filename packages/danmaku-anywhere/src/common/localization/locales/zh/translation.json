@@ -913,10 +913,18 @@
   "upscale": {
     "alert": {
       "crossOriginBlocked": "该视频源跨域受限，无法超分",
+      "frameInterpolationUnavailable": "当前视频或 GPU 无法使用补帧，Anime4K 超分将继续运行",
       "failed": "超分出错，已自动关闭"
     },
     "corsFix": "跨域修复",
     "enable": "超分辨率",
+    "frameInterpolation": {
+      "description": "在 Anime4K 之前使用 Framegen 生成一张中间帧。会增加少量画面延迟，GPU 负载过高时自动退回仅超分。",
+      "enable": "视频补帧",
+      "licenseNotice": "内置模型权重仅限个人与非商业用途。",
+      "shortDescription": "Framegen 补帧后再超分，过载时自动旁路。",
+      "title": "2× 视频补帧"
+    },
     "mode": "模式",
     "native": "原始分辨率",
     "performanceTier": "性能档位",

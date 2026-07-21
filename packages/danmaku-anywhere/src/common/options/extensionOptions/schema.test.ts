@@ -11,6 +11,10 @@ describe('extension options upscale schema', () => {
       performanceTier: 'balanced',
       targetResolution: 'x2',
       enableCrossOriginFix: false,
+      frameInterpolation: {
+        enabled: false,
+        resolution: '720p',
+      },
     })
   })
 
@@ -52,6 +56,9 @@ describe('extension options upscale schema', () => {
                 performanceTier,
                 targetResolution,
                 enableCrossOriginFix: false,
+                frameInterpolation:
+                  defaultExtensionOptions.playerOptions.upscale
+                    .frameInterpolation,
               },
             },
           }

@@ -1,6 +1,7 @@
 import {
   type Dimensions,
   type EnhancementEffect,
+  type FrameInterpolationOptions,
   Renderer,
   type RendererDiagnosticMode,
   type RendererDiagnosticsOptions,
@@ -21,6 +22,7 @@ export interface UpscaleOptions {
   targetResolution: number
   targetDimensions?: Dimensions
   effects: EnhancementEffect[]
+  frameInterpolation?: FrameInterpolationOptions
 }
 
 type UpscaleDiagnosticConfig = {
@@ -49,6 +51,10 @@ type StoredUpscaleOptions = {
     | '4k'
     | 'native'
   enableCrossOriginFix: boolean
+  frameInterpolation: {
+    enabled: boolean
+    resolution: '480p' | '720p'
+  }
 }
 
 const defaultOptions: UpscaleOptions = {
@@ -70,7 +76,10 @@ export class CrossOriginReloadError extends RendererInitializationError {
   }
 }
 
-export type UpscaleFailureKind = 'cross-origin' | 'error'
+export type UpscaleFailureKind =
+  | 'cross-origin'
+  | 'error'
+  | 'frame-interpolation'
 
 @injectable('Singleton')
 export class UpscaleService {
@@ -96,6 +105,10 @@ export class UpscaleService {
     performanceTier: 'balanced',
     targetResolution: 'x2',
     enableCrossOriginFix: false,
+    frameInterpolation: {
+      enabled: false,
+      resolution: '720p',
+    },
   }
   private notifyFailure: ((kind: UpscaleFailureKind) => void) | undefined
   private readonly logger: ILogger
@@ -240,6 +253,7 @@ export class UpscaleService {
       canvas: canvas.element,
       effects: this.options.effects,
       targetDimensions,
+      frameInterpolation: this.options.frameInterpolation,
       presentationMode: diagnosticConfig.presentationMode,
       onFirstFrameRendered: () => {
         if (this.canvas === canvas && diagnosticConfig.showProcessedCanvas)
@@ -254,6 +268,10 @@ export class UpscaleService {
           }
         : undefined,
       onError: (error) => void this.handleRuntimeError(error),
+      onFrameInterpolationFallback: (error) => {
+        if (this.canvas !== canvas) return
+        void this.reportFrameInterpolationFallback(error)
+      },
       onProgress: () => undefined,
     })
     if (epoch !== this.opEpoch) {
@@ -292,6 +310,7 @@ export class UpscaleService {
         await renderer.updateConfiguration({
           effects: nextOptions.effects,
           targetDimensions,
+          frameInterpolation: nextOptions.frameInterpolation,
         })
       } catch (error) {
         if (
@@ -427,6 +446,14 @@ export class UpscaleService {
         targetResolution: targetDimensions.width / sourceWidth,
         targetDimensions,
         effects: resolveEffectChain(baseMode, options.performanceTier),
+        frameInterpolation: {
+          enabled: options.frameInterpolation.enabled,
+          resolution: options.frameInterpolation.resolution,
+          weightsBinUrl: chrome.runtime.getURL('assets/framegen/rt_v7s.bin'),
+          weightsManifestUrl: chrome.runtime.getURL(
+            'assets/framegen/rt_v7s.json'
+          ),
+        },
       })
     } catch (error) {
       // A newer operation superseded this attempt while it was in flight —
@@ -466,6 +493,39 @@ export class UpscaleService {
     } catch (updateError) {
       this.logger.warn(
         'Failed to reset upscale option after enable failure',
+        updateError
+      )
+    }
+  }
+
+  private async reportFrameInterpolationFallback(error: unknown) {
+    this.logger.warn(
+      'Frame interpolation is unavailable; continuing with Anime4K only',
+      error
+    )
+    try {
+      this.notifyFailure?.('frame-interpolation')
+    } catch {
+      // A notification failure must not affect the Anime4K fallback.
+    }
+    try {
+      const options = await this.extensionOptions.get()
+      if (!options.playerOptions.upscale.frameInterpolation.enabled) return
+      await this.extensionOptions.update({
+        playerOptions: {
+          ...options.playerOptions,
+          upscale: {
+            ...options.playerOptions.upscale,
+            frameInterpolation: {
+              ...options.playerOptions.upscale.frameInterpolation,
+              enabled: false,
+            },
+          },
+        },
+      })
+    } catch (updateError) {
+      this.logger.warn(
+        'Failed to reset frame interpolation after fallback',
         updateError
       )
     }

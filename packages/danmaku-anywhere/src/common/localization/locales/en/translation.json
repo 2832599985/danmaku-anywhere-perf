@@ -917,10 +917,18 @@
   "upscale": {
     "alert": {
       "crossOriginBlocked": "This video source blocks cross-origin access, upscaling is unavailable here",
+      "frameInterpolationUnavailable": "Frame interpolation is unavailable on this video or GPU; Anime4K remains enabled",
       "failed": "Upscaling hit an error and was turned off"
     },
     "corsFix": "CORS fix",
     "enable": "Super resolution",
+    "frameInterpolation": {
+      "description": "Generate one intermediate frame with Framegen before Anime4K. Adds a small playback delay and falls back automatically when the GPU is overloaded.",
+      "enable": "Frame interpolation",
+      "licenseNotice": "Bundled model weights are for personal and non-commercial use.",
+      "shortDescription": "Framegen before Anime4K; auto-bypasses on overload.",
+      "title": "2× frame interpolation"
+    },
     "mode": "Mode",
     "native": "Native",
     "performanceTier": "Performance tier",

@@ -15,7 +15,8 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "anime4k-webgpu": "^1.0.0"
+    "anime4k-webgpu": "^1.0.0",
+    "framegen": "1.4.0"
   },
   "devDependencies": {
     "@webgpu/types": "^0.1.64",

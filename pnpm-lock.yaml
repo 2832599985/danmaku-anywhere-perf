@@ -565,6 +565,9 @@ importers:
       anime4k-webgpu:
         specifier: ^1.0.0
         version: 1.0.0(@webgpu/types@0.1.71)
+      framegen:
+        specifier: 1.4.0
+        version: 1.4.0
     devDependencies:
       '@webgpu/types':
         specifier: ^0.1.64
@@ -5919,6 +5922,10 @@ packages:
   forwarded@0.2.0:
     resolution: {integrity: sha512-buRG0fpBtRHSTCOASe6hD258tEubFoRLb4ZNA6NxMVHNw2gOcwHo9wyablzMzOA5z9xA9L1KNjk/Nt6MT9aYow==}
     engines: {node: '>= 0.6'}
+
+  framegen@1.4.0:
+    resolution: {integrity: sha512-NqK6nckQMqW6l29mKlNzVlbwH89YLPi7wqiPbrmLSm3p9LMqWEnURTjubNQ8k8F4ogz2OWpygT5MSTmxtvojQQ==}
+    engines: {node: '>=18'}
 
   fresh@2.0.0:
     resolution: {integrity: sha512-Rx/WycZ60HOaqLKAi6cHRKKI7zxWbJ31MhntmtwMoaTeF7XFH9hhBp8vITaMidfljRQ6eYWCKkaTK+ykVJHP2A==}
@@ -13644,6 +13651,8 @@ snapshots:
       fd-package-json: 2.0.0
 
   forwarded@0.2.0: {}
+
+  framegen@1.4.0: {}
 
   fresh@2.0.0: {}
 

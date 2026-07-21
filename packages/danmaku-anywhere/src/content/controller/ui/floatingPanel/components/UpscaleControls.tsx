@@ -215,6 +215,73 @@ export const UpscaleControls = () => {
                   </ToggleButton>
                 </ToggleButtonGroup>
               </Stack>
+              <Divider />
+              <Stack spacing={0.75}>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  justifyContent="space-between"
+                >
+                  <Box>
+                    <Typography variant="body2" fontWeight={700}>
+                      {t(
+                        'upscale.frameInterpolation.title',
+                        '2× frame interpolation'
+                      )}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {t(
+                        'upscale.frameInterpolation.shortDescription',
+                        'Framegen before Anime4K; auto-bypasses on overload.'
+                      )}
+                    </Typography>
+                  </Box>
+                  <Switch
+                    size="small"
+                    checked={upscale.frameInterpolation.enabled}
+                    inputProps={{
+                      'aria-label': t(
+                        'upscale.frameInterpolation.enable',
+                        'Frame interpolation'
+                      ),
+                    }}
+                    onChange={(_, enabled) =>
+                      update({
+                        frameInterpolation: {
+                          ...upscale.frameInterpolation,
+                          enabled,
+                        },
+                      })
+                    }
+                  />
+                </Stack>
+                {upscale.frameInterpolation.enabled && (
+                  <ToggleButtonGroup
+                    exclusive
+                    fullWidth
+                    size="small"
+                    value={upscale.frameInterpolation.resolution}
+                    onChange={(
+                      _,
+                      resolution:
+                        | typeof upscale.frameInterpolation.resolution
+                        | null
+                    ) => {
+                      if (resolution) {
+                        update({
+                          frameInterpolation: {
+                            ...upscale.frameInterpolation,
+                            resolution,
+                          },
+                        })
+                      }
+                    }}
+                  >
+                    <ToggleButton value="480p">480p</ToggleButton>
+                    <ToggleButton value="720p">720p</ToggleButton>
+                  </ToggleButtonGroup>
+                )}
+              </Stack>
               <FormControlLabel
                 sx={{ m: 0 }}
                 control={

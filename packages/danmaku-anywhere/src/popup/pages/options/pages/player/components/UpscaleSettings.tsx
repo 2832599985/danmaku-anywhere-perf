@@ -183,6 +183,78 @@ export const UpscaleSettings = () => {
               </ToggleButton>
             </ToggleButtonGroup>
           </Stack>
+          <Divider />
+          <Stack spacing={1}>
+            <Stack
+              direction="row"
+              alignItems="center"
+              justifyContent="space-between"
+            >
+              <Stack spacing={0.25}>
+                <Typography fontWeight={600}>
+                  {t(
+                    'upscale.frameInterpolation.title',
+                    '2× frame interpolation'
+                  )}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {t(
+                    'upscale.frameInterpolation.description',
+                    'Generate one intermediate frame with Framegen before Anime4K. Adds a small playback delay and falls back automatically when the GPU is overloaded.'
+                  )}
+                </Typography>
+              </Stack>
+              <Switch
+                checked={upscale.frameInterpolation.enabled}
+                onChange={(_, enabled) =>
+                  void update({
+                    frameInterpolation: {
+                      ...upscale.frameInterpolation,
+                      enabled,
+                    },
+                  })
+                }
+                inputProps={{
+                  'aria-label': t(
+                    'upscale.frameInterpolation.enable',
+                    'Frame interpolation'
+                  ),
+                }}
+              />
+            </Stack>
+            {upscale.frameInterpolation.enabled && (
+              <ToggleButtonGroup
+                exclusive
+                fullWidth
+                size="small"
+                value={upscale.frameInterpolation.resolution}
+                onChange={(
+                  _,
+                  resolution:
+                    | typeof upscale.frameInterpolation.resolution
+                    | null
+                ) => {
+                  if (resolution) {
+                    void update({
+                      frameInterpolation: {
+                        ...upscale.frameInterpolation,
+                        resolution,
+                      },
+                    })
+                  }
+                }}
+              >
+                <ToggleButton value="480p">480p</ToggleButton>
+                <ToggleButton value="720p">720p</ToggleButton>
+              </ToggleButtonGroup>
+            )}
+            <Typography variant="caption" color="warning.main">
+              {t(
+                'upscale.frameInterpolation.licenseNotice',
+                'Bundled model weights are for personal and non-commercial use.'
+              )}
+            </Typography>
+          </Stack>
         </Stack>
       </ListItem>
       <ListItem sx={{ pl: 4, pt: 0 }}>

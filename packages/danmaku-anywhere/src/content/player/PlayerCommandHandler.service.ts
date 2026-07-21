@@ -296,6 +296,10 @@ export class PlayerCommandHandler {
           | '4k'
           | 'native'
         enableCrossOriginFix: boolean
+        frameInterpolation: {
+          enabled: boolean
+          resolution: '480p' | '720p'
+        }
       }
     }
   }) {

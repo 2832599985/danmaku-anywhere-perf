@@ -181,6 +181,10 @@ export class ExtensionOptionsService implements IStoreService {
                 performanceTier: 'balanced',
                 targetResolution: 'x2',
                 enableCrossOriginFix: false,
+                frameInterpolation: {
+                  enabled: false,
+                  resolution: '720p',
+                },
               },
             }
           }),
@@ -285,6 +289,10 @@ export class ExtensionOptionsService implements IStoreService {
                   performanceTier: 'balanced',
                   targetResolution: 'x2',
                   enableCrossOriginFix: false,
+                  frameInterpolation: {
+                    enabled: false,
+                    resolution: '720p',
+                  },
                 },
               }
               return
@@ -385,6 +393,10 @@ export class ExtensionOptionsService implements IStoreService {
               performanceTier: 'balanced',
               targetResolution: 'x2',
               enableCrossOriginFix: false,
+              frameInterpolation: {
+                enabled: false,
+                resolution: '720p',
+              },
             }
           }),
       })
@@ -392,6 +404,15 @@ export class ExtensionOptionsService implements IStoreService {
         upgrade: (data) =>
           produce<ExtensionOptions>(data, (draft) => {
             draft.playerOptions.upscale.performanceTier ??= 'balanced'
+          }),
+      })
+      .version(36, {
+        upgrade: (data) =>
+          produce<ExtensionOptions>(data, (draft) => {
+            draft.playerOptions.upscale.frameInterpolation ??= {
+              enabled: false,
+              resolution: '720p',
+            }
           }),
       })
   }

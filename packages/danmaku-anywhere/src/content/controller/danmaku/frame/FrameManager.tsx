@@ -199,6 +199,15 @@ export const FrameManager = () => {
           window.dispatchEvent(new Event('touchmove'))
         },
         'relay:event:upscaleError': async ({ data }) => {
+          if (data.kind === 'frame-interpolation') {
+            toast.info(
+              t(
+                'upscale.alert.frameInterpolationUnavailable',
+                'Frame interpolation is unavailable on this video or GPU; Anime4K remains enabled'
+              )
+            )
+            return
+          }
           toast.error(
             data.kind === 'cross-origin'
               ? t(

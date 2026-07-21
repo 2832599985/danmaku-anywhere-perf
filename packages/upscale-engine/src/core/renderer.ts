@@ -1,6 +1,11 @@
 import type { Anime4KPipeline } from 'anime4k-webgpu'
-import type { Dimensions, EnhancementEffect } from '../types'
+import type {
+  Dimensions,
+  EnhancementEffect,
+  FrameInterpolationOptions,
+} from '../types'
 import { waitForVideoReady } from '../utils/video-ready'
+import { FrameInterpolator } from './frame-interpolator'
 
 type DestroyablePipeline = Anime4KPipeline & { destroy?: () => void }
 
@@ -88,8 +93,12 @@ export interface RendererOptions {
   targetDimensions: Dimensions
   /** Decouple canvas presentation from video callbacks by default. */
   presentationMode?: RendererPresentationMode
+  /** Optional 2x neural frame interpolation before the Anime4K chain. */
+  frameInterpolation?: FrameInterpolationOptions
   /** 发生运行时错误时的回调函数 */
   onError?: (error: Error) => void
+  /** Optional interpolation could not initialize; Anime4K remains active. */
+  onFrameInterpolationFallback?: (error: unknown) => void
   /** 成功渲染第一帧时的回调函数 */
   onFirstFrameRendered?: () => void
   /** 初始化进度回调函数 */
@@ -150,7 +159,10 @@ export class Renderer {
   private canvas: HTMLCanvasElement
   private effects: EnhancementEffect[]
   private targetDimensions: Dimensions
+  private frameInterpolation?: FrameInterpolationOptions
+  private sourceDimensions: Dimensions = { width: 0, height: 0 }
   private onError?: (error: Error) => void
+  private onFrameInterpolationFallback?: (error: unknown) => void
   private onFirstFrameRendered?: () => void
   private onProgress?: (
     stage: string | null,
@@ -200,6 +212,12 @@ export class Renderer {
   private lastError: Error | null = null
   // 正在进行的源尺寸重建；渲染循环在此期间必须跳帧（见 processFrame）
   private resizePromise: Promise<void> | null = null
+  /**
+   * 所有会替换 GPU 输入纹理/管线的异步操作共享同一条串行队列。
+   * epoch 防止较早任务的 finally 在后续任务仍排队时提前解除重建状态。
+   */
+  private resourceRebuildPromise: Promise<void> | null = null
+  private resourceRebuildEpoch = 0
   /** 是否正在恢复设备（设备丢失后的自动恢复） */
   private isRecovering = false
 
@@ -233,6 +251,10 @@ export class Renderer {
   private renderPipeline!: GPURenderPipeline
   private sampler!: GPUSampler
   private renderBindGroup!: GPUBindGroup
+  private frameInterpolator: FrameInterpolator | undefined
+  private interpolationInputPipeline: GPURenderPipeline | undefined
+  private interpolationInputSampler: GPUSampler | undefined
+  private interpolationInputBindGroups = new WeakMap<GPUTexture, GPUBindGroup>()
 
   // --- 静态属性，用于确保只检测一次 ---
   private static hasCheckedWebGPUFeatures = false
@@ -254,7 +276,9 @@ export class Renderer {
         ? []
         : options.effects
     this.targetDimensions = options.targetDimensions
+    this.frameInterpolation = options.frameInterpolation
     this.onError = options.onError
+    this.onFrameInterpolationFallback = options.onFrameInterpolationFallback
     this.onFirstFrameRendered = options.onFirstFrameRendered
     this.onProgress = options.onProgress
     this.diagnostics = {
@@ -359,10 +383,13 @@ export class Renderer {
         alphaMode: 'opaque',
       })
 
+      await this.initializeFrameInterpolator()
+
       // 创建初始资源
       this.createResources()
       await this.buildPipelines()
       await this.createRenderPipeline()
+      this.createInterpolationInputPipeline()
       this.createRenderBindGroup()
 
       // 启动渲染循环，尝试渲染第一帧并启动持续渲染
@@ -389,7 +416,12 @@ export class Renderer {
   ): Promise<GPUDevice> {
     const adapterLimits = adapter.limits
     this.maxTextureDimension = adapterLimits.maxTextureDimension2D || 8192
+    const requiredFeatures: GPUFeatureName[] = []
+    // Request shader-f16 whenever it is available so frame interpolation can
+    // be toggled on later without recreating the whole WebGPU device.
+    if (adapter.features.has('shader-f16')) requiredFeatures.push('shader-f16')
     return adapter.requestDevice({
+      requiredFeatures,
       requiredLimits: {
         maxBufferSize: adapterLimits.maxBufferSize,
         maxStorageBufferBindingSize: adapterLimits.maxStorageBufferBindingSize,
@@ -401,6 +433,62 @@ export class Renderer {
   /** 返回设备支持的最大 2D 纹理边长（供上层钳制目标分辨率） */
   public getMaxTextureDimension(): number {
     return this.maxTextureDimension
+  }
+
+  private async initializeFrameInterpolator(): Promise<void> {
+    this.frameInterpolator?.destroy()
+    this.frameInterpolator = undefined
+    delete this.canvas.dataset.danmakuAnywhereFrameInterpolationGenerated
+    if (!this.frameInterpolation?.enabled) {
+      delete this.canvas.dataset.danmakuAnywhereFrameInterpolation
+      return
+    }
+    if (this.useImageBitmapFallback) {
+      const error = new Error(
+        'Direct video texture copies are unavailable for frame interpolation'
+      )
+      console.warn(
+        '[DanmakuAnywhere][Framegen] Direct video texture copies are unavailable; falling back to Anime4K only.'
+      )
+      this.canvas.dataset.danmakuAnywhereFrameInterpolation = 'fallback'
+      this.onFrameInterpolationFallback?.(error)
+      return
+    }
+
+    this.onProgress?.('loadingFrameInterpolation')
+    try {
+      this.frameInterpolator = await FrameInterpolator.create({
+        device: this.device,
+        video: this.video,
+        options: this.frameInterpolation,
+        maxTextureDimension: this.maxTextureDimension,
+        onWarning: (message, error) => {
+          if (error)
+            console.warn(`[DanmakuAnywhere][Framegen] ${message}`, error)
+          else console.warn(`[DanmakuAnywhere][Framegen] ${message}`)
+        },
+        onFrameGenerated: (count) => {
+          this.canvas.dataset.danmakuAnywhereFrameInterpolationGenerated =
+            String(count)
+        },
+      })
+      console.log(
+        `[DanmakuAnywhere][Framegen] 2x interpolation ready at ${this.frameInterpolator.dimensions.width}x${this.frameInterpolator.dimensions.height}.`
+      )
+      this.canvas.dataset.danmakuAnywhereFrameInterpolation = 'active'
+    } catch (error) {
+      // Interpolation is an optional enhancement. Missing shader-f16, model
+      // loading failures, or insufficient GPU resources must not take Anime4K
+      // down with it.
+      console.warn(
+        '[DanmakuAnywhere][Framegen] Interpolation unavailable; falling back to Anime4K only.',
+        error
+      )
+      this.canvas.dataset.danmakuAnywhereFrameInterpolation = 'fallback'
+      this.onFrameInterpolationFallback?.(error)
+    } finally {
+      this.onProgress?.(null)
+    }
   }
 
   /**
@@ -436,8 +524,16 @@ export class Renderer {
    */
   private createResources(): void {
     this.hasProcessedFrame = false
+    this.sourceDimensions = {
+      width: this.video.videoWidth,
+      height: this.video.videoHeight,
+    }
+    const inputDimensions = this.frameInterpolator?.dimensions ?? {
+      width: this.video.videoWidth,
+      height: this.video.videoHeight,
+    }
     this.videoFrameTexture = this.device.createTexture({
-      size: [this.video.videoWidth, this.video.videoHeight, 1],
+      size: [inputDimensions.width, inputDimensions.height, 1],
       format: this.diagnostics.inputTextureFormat,
       usage:
         GPUTextureUsage.TEXTURE_BINDING | // 可以作为着色器输入
@@ -544,8 +640,8 @@ export class Renderer {
 
     const pipelines: Anime4KPipeline[] = []
     let currentTexture = this.videoFrameTexture
-    let curWidth = this.video.videoWidth
-    let curHeight = this.video.videoHeight
+    let curWidth = this.videoFrameTexture.width
+    let curHeight = this.videoFrameTexture.height
 
     // 使用缓存的模块，避免重复动态导入
     if (!Renderer.cachedAnime4KModule) {
@@ -784,6 +880,98 @@ export class Renderer {
     })
   }
 
+  private createInterpolationInputPipeline(): void {
+    this.interpolationInputPipeline = undefined
+    this.interpolationInputSampler = undefined
+    this.interpolationInputBindGroups = new WeakMap()
+    if (!this.frameInterpolator) return
+
+    const module = this.device.createShaderModule({
+      code: `
+struct VertexOutput {
+  @builtin(position) position: vec4<f32>,
+  @location(0) uv: vec2<f32>,
+}
+
+@vertex
+fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+  const positions = array(
+    vec2<f32>(-1.0, -1.0),
+    vec2<f32>(3.0, -1.0),
+    vec2<f32>(-1.0, 3.0),
+  );
+  const uvs = array(
+    vec2<f32>(0.0, 1.0),
+    vec2<f32>(2.0, 1.0),
+    vec2<f32>(0.0, -1.0),
+  );
+  var output: VertexOutput;
+  output.position = vec4<f32>(positions[vertexIndex], 0.0, 1.0);
+  output.uv = uvs[vertexIndex];
+  return output;
+}
+
+@group(0) @binding(0) var inputTexture: texture_2d<f32>;
+@group(0) @binding(1) var inputSampler: sampler;
+
+@fragment
+fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
+  return textureSampleLevel(inputTexture, inputSampler, input.uv, 0.0);
+}
+`,
+    })
+    this.interpolationInputPipeline = this.device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module, entryPoint: 'vertexMain' },
+      fragment: {
+        module,
+        entryPoint: 'fragmentMain',
+        targets: [{ format: this.diagnostics.inputTextureFormat }],
+      },
+      primitive: { topology: 'triangle-list' },
+    })
+    this.interpolationInputSampler = this.device.createSampler({
+      magFilter: 'linear',
+      minFilter: 'linear',
+    })
+  }
+
+  private encodeInterpolationInput(
+    commandEncoder: GPUCommandEncoder,
+    texture: GPUTexture
+  ): void {
+    const pipeline = this.interpolationInputPipeline
+    const sampler = this.interpolationInputSampler
+    if (!pipeline || !sampler) return
+
+    let bindGroup = this.interpolationInputBindGroups.get(texture)
+    if (!bindGroup) {
+      bindGroup = this.device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: texture.createView() },
+          { binding: 1, resource: sampler },
+        ],
+      })
+      this.interpolationInputBindGroups.set(texture, bindGroup)
+    }
+
+    const pass = commandEncoder.beginRenderPass({
+      colorAttachments: [
+        {
+          view: this.videoFrameTexture.createView(),
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        },
+      ],
+    })
+    pass.setPipeline(pipeline)
+    pass.setBindGroup(0, bindGroup)
+    pass.draw(3)
+    pass.end()
+  }
+
   /**
    * 创建渲染绑定组，它将实际的资源（采样器和最终纹理）绑定到渲染管线。
    */
@@ -827,13 +1015,16 @@ export class Renderer {
    * 处理单帧渲染的核心逻辑。
    * @returns {boolean} 如果成功渲染了一帧则返回 true，否则返回 false。
    */
-  private async processFrame(): Promise<boolean> {
+  private async processFrame(
+    now = performance.now(),
+    metadata?: VideoFrameCallbackMetadata
+  ): Promise<boolean> {
     if (this.destroyed) return false
 
     // 管线重建期间必须跳帧：旧管线/绑定组可能引用已销毁的纹理，
     // 继续渲染会触发 WebGPU validation error。
     // 同时重置失败计数，避免较慢的重建（>60 帧）误触熔断。
-    if (this.resizePromise) {
+    if (this.resourceRebuildPromise) {
       this.consecutiveFailures = 0
       return false
     }
@@ -845,14 +1036,27 @@ export class Renderer {
 
       // 检查分辨率是否变化
       if (
-        this.video.videoWidth !== this.videoFrameTexture.width ||
-        this.video.videoHeight !== this.videoFrameTexture.height
+        this.video.videoWidth !== this.sourceDimensions.width ||
+        this.video.videoHeight !== this.sourceDimensions.height
       ) {
         console.log(
-          `[Anime4KWebExt] Resolution changed: ${this.videoFrameTexture.width}x${this.videoFrameTexture.height} -> ${this.video.videoWidth}x${this.video.videoHeight}`
+          `[Anime4KWebExt] Resolution changed: ${this.sourceDimensions.width}x${this.sourceDimensions.height} -> ${this.video.videoWidth}x${this.video.videoHeight}`
         )
         void this.handleSourceResize()
         return false // 分辨率已变，跳过此帧的渲染，等待重建完成
+      }
+
+      if (this.frameInterpolator) {
+        // Pool saturation is an intentional overload drop. The rAF loop keeps
+        // presenting the latest processed frame, so it must not count toward
+        // the renderer circuit breaker.
+        this.frameInterpolator.captureFrame({
+          arrival: now,
+          expectedDisplayTime: metadata?.expectedDisplayTime,
+          mediaTime: metadata?.mediaTime,
+          presentedFrames: metadata?.presentedFrames,
+        })
+        return true
       }
 
       const frameStartedAt = this.diagnosticsEnabled ? performance.now() : 0
@@ -1079,7 +1283,7 @@ export class Renderer {
     if (
       this.destroyed ||
       this.isRecovering ||
-      this.resizePromise ||
+      this.resourceRebuildPromise ||
       !this.hasProcessedFrame ||
       (this.video.paused &&
         this.presentedFrameGeneration === this.processedFrameGeneration)
@@ -1106,22 +1310,65 @@ export class Renderer {
     }
   }
 
-  private presentationLoop: FrameRequestCallback = () => {
+  private processDueInterpolatedFrame(now: number): boolean {
+    if (this.destroyed || this.isRecovering || this.resourceRebuildPromise) {
+      return false
+    }
+    const frame = this.frameInterpolator?.takeDueFrame(now)
+    if (!frame) return false
+
+    try {
+      const commandEncoder = this.device.createCommandEncoder()
+      this.encodeInterpolationInput(commandEncoder, frame.texture)
+      this.pipelines.forEach((pipeline) => pipeline.pass(commandEncoder))
+      this.device.queue.submit([commandEncoder.finish()])
+      this.hasProcessedFrame = true
+      this.processedFrameGeneration++
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const runtimeError = new RendererRuntimeError(
+        `Failed to process interpolated frame: ${message}`,
+        { cause: error as Error }
+      )
+      console.error(
+        '[DanmakuAnywhere][Framegen] Output processing failed:',
+        error
+      )
+      this.onError?.(runtimeError)
+      this.destroy()
+      return false
+    } finally {
+      frame.release()
+    }
+  }
+
+  private presentationLoop: FrameRequestCallback = (now) => {
     this.presentationAnimationFrameId = null
     if (this.destroyed) return
 
     if (this.presentLatestProcessedFrame()) this.notifyFirstFrameRendered()
+    // Build the next interpolated/real output after presenting the previous
+    // one. This keeps Anime4K compute and the canvas swapchain on separate rAF
+    // turns, preserving the media/compositor pacing fix.
+    this.processDueInterpolatedFrame(now)
 
-    if (!this.destroyed) {
+    if (!this.destroyed && this.shouldRunPresentationLoop()) {
       this.presentationAnimationFrameId = requestAnimationFrame(
         this.presentationLoop
       )
     }
   }
 
+  private shouldRunPresentationLoop(): boolean {
+    return (
+      this.presentationMode === 'raf' || this.frameInterpolator !== undefined
+    )
+  }
+
   private startPresentationLoop(): void {
     if (
-      this.presentationMode !== 'raf' ||
+      !this.shouldRunPresentationLoop() ||
       this.destroyed ||
       this.presentationAnimationFrameId !== null
     ) {
@@ -1138,16 +1385,25 @@ export class Renderer {
     this.presentationAnimationFrameId = null
   }
 
+  /** Keep presentation ownership aligned with the currently active input path. */
+  private syncPresentationLoop(): void {
+    if (this.shouldRunPresentationLoop()) this.startPresentationLoop()
+    else this.stopPresentationLoop()
+  }
+
   /**
    * 尝试渲染第一帧。成功后，调用回调并切换到常规渲染循环。
    * 如果不成功（例如视频暂停），则重新调度自身。
    */
-  private renderFirstFrameAndStartLoop = async (): Promise<void> => {
+  private renderFirstFrameAndStartLoop = async (
+    now = performance.now(),
+    metadata?: VideoFrameCallbackMetadata
+  ): Promise<void> => {
     if (this.destroyed) return
 
-    if (await this.processFrame()) {
+    if (await this.processFrame(now, metadata)) {
       // 第一帧成功处理。rAF 模式要等到它真正提交到 canvas 后再通知上层。
-      if (this.presentationMode === 'raf') {
+      if (this.presentationMode === 'raf' || this.frameInterpolator) {
         this.startPresentationLoop()
       } else {
         this.notifyFirstFrameRendered()
@@ -1214,7 +1470,7 @@ export class Renderer {
       this.frameInFlight = true
     }
 
-    if (await this.processFrame()) {
+    if (await this.processFrame(now, metadata)) {
       // 帧渲染成功
       this.fixAttempted = false
       this.lastError = null
@@ -1274,6 +1530,32 @@ export class Renderer {
   }
 
   /**
+   * Serialize every asynchronous mutation of the GPU input graph. The public
+   * promise preserves the operation's error semantics, while the internal tail
+   * always resolves so one failed rebuild cannot poison later updates.
+   */
+  private enqueueResourceRebuild(rebuild: () => Promise<void>): Promise<void> {
+    const epoch = ++this.resourceRebuildEpoch
+    const previousRebuild = this.resourceRebuildPromise ?? Promise.resolve()
+    const operationPromise = previousRebuild.then(async () => {
+      if (this.destroyed) return
+      await rebuild()
+    })
+
+    this.resourceRebuildPromise = operationPromise
+      .catch(() => undefined)
+      .finally(() => {
+        // A newer operation may already be chained behind this one. Only the
+        // newest epoch owns the shared busy flag and presentation-loop sync.
+        if (this.resourceRebuildEpoch !== epoch) return
+        this.resourceRebuildPromise = null
+        this.syncPresentationLoop()
+      })
+
+    return operationPromise
+  }
+
+  /**
    * 当视频源本身的分辨率发生变化时调用（例如，用户在视频播放器中切换了清晰度）
    * 这将重新创建基于视频原始尺寸的资源
    */
@@ -1281,14 +1563,29 @@ export class Renderer {
     if (this.destroyed) return
     // 重入安全：渲染循环与外部调用（如视频节点变化）并发触发时共享同一次重建
     if (this.resizePromise) return this.resizePromise
-    this.hasProcessedFrame = false
-    const rebuild = async () => {
+    const rebuildPromise = this.enqueueResourceRebuild(async () => {
+      this.hasProcessedFrame = false
       console.log(
         '[Anime4KWebExt] Resizing renderer due to video source dimension change...'
       )
+      this.frameInterpolator?.destroy()
+      this.frameInterpolator = undefined
       // 当前整套管线移入缓存而非销毁——自适应码率大概率很快切回这一档
       this.stashCurrentPipelineSet()
-      const key = `${this.video.videoWidth}x${this.video.videoHeight}`
+      await this.initializeFrameInterpolator()
+      if (this.destroyed) return
+      this.sourceDimensions = {
+        width: this.video.videoWidth,
+        height: this.video.videoHeight,
+      }
+      const activeInterpolator = this.frameInterpolator as
+        | FrameInterpolator
+        | undefined
+      const processingDimensions = activeInterpolator?.dimensions ?? {
+        width: this.video.videoWidth,
+        height: this.video.videoHeight,
+      }
+      const key = `${processingDimensions.width}x${processingDimensions.height}`
       const cached = this.pipelineCache.get(key)
       if (cached) {
         // 命中：整套换回，零着色器编译、零预热，下一帧即恢复渲染
@@ -1297,18 +1594,20 @@ export class Renderer {
         this.pipelines = cached.pipelines
         this.renderBindGroup = cached.renderBindGroup
         this.hasProcessedFrame = false
+        this.createInterpolationInputPipeline()
         console.log('[Anime4KWebExt] Renderer resized for source (cache hit).')
         return
       }
       this.createResources()
       await this.buildPipelines()
       if (this.destroyed) return
+      this.createInterpolationInputPipeline()
       this.createRenderBindGroup()
       console.log('[Anime4KWebExt] Renderer resized for source.')
-    }
+    })
     // 存储的 promise 永不 reject：错误写入 lastError 走渲染循环的
     // 既有错误路径（onError/熔断），避免调用方产生未处理的 rejection。
-    this.resizePromise = rebuild()
+    const trackedResizePromise = rebuildPromise
       .catch((error) => {
         const message = error instanceof Error ? error.message : String(error)
         this.lastError = new RendererRuntimeError(
@@ -1317,9 +1616,12 @@ export class Renderer {
         )
       })
       .finally(() => {
-        this.resizePromise = null
+        if (this.resizePromise === trackedResizePromise) {
+          this.resizePromise = null
+        }
       })
-    return this.resizePromise
+    this.resizePromise = trackedResizePromise
+    return trackedResizePromise
   }
 
   /**
@@ -1329,46 +1631,86 @@ export class Renderer {
   public async updateConfiguration(options: {
     effects: EnhancementEffect[]
     targetDimensions: Dimensions
+    frameInterpolation?: FrameInterpolationOptions
   }): Promise<void> {
     if (this.destroyed) return
+    const { effects, targetDimensions, frameInterpolation } = options
 
-    const { effects, targetDimensions } = options
+    await this.enqueueResourceRebuild(async () => {
+      // 在互斥区内比较并提交配置，避免排队中的新配置改写正在构建的管线。
+      const effectsChanged =
+        JSON.stringify(this.effects) !== JSON.stringify(effects)
+      const dimensionsChanged =
+        this.targetDimensions.width !== targetDimensions.width ||
+        this.targetDimensions.height !== targetDimensions.height
+      const interpolationChanged =
+        JSON.stringify(this.frameInterpolation) !==
+        JSON.stringify(frameInterpolation)
 
-    // 使用JSON字符串比较来检测效果数组是否有实质性变化
-    const effectsChanged =
-      JSON.stringify(this.effects) !== JSON.stringify(effects)
-    const dimensionsChanged =
-      this.targetDimensions.width !== targetDimensions.width ||
-      this.targetDimensions.height !== targetDimensions.height
+      if (!effectsChanged && !dimensionsChanged && !interpolationChanged) {
+        console.log(
+          '[Anime4KWebExt] Configuration unchanged, skipping pipeline rebuild.'
+        )
+        return
+      }
 
-    if (!effectsChanged && !dimensionsChanged) {
+      if (dimensionsChanged) {
+        console.log(
+          `[Anime4KWebExt] Updating target dimensions to ${targetDimensions.width}x${targetDimensions.height}.`
+        )
+        this.targetDimensions = targetDimensions
+      }
+
+      if (effectsChanged) {
+        console.log('[Anime4KWebExt] Updating effects.')
+        this.effects = effects
+      }
+
+      if (interpolationChanged) {
+        this.hasProcessedFrame = false
+        this.frameInterpolation = frameInterpolation
+        this.frameInterpolator?.destroy()
+        this.frameInterpolator = undefined
+        this.clearPipelineCache()
+        try {
+          await this.device.queue.onSubmittedWorkDone()
+        } catch {
+          // Device loss is handled by the existing recovery path.
+        }
+        if (this.destroyed) return
+        for (const pipeline of this.pipelines) {
+          try {
+            ;(pipeline as DestroyablePipeline).destroy?.()
+          } catch {
+            // Best-effort cleanup before rebuilding the input graph.
+          }
+        }
+        this.pipelines = []
+        this.videoFrameTexture.destroy()
+        await this.initializeFrameInterpolator()
+        if (this.destroyed) return
+        this.createResources()
+        await this.buildPipelines()
+        if (this.destroyed) return
+        this.createInterpolationInputPipeline()
+        this.createRenderBindGroup()
+        console.log(
+          '[Anime4KWebExt] Frame interpolation configuration updated.'
+        )
+        return
+      }
+
       console.log(
-        '[Anime4KWebExt] Configuration unchanged, skipping pipeline rebuild.'
+        '[Anime4KWebExt] Rebuilding pipeline due to configuration update.'
       )
-      return
-    }
-
-    if (dimensionsChanged) {
-      console.log(
-        `[Anime4KWebExt] Updating target dimensions to ${targetDimensions.width}x${targetDimensions.height}.`
-      )
-      this.targetDimensions = targetDimensions
-    }
-
-    if (effectsChanged) {
-      console.log('[Anime4KWebExt] Updating effects.')
-      this.effects = effects
-    }
-
-    console.log(
-      '[Anime4KWebExt] Rebuilding pipeline due to configuration update.'
-    )
-    this.hasProcessedFrame = false
-    // 缓存中的管线组都绑定旧效果链/旧目标分辨率，整体失效
-    this.clearPipelineCache()
-    await this.buildPipelines()
-    this.createRenderBindGroup()
-    console.log('[Anime4KWebExt] Renderer configuration updated.')
+      this.hasProcessedFrame = false
+      // 缓存中的管线组都绑定旧效果链/旧目标分辨率，整体失效
+      this.clearPipelineCache()
+      await this.buildPipelines()
+      if (this.destroyed) return
+      this.createRenderBindGroup()
+      console.log('[Anime4KWebExt] Renderer configuration updated.')
+    })
   }
 
   /**
@@ -1377,16 +1719,16 @@ export class Renderer {
    */
   public async updateVideoSource(newVideo: HTMLVideoElement): Promise<void> {
     console.log('[Anime4KWebExt] Renderer video source updated.')
-    if (
-      newVideo.videoWidth !== this.videoFrameTexture.width ||
-      newVideo.videoHeight !== this.videoFrameTexture.height
-    ) {
+    const dimensionsChanged =
+      newVideo.videoWidth !== this.sourceDimensions.width ||
+      newVideo.videoHeight !== this.sourceDimensions.height
+    this.video = newVideo
+    if (dimensionsChanged || this.frameInterpolator) {
       console.log(
         '[Anime4KWebExt] Video dimensions changed on reattach. Updating renderer.'
       )
       await this.handleSourceResize()
     }
-    this.video = newVideo
   }
 
   /**
@@ -1408,6 +1750,8 @@ export class Renderer {
       this.stopPresentationLoop()
       this.hasProcessedFrame = false
       this.frameInFlight = false
+      this.frameInterpolator?.destroy()
+      this.frameInterpolator = undefined
 
       // 重新请求 GPU 适配器和设备
       const adapter = await navigator.gpu.requestAdapter()
@@ -1437,9 +1781,11 @@ export class Renderer {
 
       // 重建资源和管道（缓存中的管线组属于已丢失的旧设备，整体失效）
       this.clearPipelineCache()
+      await this.initializeFrameInterpolator()
       this.createResources()
       await this.buildPipelines()
       await this.createRenderPipeline()
+      this.createInterpolationInputPipeline()
       this.createRenderBindGroup()
 
       // 重启渲染循环
@@ -1478,6 +1824,8 @@ export class Renderer {
 
     // 安全地销毁所有 GPU 资源
     try {
+      this.frameInterpolator?.destroy()
+      this.frameInterpolator = undefined
       this.clearPipelineCache()
       this.pipelines.forEach((pipeline) => {
         ;(pipeline as DestroyablePipeline).destroy?.()

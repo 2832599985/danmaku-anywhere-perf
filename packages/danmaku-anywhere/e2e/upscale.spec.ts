@@ -7,13 +7,16 @@ test('player settings exposes a single inline Anime4K control surface', async ({
   await page.goto(
     `chrome-extension://${extensionId}/pages/dashboard.html#/options/player`
   )
-  await expect(page.getByText(/Anime4K/)).toBeVisible()
+  await expect(
+    page.getByText('Video super resolution (Anime4K)', { exact: true })
+  ).toBeVisible()
   await expect(
     page.getByRole('button', { name: 'A', exact: true })
   ).toBeVisible()
   await expect(
     page.getByRole('button', { name: '2×', exact: true })
   ).toBeVisible()
+  await expect(page.getByText('2× frame interpolation')).toBeVisible()
   await expect(
     page.getByTestId('upscale-settings').getByRole('combobox')
   ).toHaveCount(0)
@@ -38,6 +41,10 @@ test('upscale defaults are persisted and the CORS ruleset is disabled', async ({
       performanceTier: 'balanced',
       targetResolution: 'x2',
       enableCrossOriginFix: false,
+      frameInterpolation: {
+        enabled: false,
+        resolution: '720p',
+      },
     })
 
   const enabledRulesets = await worker.evaluate(() =>
@@ -134,25 +141,47 @@ test('renders an Anime4K canvas while keeping the player popover above it', asyn
     .toContain('https://example.com/*')
 
   await page.goto('https://example.com')
-  const hasGpuAdapter = await page.evaluate(async () => {
+  const gpuSupport = await page.evaluate(async () => {
     if (!('gpu' in navigator) || !navigator.gpu) return false
     try {
-      return Boolean(await navigator.gpu.requestAdapter())
+      const adapter = await navigator.gpu.requestAdapter()
+      return {
+        adapter: Boolean(adapter),
+        shaderF16: Boolean(adapter?.features.has('shader-f16')),
+      }
     } catch {
       return false
     }
   })
-  test.skip(!hasGpuAdapter, 'WebGPU adapter is unavailable in this environment')
+  test.skip(
+    !gpuSupport || !gpuSupport.adapter,
+    'WebGPU adapter is unavailable in this environment'
+  )
 
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
+    const sourceCanvas = document.createElement('canvas')
+    sourceCanvas.width = 320
+    sourceCanvas.height = 180
+    sourceCanvas.style.position = 'fixed'
+    sourceCanvas.style.left = '-10000px'
+    document.body.appendChild(sourceCanvas)
+    const sourceContext = sourceCanvas.getContext('2d')
+    if (!sourceContext) throw new Error('2D canvas is unavailable')
+    let frame = 0
+    window.setInterval(() => {
+      const level = 128 + Math.round(Math.sin(frame / 12) * 60)
+      sourceContext.fillStyle = `rgb(${level}, 90, 140)`
+      sourceContext.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height)
+      frame++
+    }, 1000 / 30)
+
     const video = document.createElement('video')
     video.muted = true
     video.autoplay = true
     video.controls = true
-    video.crossOrigin = 'anonymous'
-    video.src =
-      'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4'
+    video.srcObject = sourceCanvas.captureStream(30)
     document.body.appendChild(video)
+    await video.play()
   })
   await page.locator('video').waitFor({ state: 'attached' })
   await page.locator('#danmaku-anywhere-player').waitFor({
@@ -175,7 +204,11 @@ test('renders an Anime4K canvas while keeping the player popover above it', asyn
               enabled: true,
               modeId: 'builtin-mode-a',
               targetResolution: 'x2',
-              enableCrossOriginFix: true,
+              enableCrossOriginFix: false,
+              frameInterpolation: {
+                enabled: true,
+                resolution: '480p',
+              },
             },
           },
         },
@@ -218,4 +251,29 @@ test('renders an Anime4K canvas while keeping the player popover above it', asyn
   expect(state.canvasHeight).toBe(Math.round(requestedHeight * scale))
   expect(state.playerPopoverOpen).toBe(true)
   expect(state.canvasPopoverOpen).toBe(false)
+  if (gpuSupport && gpuSupport.shaderF16) {
+    await expect(canvas).toHaveAttribute(
+      'data-danmaku-anywhere-frame-interpolation',
+      'active',
+      { timeout: 60_000 }
+    )
+    await expect
+      .poll(
+        async () => {
+          return (
+            (await canvas.getAttribute(
+              'data-danmaku-anywhere-frame-interpolation-generated'
+            )) ?? ''
+          )
+        },
+        { timeout: 60_000 }
+      )
+      .toMatch(/^[1-9]\d*$/)
+  } else {
+    await expect(canvas).toHaveAttribute(
+      'data-danmaku-anywhere-frame-interpolation',
+      'fallback',
+      { timeout: 60_000 }
+    )
+  }
 })

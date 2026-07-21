@@ -74,6 +74,10 @@ const createStoredOptions = (
   performanceTier: 'balanced' as const,
   targetResolution: 'x2' as const,
   enableCrossOriginFix: false,
+  frameInterpolation: {
+    enabled: false,
+    resolution: '720p' as const,
+  },
   ...overrides,
 })
 
@@ -121,8 +125,15 @@ describe('UpscaleService operation coordination', () => {
     mocks.upscaleRemoveCorsRule.mockResolvedValue(undefined)
     mocks.resolveEffectChain.mockImplementation(
       (mode: string, tier: string): EnhancementEffect[] => [
-        { className: `${mode}-${tier}` },
+        {
+          id: `${mode}-${tier}`,
+          name: `${mode}-${tier}`,
+          className: `${mode}-${tier}`,
+        },
       ]
+    )
+    vi.mocked(chrome.runtime.getURL).mockImplementation(
+      (path) => `chrome-extension://test/${path}`
     )
     Object.defineProperty(navigator, 'gpu', {
       configurable: true,
@@ -207,8 +218,21 @@ describe('UpscaleService operation coordination', () => {
 
     expect(renderer.updateConfiguration).toHaveBeenCalledTimes(2)
     expect(renderer.updateConfiguration).toHaveBeenLastCalledWith({
-      effects: [{ className: 'C-balanced' }],
+      effects: [
+        {
+          id: 'C-balanced',
+          name: 'C-balanced',
+          className: 'C-balanced',
+        },
+      ],
       targetDimensions: { width: 5120, height: 2880 },
+      frameInterpolation: {
+        enabled: false,
+        resolution: '720p',
+        weightsBinUrl: 'chrome-extension://test/assets/framegen/rt_v7s.bin',
+        weightsManifestUrl:
+          'chrome-extension://test/assets/framegen/rt_v7s.json',
+      },
     })
   })
 
@@ -260,7 +284,13 @@ describe('UpscaleService operation coordination', () => {
     expect(mocks.rendererCreate).toHaveBeenCalledTimes(1)
     expect(mocks.rendererCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        effects: [{ className: 'C-balanced' }],
+        effects: [
+          {
+            id: 'C-balanced',
+            name: 'C-balanced',
+            className: 'C-balanced',
+          },
+        ],
         targetDimensions: { width: 2560, height: 1440 },
       })
     )
@@ -379,6 +409,45 @@ describe('UpscaleService operation coordination', () => {
       })
       // The half-built canvas from the failed enable must be cleaned up.
       expect(mocks.canvasInstances.at(-1)?.cleanup).toHaveBeenCalled()
+    })
+
+    it('turns off only frame interpolation when the renderer falls back', async () => {
+      const video = createVideo()
+      const renderer = {
+        destroy: vi.fn(),
+        handleSourceResize: vi.fn(),
+        updateConfiguration: vi.fn(),
+      }
+      mocks.rendererCreate.mockImplementation(async (options) => {
+        options.onFrameInterpolationFallback?.(
+          new Error('shader-f16 is unavailable')
+        )
+        return renderer
+      })
+      const { service, extensionOptions } = createServiceHarness(video)
+      const storedUpscale = createStoredOptions({
+        frameInterpolation: { enabled: true, resolution: '720p' },
+      })
+      extensionOptions.get.mockResolvedValue({
+        playerOptions: { upscale: storedUpscale },
+      })
+      const onFailure = vi.fn()
+      service.setFailureNotifier(onFailure)
+
+      await service.applyOptions(storedUpscale)
+
+      await vi.waitFor(() => {
+        expect(onFailure).toHaveBeenCalledWith('frame-interpolation')
+        expect(extensionOptions.update).toHaveBeenCalledWith({
+          playerOptions: {
+            upscale: {
+              ...storedUpscale,
+              frameInterpolation: { enabled: false, resolution: '720p' },
+            },
+          },
+        })
+      })
+      expect(renderer.destroy).not.toHaveBeenCalled()
     })
   })
 

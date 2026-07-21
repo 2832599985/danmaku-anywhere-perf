@@ -89,6 +89,10 @@ export const playerOptionsSchema = z.object({
       'native',
     ]),
     enableCrossOriginFix: z.boolean(),
+    frameInterpolation: z.object({
+      enabled: z.boolean(),
+      resolution: z.enum(['480p', '720p']),
+    }),
   }),
 })
 

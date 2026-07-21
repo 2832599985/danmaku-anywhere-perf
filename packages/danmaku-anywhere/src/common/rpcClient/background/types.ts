@@ -307,7 +307,9 @@ export type PlayerRelayEvents = {
    * reload, so this source can never be upscaled.
    */
   'relay:event:upscaleError': RPCDef<
-    InputWithFrameId<{ kind: 'cross-origin' | 'error' }>,
+    InputWithFrameId<{
+      kind: 'cross-origin' | 'error' | 'frame-interpolation'
+    }>,
     void
   >
 }

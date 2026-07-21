@@ -4,6 +4,15 @@ type PerformanceTier = 'performance' | 'balanced' | 'quality' | 'ultra'
 // ===== 基础模式类型 =====
 type BaseMode = 'A' | 'B' | 'C' | 'A+A' | 'B+B' | 'C+A'
 
+type FrameInterpolationResolution = '480p' | '720p'
+
+interface FrameInterpolationOptions {
+  enabled: boolean
+  resolution: FrameInterpolationResolution
+  weightsBinUrl: string
+  weightsManifestUrl: string
+}
+
 // 定义视频增强器接口
 interface VideoEnhancer {
   destroy: () => void
@@ -98,6 +107,8 @@ export type {
   Dimensions,
   EnhancementEffect,
   EnhancementMode,
+  FrameInterpolationOptions,
+  FrameInterpolationResolution,
   GPUBenchmarkResult,
   LocalSettings,
   PerformanceTier,

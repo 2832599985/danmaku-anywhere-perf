@@ -47,6 +47,10 @@ export const defaultExtensionOptions: ExtensionOptions = {
       performanceTier: 'balanced',
       targetResolution: 'x2',
       enableCrossOriginFix: false,
+      frameInterpolation: {
+        enabled: false,
+        resolution: '720p',
+      },
     },
   },
   theme: {
