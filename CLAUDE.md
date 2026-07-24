@@ -31,6 +31,7 @@ This is a performance/UX fork (`2832599985/danmaku-anywhere-perf`) of `Mr-Quin/d
 - MacCMS title mapping support (season/episode persistence for automatic matching)
 - Anime4K WebGPU super-resolution (`packages/upscale-engine`, `src/content/player/upscaler/`); integration points are extension options v34-v35, player RPC commands, floating-panel controls, and the optional `anime4k-cors` DNR ruleset
 - Optional Framegen 2× video interpolation before Anime4K; extension options v36 stores the 480p/720p preference, model assets live in `public/assets/framegen/`, and unsupported GPUs fall back to Anime4K without disabling super-resolution
+- Local Tauri v2 desktop player (`app/player/`) reusing the danmaku/upscale engines for local video files: playlist with auto-advance, sibling-danmaku autoload, Anime4K + Framegen, `stream://` range protocol; spec and verification log in `app/player/CONTRACT.md`
 
 ## Common Commands
 
@@ -55,6 +56,16 @@ corepack pnpm --filter @danmaku-anywhere/upscale-engine type-check
 
 # Run the real-browser upscale and package-asset checks
 corepack pnpm -C packages/danmaku-anywhere exec playwright test e2e/upscale.spec.ts e2e/package-assets.spec.ts --workers=1
+
+# Desktop player (app/player): gates, browser e2e, package the exe
+corepack pnpm -C app/player type-check
+corepack pnpm -C app/player build                       # vite build (`pnpm dev` is broken, see player notes)
+corepack pnpm -C app/player exec playwright test --workers=1   # runs against the prebuilt dist
+export PATH="$HOME/.cargo/bin:$PATH" && corepack pnpm -C app/player tauri build   # cargo is NOT on PATH
+
+# Verify the packaged exe itself (19 checks incl. WebGPU + playlist):
+# launch it with WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222, then
+node app/player/e2e/verify-exe.mjs
 
 # Package extension (Chrome/Edge) — output: packages/danmaku-anywhere/package/
 corepack pnpm -C packages/danmaku-anywhere package
@@ -85,6 +96,7 @@ danmaku-anywhere/
 │   ├── integration-policy/ # XPath/AI integration policy types
 │   ├── result/             # Result<T, E> type (@danmaku-anywhere/result)
 │   └── web-scraper/        # Web scraping utilities
+├── app/player/             # Local Tauri v2 desktop danmaku player (fork)
 ├── app/web/                # Angular web application
 ├── backend/                # Cloudflare Workers backend
 └── docs/                   # Astro documentation
@@ -284,6 +296,23 @@ Two-layer i18n:
 - Keep resize, configuration, and interpolation resource rebuilds serialized. Rendering must skip frames while shared GPU resources are being replaced.
 - Frame interpolation timing must use rVFC `mediaTime` and `expectedDisplayTime`; clear queued frames on seeks and discard stale frame-pair work before GPU readback.
 - Keep `public/assets/framegen/LICENSE` and `WEIGHTS_LICENSE.md` beside the bundled model. The weights are restricted to personal, non-commercial use.
+
+## Desktop Player (app/player)
+
+Tauri v2 + React 19 desktop player (fork feature) that reuses the workspace engines for local video. Architecture, frozen module contracts, and the full verification log live in `app/player/CONTRACT.md` — read it before changing the player.
+
+**Architecture in one line:** platform adapter (`src/platform/`) lets the identical React tree run in a plain browser (blob URLs, for Playwright) and in WebView2 (`http://stream.localhost/<encoded path>` served by the range-capable, CORS-clean Rust protocol in `src-tauri/src/stream.rs`); Zustand store + imperative `UpscaleController`/`DanmakuController` glue the engines to one `<video>`.
+
+**Hard rules (each one was a real shipped bug — violations mean black screen or silently broken features):**
+- NEVER put inline `<style>` or `style=` attributes in `index.html`. Tauri gives inline content a CSP nonce, and a nonce makes `'unsafe-inline'` ignored, which blocks every Emotion/MUI runtime style → app renders 0×0 on black. Base CSS belongs in `public/app.css`; keep `security.dangerousDisableAssetCspModification: ["style-src"]` in `tauri.conf.json`.
+- NEVER swap `window.fetch` wholesale to `@tauri-apps/plugin-http`. The plugin rejects URLs outside the capability scope, which breaks Tauri's own IPC probe and same-origin asset fetches (Framegen weights). Keep the selective bridge in `src/platform/tauri.ts` (only DanDanPlay/proxy hosts).
+- When adding a field to persisted settings, it only survives existing users' localStorage because of the deep `merge` in `playerStore.ts` persist options (zustand's default merge is shallow and wipes new defaults). Extend that merge for any new nested settings object.
+- WebView2 blocks autoplay without a user gesture. The window config sets `additionalBrowserArgs` with `--autoplay-policy=no-user-gesture-required`; if you edit that string, preserve Tauri's default `--disable-features=...` args.
+- Framegen weights ship as `rt_v7s.dat` (a local web filter returns empty 204 for `.bin` fetches) using the canonical manifest from `node_modules/framegen/weights/rt_v7s.json` — the copy in the extension's `public/assets/framegen/` is corrupt (size-mismatched with the .bin).
+- `pnpm dev` / `tauri dev` do not work (Vite dep-optimizer chokes on the aliased workspace TS sources). Always verify against `vite build` output; the browser e2e serves `dist/` via `e2e/serve-dist.mjs` (Vite preview 204s `.bin`-like assets and orphans zombie servers on port 3060).
+- Playlist semantics: every "open" goes through the playlist store actions (single file = playlist of 1); switching items clears danmaku, then on Tauri a sibling `<name>.xml`/`<name>.json` next to the video is auto-mounted unless danmaku was explicitly loaded.
+- Browser-green ≠ exe-green: CSP, IPC, capability scopes, and autoplay only fail in the real WebView2. After meaningful changes run `e2e/verify-exe.mjs` (CDP attach to the exe launched with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`; also handy interactively via `e2e/cdp-inspect.mjs`).
+- On this machine cargo lives at `~/.cargo/bin` but is NOT on PATH; prefix builds with `export PATH="$HOME/.cargo/bin:$PATH"`. Never regex-edit files containing non-ASCII text via PowerShell 5.1 (`Get-Content`/`Set-Content` read BOM-less UTF-8 as ANSI and mojibake it) — use proper editing tools.
 
 ## Release Workflow
 
