@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "types": ["@webgpu/types", "vite/client"],
+
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@danmaku-anywhere/danmaku-provider/ddp": [
+        "../../packages/danmaku-provider/src/providers/ddp/index.ts"
+      ],
+      "@danmaku-anywhere/danmaku-provider": [
+        "../../packages/danmaku-provider/src/index.ts"
+      ],
+      "@danmaku-anywhere/danmaku-converter": [
+        "../../packages/danmaku-converter/src/index.ts"
+      ],
+      "@danmaku-anywhere/danmaku-engine": [
+        "../../packages/danmaku-engine/src/index.ts"
+      ],
+      "@danmaku-anywhere/upscale-engine": [
+        "../../packages/upscale-engine/src/index.ts"
+      ],
+      "@danmaku-anywhere/result": ["../../packages/result/src/index.ts"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", "src-tauri"]
+}

@@ -1,0 +1,11 @@
+/* App shell base — must live in a real stylesheet, NOT an inline <style>:
+ * Tauri nonces inline styles in index.html, and a CSP nonce makes
+ * 'unsafe-inline' ignored, which would block all Emotion/MUI runtime styles. */
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+}

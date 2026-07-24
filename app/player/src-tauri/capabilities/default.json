@@ -1,0 +1,25 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core, dialog, filesystem (read) and scoped HTTP access for the main player window.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "fs:default",
+    "fs:allow-read-file",
+    "fs:allow-read-text-file",
+    {
+      "identifier": "fs:scope",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://api.danmaku.weeblify.app/*" },
+        { "url": "https://*.dandanplay.net/*" }
+      ]
+    }
+  ]
+}

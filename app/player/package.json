@@ -1,0 +1,46 @@
+{
+  "name": "@danmaku-anywhere/player",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Danmaku Player — local desktop video player with danmaku, Anime4K super-resolution and Framegen frame interpolation",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 3060 --strictPort",
+    "tauri": "tauri",
+    "type-check": "tsc --noEmit",
+    "lint": "biome check --write",
+    "lint:ci": "biome ci",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@danmaku-anywhere/danmaku-converter": "workspace:*",
+    "@danmaku-anywhere/danmaku-engine": "workspace:*",
+    "@danmaku-anywhere/danmaku-provider": "workspace:*",
+    "@danmaku-anywhere/result": "workspace:*",
+    "@danmaku-anywhere/upscale-engine": "workspace:*",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^7.3.5",
+    "@mui/material": "^7.3.5",
+    "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/plugin-dialog": "^2.4.0",
+    "@tauri-apps/plugin-fs": "^2.4.2",
+    "@tauri-apps/plugin-http": "^2.5.2",
+    "immer": "^10.2.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "zustand": "5.0.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@tauri-apps/cli": "^2.9.2",
+    "@types/react": "^19.2.6",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "@webgpu/types": "^0.1.64",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.4"
+  }
+}

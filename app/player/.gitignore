@@ -1,0 +1,19 @@
+# build output
+dist/
+build/
+
+# vite
+.vite/
+
+# tauri (rust build artifacts)
+src-tauri/target/
+src-tauri/gen/
+
+# playwright
+test-results/
+playwright-report/
+.playwright/
+
+# misc
+*.log
+node_modules/

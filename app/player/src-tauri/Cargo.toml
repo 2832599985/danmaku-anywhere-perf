@@ -1,0 +1,38 @@
+[package]
+name = "danmaku-player"
+version = "0.0.1"
+description = "Danmaku Player — local desktop video player with danmaku, Anime4K super-resolution and Framegen frame interpolation"
+authors = ["danmaku-anywhere"]
+edition = "2021"
+rust-version = "1.77.2"
+
+# The Tauri app is split into a library (reused by the desktop binary and any
+# future mobile targets) and a thin `main.rs` entry point.
+[lib]
+name = "danmaku_player_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Custom URI scheme protocols are always available in Tauri v2 — no extra
+# cargo feature is required (the v1-era `protocol-all` feature is gone).
+# `protocol-asset` is intentionally NOT enabled: we serve local media through
+# our own range-capable `stream://` protocol instead.
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-http = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Percent-decodes the absolute file path carried in `stream://` URLs.
+urlencoding = "2"
+
+# Sensible release optimizations (smaller, faster binary).
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+panic = "abort"
