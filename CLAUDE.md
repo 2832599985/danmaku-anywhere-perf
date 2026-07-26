@@ -306,7 +306,7 @@ The type augmentation in `src/common/localization/resources.ts` MUST keep the `{
 
 ## Extension Development Notes
 
-- Content scripts inject via `ScriptingManager` based on `MountConfig`
+- Content scripts inject via `ScriptingManager` based on `MountConfig`. It must register from stored configs on **every** worker start: `chrome.runtime.onStartup` fires only on browser launch, not on an extension reload/update or an event-revived worker. Registration once rode along on the unconditional storage write in `OptionsService.upgrade()`; when that write became conditional, a reloaded extension registered nothing — no controller, so no floating button and no video detection anywhere. Never let script registration depend on an options-write side effect (`ScriptingManager.test.ts` guards this).
 - Player script injected per-frame on video detection
 - Use `pointer-events: none` on containers, `pointer-events: auto` on interactive elements
 - Validate all user inputs; no `eval()` or `innerHTML`
