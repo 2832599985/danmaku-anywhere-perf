@@ -1,0 +1,28 @@
+# Git normalizes to LF in the index and checks out LF on every platform.
+# Biome formats to LF, so a CRLF checkout (core.autocrlf=true on Windows)
+# made it rewrite every file it touched, leaving them permanently "modified"
+# with an empty content diff.
+* text=auto eol=lf
+
+# Binary assets: never run line-ending conversion or text diffs on these.
+# `text=auto` detects them by content, but the Framegen model weights in
+# particular must stay byte-exact -- the manifest offsets are validated
+# against the .bin byte size.
+*.dat binary
+*.bin binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.mp4 binary
+*.webm binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.zip binary
+*.gz binary
+*.wasm binary
