@@ -135,7 +135,8 @@ export function calculateInterpolationDimensions(
   resolution: FrameInterpolationResolution,
   maxTextureDimension = Number.POSITIVE_INFINITY
 ): Dimensions {
-  const maximumHeight = resolution === '720p' ? 720 : 480
+  const maximumHeight =
+    resolution === '1080p' ? 1080 : resolution === '720p' ? 720 : 480
   const scale = Math.min(
     1,
     maximumHeight / Math.max(1, source.height),

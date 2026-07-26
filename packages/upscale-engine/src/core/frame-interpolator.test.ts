@@ -17,6 +17,12 @@ describe('frame interpolation helpers', () => {
     expect(
       calculateInterpolationDimensions({ width: 854, height: 480 }, '480p')
     ).toEqual({ width: 848, height: 480 })
+    expect(
+      calculateInterpolationDimensions({ width: 1920, height: 1080 }, '1080p')
+    ).toEqual({ width: 1920, height: 1072 })
+    expect(
+      calculateInterpolationDimensions({ width: 3840, height: 2160 }, '1080p')
+    ).toEqual({ width: 1920, height: 1072 })
   })
 
   it('does not upscale a source before interpolation', () => {

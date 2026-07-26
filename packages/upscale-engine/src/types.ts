@@ -4,7 +4,7 @@ type PerformanceTier = 'performance' | 'balanced' | 'quality' | 'ultra'
 // ===== 基础模式类型 =====
 type BaseMode = 'A' | 'B' | 'C' | 'A+A' | 'B+B' | 'C+A'
 
-type FrameInterpolationResolution = '480p' | '720p'
+type FrameInterpolationResolution = '480p' | '720p' | '1080p'
 
 interface FrameInterpolationOptions {
   enabled: boolean

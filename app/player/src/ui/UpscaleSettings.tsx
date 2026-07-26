@@ -236,7 +236,7 @@ export const UpscaleSettings = () => {
                 exclusive
                 size="small"
                 value={fi.resolution}
-                sx={toggleGridSx(2)}
+                sx={toggleGridSx(3)}
                 onChange={(_, v: InterpolationResolution | null) => {
                   if (v)
                     updateUpscale({ frameInterpolation: { resolution: v } })
@@ -244,6 +244,7 @@ export const UpscaleSettings = () => {
               >
                 <ToggleButton value="480p">480p</ToggleButton>
                 <ToggleButton value="720p">720p</ToggleButton>
+                <ToggleButton value="1080p">1080p</ToggleButton>
               </ToggleButtonGroup>
             </PanelSection>
 

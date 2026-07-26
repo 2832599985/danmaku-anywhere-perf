@@ -15,7 +15,7 @@ plays local files without depending on the network for the video itself.
 | 1a | Open video files (mainstream MP4 etc.) | Native file dialog + custom streaming protocol; browser fallback = file input / drag-drop |
 | 1b | Danmaku mounting (logic ≈ extension) | `@danmaku-anywhere/danmaku-engine` `DanmakuRenderer` over the `<video>` |
 | 1c | Super-resolution | `@danmaku-anywhere/upscale-engine` `Renderer` (Anime4K) |
-| 1d | Frame interpolation (customizable) | Same `Renderer`, Framegen 2× (`480p`/`720p`, toggle) |
+| 1d | Frame interpolation (customizable) | Same `Renderer`, Framegen N× (`480p`/`720p`/`1080p`, factor or target fps) |
 | 2a | Volume adjustment | Volume slider + `video.volume` |
 | 2b | Left/right = seek | Global keydown (`±5s`, configurable) |
 | 2c | Up/down = volume | Global keydown (`±5%`) |
@@ -153,7 +153,13 @@ type UpscaleSettings = {
   modeId: 'builtin-mode-a'|'-b'|'-c'|'-aa'|'-bb'|'-ca'
   performanceTier: 'performance'|'balanced'|'quality'|'ultra'
   targetResolution: 'x2'|'x4'|'x8'|'720p'|'1080p'|'2k'|'4k'|'native'
-  frameInterpolation: { enabled: boolean; resolution: '480p'|'720p' }
+  frameInterpolation: {
+    enabled: boolean
+    resolution: '480p'|'720p'|'1080p'   // model processing resolution (§17)
+    mode: 'multiplier'|'targetFps'
+    multiplier: 2|3|4
+    targetFps: 60|120|144|170
+  }
 }
 // defaults: enabled:false, modeId:'builtin-mode-a', tier:'balanced',
 //           targetResolution:'x2', frameInterpolation:{enabled:false,resolution:'720p'}
@@ -254,7 +260,7 @@ in this CONTRACT so B/C/D mock against them.
 
 ## 12. Interpretations / decisions (documented, not blocking)
 
-- **"自定义插帧" (custom interpolation):** Framegen is architecturally 2× (midpoint). We expose the real user-facing knobs it supports — on/off + processing resolution (`480p`/`720p`, quality-vs-perf) — plus a labeled "2× 补帧" and automatic overload bypass. Extra multipliers (3×/4×) are not supported by the bundled model and are out of scope.
+- **"自定义插帧" (custom interpolation):** ~~Framegen is architecturally 2× (midpoint) and extra multipliers are out of scope.~~ **Superseded by §16(4) and §17** — the model's `runT(t)` accepts any `t`, so the shipped knobs are on/off, factor (2×/3×/4×) or target fps, and processing resolution (`480p`/`720p`/`1080p`), plus automatic overload bypass.
 - **Danmaku source priority:** local-file import is primary (matches the "network-unreliable" motivation); DanDanPlay online search is an included convenience reusing the provider package.
 - **License:** Framegen weights are personal/non-commercial; `LICENSE` + `WEIGHTS_LICENSE.md` ship beside the model and a notice appears in the interpolation settings.
 - **No GPU benchmark:** performanceTier is a manual setting (matches extension).
@@ -456,3 +462,37 @@ mid-reconfigure. It is caught, non-fatal, and self-heals to `active`; it is the
 renderer's existing reconfigure path, not the multi-frame change. A single
 user-driven factor change triggers one reinit and is unaffected.
 
+
+## 17. Interpolation processing resolution up to 1080p (2026-07-26 — DONE, verified in exe)
+
+**Complaint:** "当前这个补帧的分辨率只有 720P 吗?能不能补到跟当前分辨率一样?"
+
+**What was actually true.** The *output* resolution was never capped at 720p — the
+Anime4K chain still scales to `targetResolution` (up to 4K). But with interpolation
+on, **every** frame (real ones too) is first resampled down to the interpolation
+working size (`calculateInterpolationDimensions`, height ≤ 720) before Framegen,
+and the Anime4K chain then runs on *that* texture (`createResources` sizes
+`videoFrameTexture` from `frameInterpolator.dimensions`;
+`processDueInterpolatedFrame` → `encodeInterpolationInput` → pipelines). So detail
+was genuinely capped at 720p: a 1080p source got downsampled and then guessed back
+up. The user's perception was correct even though the canvas said 4K.
+
+**Change.** `FrameInterpolationResolution` gains `'1080p'` (engine `types.ts`,
+mapped in `calculateInterpolationDimensions`), mirrored in the player's
+`InterpolationResolution` and exposed as a third toggle. Default stays `720p`; the
+extension never sets `1080p`, so its behavior is unchanged.
+
+**Why 1080p and not native/4K.** Cost scales with pixel count (1080p = 2.25× of
+720p) and multiplies with the factor from §16(4). On this machine's mid-range GPU,
+4K neural interpolation would mostly live in the overload-bypass path, which looks
+worse than not interpolating. 1080p is the honest ceiling here; raising it later is
+a one-line map change plus a UI entry.
+
+**No upsampling.** The scale is `min(1, …)`, so a 640×360 source stays 640×352 at
+any setting — choosing `1080p` for a sub-1080p source is a no-op, not a quality
+gain. 16-pixel alignment means 1080p processes as 1920×1072.
+
+**Verified:** engine unit tests 16/16 (added 1080p and 4K-source dimension
+asserts), engine + player type-check, `vite build`, `tauri build`, and in the real
+exe `verify-exe.mjs` **25/25** plus an ad-hoc CDP check that setting
+`resolution:'1080p'` stays `active` and keeps generating frames.

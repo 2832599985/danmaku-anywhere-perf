@@ -25,7 +25,7 @@ export type TargetResolution =
   | '4k'
   | 'native'
 
-export type InterpolationResolution = '480p' | '720p'
+export type InterpolationResolution = '480p' | '720p' | '1080p'
 
 /** How the interpolation factor is chosen. */
 export type InterpolationMode = 'multiplier' | 'targetFps'
