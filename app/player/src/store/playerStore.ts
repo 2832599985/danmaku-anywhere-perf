@@ -77,6 +77,12 @@ const INITIAL_PLAYBACK: PlaybackState = {
 export interface PlayerStore {
   // --- media / danmaku ---
   media: PickedMedia | null
+  /**
+   * Why the current media failed to load (missing file, unsupported codec, …),
+   * or null. The persistent history means stale paths are normal, so a failure
+   * must be visible instead of leaving a black screen.
+   */
+  mediaError: string | null
   comments: CommentEntity[]
   danmakuSource: DanmakuSource | null
 
@@ -112,6 +118,8 @@ export interface PlayerStore {
 
   // --- actions ---
   setMedia: (media: PickedMedia | null) => void
+  /** record (or clear, with null) why the current media could not be played. */
+  setMediaError: (message: string | null) => void
   setComments: (comments: CommentEntity[], source: DanmakuSource | null) => void
   clearDanmaku: () => void
   /** record the detected HDR transfer ('pq'/'hlg') or null for SDR. */
@@ -158,6 +166,8 @@ let osdSeq = 0
 
 /** Upper bound on the persisted history playlist (oldest entries are dropped). */
 const PLAYLIST_MAX = 200
+/** Upper bound on persisted resume points (least recently updated are dropped). */
+const PROGRESS_MAX = 500
 
 /** Dedup key for a playlist item: absolute path when local, else the url. */
 const playlistKey = (item: PlaylistItem): string => item.path ?? item.url
@@ -177,6 +187,7 @@ function clamp(value: number, min: number, max: number): number {
 function resetPlaybackForNewMedia(s: PlayerStore): void {
   s.isHdr = false
   s.hdrTransfer = null
+  s.mediaError = null
   s.playback = {
     ...INITIAL_PLAYBACK,
     volume: s.playback.volume,
@@ -188,6 +199,7 @@ export const usePlayerStore = create<PlayerStore>()(
   persist(
     immer((set) => ({
       media: null,
+      mediaError: null,
       comments: [],
       danmakuSource: null,
 
@@ -217,15 +229,14 @@ export const usePlayerStore = create<PlayerStore>()(
       setMedia: (media) =>
         set((s) => {
           s.media = media
-          // new source: HDR is unknown until the first frame is decoded
-          s.isHdr = false
-          s.hdrTransfer = null
-          // reset live playback for the new media
-          s.playback = {
-            ...INITIAL_PLAYBACK,
-            volume: s.playback.volume,
-            muted: s.playback.muted,
-          }
+          // new source: HDR is unknown until the first frame is decoded, and
+          // any previous load failure no longer applies
+          resetPlaybackForNewMedia(s)
+        }),
+
+      setMediaError: (message) =>
+        set((s) => {
+          s.mediaError = message
         }),
 
       setComments: (comments, source) =>
@@ -339,14 +350,19 @@ export const usePlayerStore = create<PlayerStore>()(
           }
           const firstKey = playlistKey(items[0])
           let idx = s.playlist.findIndex((i) => playlistKey(i) === firstKey)
-          // Cap the history, keeping the active item and everything after it.
-          const over = s.playlist.length - PLAYLIST_MAX
+          // Cap the history by dropping the oldest entries, never the one we
+          // are about to play.
+          let over = s.playlist.length - PLAYLIST_MAX
           if (over > 0) {
-            const trim = Math.min(over, idx)
-            if (trim > 0) {
-              s.playlist.splice(0, trim)
-              idx -= trim
+            const fromFront = Math.min(over, idx)
+            if (fromFront > 0) {
+              s.playlist.splice(0, fromFront)
+              idx -= fromFront
+              over -= fromFront
             }
+            // Re-opening the oldest entry leaves nothing in front of it, so the
+            // cap would never be enforced; drop the next-oldest entries instead.
+            if (over > 0) s.playlist.splice(1, over)
           }
           s.playlistIndex = idx
           // Fresh object reference so re-opening the current file still re-runs
@@ -388,7 +404,9 @@ export const usePlayerStore = create<PlayerStore>()(
             return
           }
           s.playlistIndex = index
-          s.media = s.playlist[index]
+          // Fresh copy so re-selecting the entry that is already playing still
+          // re-runs the load + resume effects (they key off media identity).
+          s.media = { ...s.playlist[index] }
           s.comments = []
           s.danmakuSource = null
           resetPlaybackForNewMedia(s)
@@ -403,7 +421,10 @@ export const usePlayerStore = create<PlayerStore>()(
           if (index < s.playlistIndex) {
             s.playlistIndex -= 1
           } else if (index === s.playlistIndex) {
-            s.playlistIndex = -1
+            // Removing what is playing leaves it playing, but park the cursor
+            // just before the freed slot so next/auto-advance carry on with
+            // whatever moved into it instead of going dead.
+            s.playlistIndex = index - 1
           }
         }),
 
@@ -425,6 +446,14 @@ export const usePlayerStore = create<PlayerStore>()(
             time,
             duration: Number.isFinite(duration) ? duration : 0,
             updatedAt: Date.now(),
+          }
+          // Bound the history so it cannot grow forever in localStorage.
+          const paths = Object.keys(s.progress)
+          if (paths.length > PROGRESS_MAX) {
+            const stale = paths
+              .sort((a, b) => s.progress[a].updatedAt - s.progress[b].updatedAt)
+              .slice(0, paths.length - PROGRESS_MAX)
+            for (const key of stale) delete s.progress[key]
           }
         }),
 

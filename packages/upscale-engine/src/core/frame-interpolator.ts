@@ -10,6 +10,14 @@ const SOURCE_POOL_SIZE = 8
 const MAX_INTERPOLATION_FACTOR = 8
 /** Lowest source fps assumed when sizing pools for a target-fps request. */
 const MIN_ASSUMED_SOURCE_FPS = 20
+/**
+ * Megapixels of generated output a single source pair may cost. Interpolation
+ * work scales with (factor - 1) x processing pixels, so without this the same
+ * factor that is comfortable at 720p saturates the GPU at 1080p and thrashes
+ * the overload bypass. Calibrated so 720p keeps the full 8x and 1080p settles
+ * at 4x.
+ */
+const INTERPOLATION_PIXEL_BUDGET_MP = 6.5
 const DEDUP_SAMPLE_WIDTH = 48
 const DEDUP_SAMPLE_HEIGHT = 27
 const DEDUP_SAMPLE_COUNT = DEDUP_SAMPLE_WIDTH * DEDUP_SAMPLE_HEIGHT
@@ -143,10 +151,40 @@ export function calculateInterpolationDimensions(
     maxTextureDimension / Math.max(1, source.width),
     maxTextureDimension / Math.max(1, source.height)
   )
-  return {
-    width: alignDown(Math.max(1, source.width * scale)),
-    height: alignDown(Math.max(1, source.height * scale)),
-  }
+  const fittedWidth = Math.max(1, source.width * scale)
+  const fittedHeight = Math.max(1, source.height * scale)
+  const height = alignDown(fittedHeight)
+
+  // Both sides must land on the model's 16-pixel grid, so flooring each one
+  // independently can skew the aspect ratio by >2% (640x360 -> 640x352), which
+  // then shows up as a squashed picture once Anime4K scales back out. Choose
+  // the aligned width that best preserves the source aspect instead.
+  const aspect = fittedWidth / fittedHeight
+  const lower = alignDown(height * aspect)
+  const upper = lower + ALIGNMENT
+  const aspectError = (candidate: number) =>
+    Math.abs(candidate / height - aspect)
+  const preferUpper =
+    upper <= maxTextureDimension && aspectError(upper) < aspectError(lower)
+
+  return { width: preferUpper ? upper : lower, height }
+}
+
+/**
+ * Upper bound on the interpolation factor for a given processing resolution,
+ * derived from the per-pair pixel budget. Keeps a high target-fps request from
+ * asking a 1080p pipeline for work it cannot finish inside one source interval.
+ */
+export function computeResolutionFactorCap(
+  dimensions: Dimensions,
+  cap = MAX_INTERPOLATION_FACTOR
+): number {
+  const megapixels = (dimensions.width * dimensions.height) / 1_000_000
+  if (!(megapixels > 0)) return cap
+  return Math.max(
+    2,
+    Math.min(cap, 1 + Math.floor(INTERPOLATION_PIXEL_BUDGET_MP / megapixels))
+  )
 }
 
 export function classifyDifferenceStats(
@@ -340,7 +378,13 @@ export class FrameInterpolator {
       multiplier: createOptions.options.multiplier,
       targetFps: createOptions.options.targetFps,
     }
-    this.maxFactor = computeMaxInterpolationFactor(this.factorOptions)
+    // The requested factor is additionally capped by what this processing
+    // resolution can sustain, so a 170fps target at 1080p degrades to a factor
+    // the GPU can actually hit instead of oscillating through overload bypass.
+    this.maxFactor = Math.min(
+      computeMaxInterpolationFactor(this.factorOptions),
+      computeResolutionFactorCap(dimensions)
+    )
 
     this.sourceTextures = Array.from({ length: SOURCE_POOL_SIZE }, (_, index) =>
       this.createFrameTexture(

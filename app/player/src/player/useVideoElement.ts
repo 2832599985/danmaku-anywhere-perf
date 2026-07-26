@@ -38,6 +38,23 @@ export const useVideoElement = (video: HTMLVideoElement | null): void => {
       })
     const onSeeked = () => patch({ currentTime: video.currentTime })
 
+    // A persistent history means entries routinely outlive the files they point
+    // at, so a failed load must say so instead of leaving a black screen.
+    const onError = () => {
+      const code = video.error?.code
+      const message =
+        code === MediaError.MEDIA_ERR_ABORTED
+          ? '加载已中止 · Load aborted'
+          : code === MediaError.MEDIA_ERR_NETWORK
+            ? '读取文件失败 · Cannot read the file'
+            : code === MediaError.MEDIA_ERR_DECODE
+              ? '解码失败，文件可能已损坏 · Decode failed'
+              : '无法播放：文件可能已被移动、删除，或格式不受支持'
+      usePlayerStore.getState().setMediaError(message)
+      patch({ playing: false, ready: false })
+    }
+    const onLoadedData = () => usePlayerStore.getState().setMediaError(null)
+
     video.addEventListener('timeupdate', onTimeUpdate)
     video.addEventListener('durationchange', onDurationChange)
     video.addEventListener('play', onPlay)
@@ -49,6 +66,8 @@ export const useVideoElement = (video: HTMLVideoElement | null): void => {
     video.addEventListener('loadedmetadata', onLoadedMetadata)
     video.addEventListener('seeked', onSeeked)
     video.addEventListener('progress', syncBuffered)
+    video.addEventListener('error', onError)
+    video.addEventListener('loadeddata', onLoadedData)
 
     // Prime the store with the element's current values.
     patch({
@@ -74,6 +93,8 @@ export const useVideoElement = (video: HTMLVideoElement | null): void => {
       video.removeEventListener('loadedmetadata', onLoadedMetadata)
       video.removeEventListener('seeked', onSeeked)
       video.removeEventListener('progress', syncBuffered)
+      video.removeEventListener('error', onError)
+      video.removeEventListener('loadeddata', onLoadedData)
     }
   }, [video])
 }

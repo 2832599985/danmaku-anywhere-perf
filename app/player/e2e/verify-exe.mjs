@@ -475,6 +475,176 @@ check(
   `170fps target generated=${genTarget}`
 )
 
+// 13. Overlays must be reachable in FULLSCREEN. document.body sits behind the
+// fullscreen element, so anything portaled there (drawers, but also the speed
+// Menu and tooltips) is invisible and — for Menu — swallows clicks.
+await page.evaluate(
+  (p) => window.__player.commands.openVideoFromPath(p),
+  FIXTURE
+)
+await page.waitForFunction(
+  () => {
+    const v = document.querySelector('video')
+    return v && v.readyState >= 2
+  },
+  null,
+  { timeout: 15000 }
+)
+await page.keyboard.press('f') // trusted gesture -> requestFullscreen
+await page.waitForTimeout(1200)
+const fsMenu = await page.evaluate(async () => {
+  const stage = document.querySelector('[data-player-stage]')
+  const isFullscreen = document.fullscreenElement === stage
+  const speed = [...document.querySelectorAll('button')].find((b) =>
+    /×/.test(b.textContent || '')
+  )
+  if (!speed) return { isFullscreen, error: 'speed button not found' }
+  speed.click()
+  await new Promise((r) => setTimeout(r, 700))
+  const paper = document.querySelector('.MuiMenu-paper, .MuiPopover-paper')
+  if (!paper) return { isFullscreen, opened: false }
+  const rect = paper.getBoundingClientRect()
+  const atCentre = document.elementFromPoint(
+    rect.left + rect.width / 2,
+    rect.top + rect.height / 2
+  )
+  return {
+    isFullscreen,
+    opened: true,
+    insideStage: stage.contains(paper),
+    // what the user actually sees where the menu claims to be
+    visibleAtCentre: !!(atCentre && paper.contains(atCentre)),
+  }
+})
+check(
+  'speed menu is visible in fullscreen',
+  fsMenu.isFullscreen &&
+    fsMenu.opened &&
+    fsMenu.insideStage &&
+    fsMenu.visibleAtCentre,
+  JSON.stringify(fsMenu)
+)
+await page.keyboard.press('Escape') // close the menu
+await page.waitForTimeout(300)
+await page.evaluate(() => document.exitFullscreen?.())
+await page.waitForTimeout(600)
+
+// 14. A missing/renamed file must say so instead of showing a black screen.
+await page.evaluate((p) => {
+  window.__player.commands.openVideoFromPath(`${p}.missing.mp4`)
+}, FIXTURE)
+const errorShown = await page
+  .waitForFunction(
+    () => {
+      const s = window.__player.store.getState()
+      const alert = document.querySelector('.MuiAlert-root')
+      return s.mediaError && alert
+        ? { message: s.mediaError, visible: alert.textContent.length > 0 }
+        : null
+    },
+    null,
+    { timeout: 15000 }
+  )
+  .then((h) => h.jsonValue())
+check(
+  'missing file reports an error',
+  errorShown.visible,
+  JSON.stringify(errorShown.message).slice(0, 60)
+)
+
+// 15. Watching to the end must LEAVE the resume point cleared (the switch-away
+// save used to write it straight back at ~100%).
+await page.evaluate(
+  ({ a, b }) => {
+    window.__player.store.getState().clearPlaylist()
+    window.__player.commands.openVideosFromPaths([a, b])
+  },
+  { a: FIXTURE, b: FIXTURE2 }
+)
+await page.waitForFunction(
+  () => {
+    const v = document.querySelector('video')
+    return (
+      window.__player.store.getState().playlistIndex === 0 &&
+      v &&
+      v.readyState >= 3
+    )
+  },
+  null,
+  { timeout: 15000 }
+)
+// Establish a resume point first, otherwise the "cleared" assertion is vacuous.
+await page.evaluate(() => {
+  // The factor measurements above left the element looping; a looping video
+  // never fires 'ended', so auto-advance would never run.
+  document.querySelector('video').loop = false
+  window.__player.commands.seekTo(5)
+  window.__player.commands.pause()
+})
+await page.waitForTimeout(600)
+const beforeEnd = await page.evaluate(
+  (p) => window.__player.store.getState().progress[p]?.time ?? null,
+  FIXTURE
+)
+check(
+  'resume point exists before finishing',
+  beforeEnd !== null && beforeEnd > 4,
+  `t=${beforeEnd}`
+)
+await page.evaluate(() => {
+  window.__player.commands.seekTo(9.6)
+  window.__player.commands.play()
+})
+await page.waitForFunction(
+  () => window.__player.store.getState().playlistIndex === 1,
+  null,
+  { timeout: 20000 }
+)
+await page.waitForTimeout(800)
+const clearedAfterEnd = await page.evaluate(
+  (p) => window.__player.store.getState().progress[p] ?? null,
+  FIXTURE
+)
+check(
+  'finished video keeps its resume point cleared',
+  clearedAfterEnd === null,
+  `progress=${JSON.stringify(clearedAfterEnd)}`
+)
+
+// 16. The playlist must surface how far through each entry you are.
+await page.evaluate(() => {
+  window.__player.commands.playlistPlayAt(0)
+})
+await page.waitForFunction(
+  () => {
+    const v = document.querySelector('video')
+    return v && v.readyState >= 2
+  },
+  null,
+  { timeout: 15000 }
+)
+await page.evaluate(() => {
+  window.__player.commands.seekTo(5)
+  window.__player.commands.pause()
+})
+await page.waitForTimeout(600)
+await page.evaluate(() => window.__player.commands.togglePlaylist())
+await page.waitForTimeout(600)
+const drawerProgress = await page.evaluate(() => {
+  const drawer = document.querySelector('.MuiDrawer-root')
+  const text = drawer ? drawer.textContent : ''
+  return {
+    hasResumeText: /看到|已看完/.test(text),
+    hasBar: !!drawer?.querySelector('.MuiLinearProgress-root'),
+  }
+})
+check(
+  'playlist shows watched progress',
+  drawerProgress.hasResumeText && drawerProgress.hasBar,
+  JSON.stringify(drawerProgress)
+)
+await page.evaluate(() => window.__player.commands.togglePlaylist())
+
 const failed = results.filter((r) => !r.ok)
 console.log(
   `\n== ${results.length - failed.length}/${results.length} checks passed ==`

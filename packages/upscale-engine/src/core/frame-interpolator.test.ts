@@ -4,6 +4,7 @@ import {
   calculateInterpolationDimensions,
   classifyDifferenceStats,
   computeMaxInterpolationFactor,
+  computeResolutionFactorCap,
   isMediaTimelineDiscontinuity,
   resolveInterpolationFactor,
   shouldInterpolateInterval,
@@ -19,16 +20,42 @@ describe('frame interpolation helpers', () => {
     ).toEqual({ width: 848, height: 480 })
     expect(
       calculateInterpolationDimensions({ width: 1920, height: 1080 }, '1080p')
-    ).toEqual({ width: 1920, height: 1072 })
+    ).toEqual({ width: 1904, height: 1072 })
     expect(
       calculateInterpolationDimensions({ width: 3840, height: 2160 }, '1080p')
-    ).toEqual({ width: 1920, height: 1072 })
+    ).toEqual({ width: 1904, height: 1072 })
+  })
+
+  it('picks the 16-aligned width that best preserves the source aspect', () => {
+    // 360 floors to 352; keeping width at 640 would squash the picture by 2.2%.
+    const dims = calculateInterpolationDimensions(
+      { width: 640, height: 360 },
+      '720p'
+    )
+    expect(dims).toEqual({ width: 624, height: 352 })
+    const sourceAspect = 640 / 360
+    expect(Math.abs(dims.width / dims.height - sourceAspect)).toBeLessThan(
+      Math.abs(640 / dims.height - sourceAspect)
+    )
   })
 
   it('does not upscale a source before interpolation', () => {
-    expect(
-      calculateInterpolationDimensions({ width: 640, height: 360 }, '720p')
-    ).toEqual({ width: 640, height: 352 })
+    const dims = calculateInterpolationDimensions(
+      { width: 640, height: 360 },
+      '720p'
+    )
+    expect(dims.height).toBeLessThanOrEqual(360)
+    expect(dims.width).toBeLessThanOrEqual(640)
+  })
+
+  it('caps the interpolation factor by processing resolution', () => {
+    // (factor - 1) x pixels is the real cost: 720p sustains the full 8x,
+    // 1080p must fall back to 4x, and 480p is never the limiting factor.
+    expect(computeResolutionFactorCap({ width: 1280, height: 720 })).toBe(8)
+    expect(computeResolutionFactorCap({ width: 1904, height: 1072 })).toBe(4)
+    expect(computeResolutionFactorCap({ width: 848, height: 480 })).toBe(8)
+    // never below 2 (interpolation would be pointless) even for huge frames
+    expect(computeResolutionFactorCap({ width: 7680, height: 4320 })).toBe(2)
   })
 
   it('detects repeated frames and scene cuts using Framegen thresholds', () => {

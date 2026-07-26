@@ -14,6 +14,15 @@ const isEditable = (el: EventTarget | null): boolean => {
 }
 
 /**
+ * True when the event came from inside an open overlay (settings/playlist
+ * drawer, danmaku dialog, a menu). Those own the keyboard while they are up —
+ * otherwise Space would toggle playback instead of the focused switch, and the
+ * arrow keys would seek instead of moving through the list.
+ */
+const isInsideOverlay = (el: EventTarget | null): boolean =>
+  el instanceof HTMLElement && el.closest('.MuiModal-root') !== null
+
+/**
  * Global keyboard controls (acceptance 2b/2c + polish):
  *   ← / →  seek by playbackSettings.seekStepSec
  *   ↑ / ↓  volume by playbackSettings.volumeStep
@@ -32,7 +41,7 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
       ) {
         return
       }
-      if (isEditable(event.target)) return
+      if (isEditable(event.target) || isInsideOverlay(event.target)) return
 
       const { seekStepSec, volumeStep } =
         usePlayerStore.getState().playbackSettings

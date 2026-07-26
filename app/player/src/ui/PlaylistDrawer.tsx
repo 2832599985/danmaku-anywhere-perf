@@ -8,6 +8,7 @@ import {
   Box,
   Drawer,
   IconButton,
+  LinearProgress,
   List,
   ListItem,
   ListItemButton,
@@ -18,14 +19,56 @@ import {
 } from '@mui/material'
 import { usePlayerCommands } from '@/player/commands'
 import { useFullscreenPortalContainer } from '@/player/fullscreenPortal'
+import type { PlaylistItem, ResumeEntry } from '@/store/playerStore'
 import { usePlayerStore } from '@/store/playerStore'
+import { formatTime } from './TimeDisplay'
+
+/** A finished item is one watched to (nearly) the end. */
+const WATCHED_RATIO = 0.95
+
+const relativeTime = (timestamp: number): string => {
+  const elapsed = Date.now() - timestamp
+  if (!Number.isFinite(elapsed) || elapsed < 0) return ''
+  const minutes = Math.floor(elapsed / 60_000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  const days = Math.floor(hours / 24)
+  return days < 30 ? `${days} 天前` : `${Math.floor(days / 30)} 个月前`
+}
+
+/** Human summary of a resume point, plus how far through it is (0..1). */
+const describeProgress = (
+  entry: ResumeEntry | undefined
+): { text: string; ratio: number } | null => {
+  if (!entry) return null
+  const ratio = entry.duration > 0 ? entry.time / entry.duration : 0
+  const seen = relativeTime(entry.updatedAt)
+  if (ratio >= WATCHED_RATIO) {
+    return { text: seen ? `已看完 · ${seen}` : '已看完', ratio: 1 }
+  }
+  const position = entry.duration
+    ? `${formatTime(entry.time)} / ${formatTime(entry.duration)}`
+    : formatTime(entry.time)
+  return {
+    text: seen ? `看到 ${position} · ${seen}` : `看到 ${position}`,
+    ratio,
+  }
+}
+
+const itemKey = (item: PlaylistItem): string => item.path ?? item.url
 
 export const PlaylistDrawer = () => {
   const commands = usePlayerCommands()
   const container = useFullscreenPortalContainer()
   const playlist = usePlayerStore((s) => s.playlist)
-  const playlistIndex = usePlayerStore((s) => s.playlistIndex)
   const playlistOpen = usePlayerStore((s) => s.playlistOpen)
+  // Highlight what is actually playing rather than the navigation cursor: the
+  // two diverge once the playing entry is removed from the list.
+  const media = usePlayerStore((s) => s.media)
+  const progress = usePlayerStore((s) => s.progress)
+  const activeKey = media ? (media.path ?? media.url) : null
   const autoAdvance = usePlayerStore((s) => s.playbackSettings.autoAdvance)
   const setPlaylistOpen = usePlayerStore((s) => s.setPlaylistOpen)
   const removePlaylistIndex = usePlayerStore((s) => s.removePlaylistIndex)
@@ -138,7 +181,10 @@ export const PlaylistDrawer = () => {
           ) : (
             <List sx={{ py: 0 }}>
               {playlist.map((item, index) => {
-                const isActive = index === playlistIndex
+                const isActive = itemKey(item) === activeKey
+                const resume = describeProgress(
+                  item.path ? progress[item.path] : undefined
+                )
                 return (
                   <ListItem
                     key={`${index}:${item.url}`}
@@ -185,20 +231,41 @@ export const PlaylistDrawer = () => {
                         >
                           {index + 1}
                         </Typography>
-                        <ListItemText
-                          primary={item.name}
-                          primaryTypographyProps={{
-                            variant: 'body2',
-                            noWrap: true,
-                            sx: {
-                              color: isActive
-                                ? 'primary.light'
-                                : 'text.primary',
-                              fontWeight: isActive ? 600 : 500,
-                            },
-                            title: item.name,
-                          }}
-                        />
+                        <Box sx={{ flex: 1, minWidth: 0 }}>
+                          <ListItemText
+                            sx={{ my: 0 }}
+                            primary={item.name}
+                            primaryTypographyProps={{
+                              variant: 'body2',
+                              noWrap: true,
+                              sx: {
+                                color: isActive
+                                  ? 'primary.light'
+                                  : 'text.primary',
+                                fontWeight: isActive ? 600 : 500,
+                              },
+                              title: item.name,
+                            }}
+                            secondary={resume?.text}
+                            secondaryTypographyProps={{
+                              variant: 'caption',
+                              noWrap: true,
+                              sx: { opacity: 0.7 },
+                            }}
+                          />
+                          {resume && resume.ratio < 1 && (
+                            <LinearProgress
+                              variant="determinate"
+                              value={Math.min(100, resume.ratio * 100)}
+                              sx={{
+                                mt: 0.5,
+                                height: 3,
+                                borderRadius: 2,
+                                bgcolor: 'rgba(255,255,255,0.12)',
+                              }}
+                            />
+                          )}
+                        </Box>
                         {isActive && (
                           <PlayArrowRounded
                             sx={{

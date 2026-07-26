@@ -496,3 +496,66 @@ gain. 16-pixel alignment means 1080p processes as 1920×1072.
 asserts), engine + player type-check, `vite build`, `tauri build`, and in the real
 exe `verify-exe.mjs` **25/25** plus an ad-hoc CDP check that setting
 `resolution:'1080p'` stays `active` and keeps generating frames.
+
+## 18. Post-review bug sweep (2026-07-26 — DONE, verified in exe)
+
+A review of §16/§17 found one bug of the same class the user had already
+reported, plus several gaps the new persistent history exposed. All fixed and
+covered by `verify-exe.mjs` (now **30 checks**) / `verify-hdr.mjs` (**6**).
+
+**(1) Overlays were only half fixed for fullscreen.** §16(2) gave the three
+drawers/dialog an explicit portal container, but the playback-rate `Menu` and
+every `Tooltip` still went to `document.body`. Reproduced over CDP in the exe:
+the menu opened at 83x209 but `elementFromPoint` at its own centre returned the
+`<video>` — invisible, and `Menu`'s backdrop swallowed the next click, so
+fullscreen looked frozen. Fixed *systemically* instead of per call site: a
+nested `ThemeProvider` in `PlayerHost` sets `defaultProps.container` for
+`MuiModal`/`MuiPopover`/`MuiPopper` to the stage, so every present and future
+overlay portals correctly. (The explicit `slotProps.root.container` on the three
+overlays stays as belt-and-braces.)
+
+**(2) Failed loads were silent.** Nothing listened to `<video>`'s `error`. With
+a history that outlives the files it points at, a moved/deleted file just showed
+a black screen. Added an error listener in `useVideoElement`, `mediaError` in the
+store, and a dismissible `Alert` (with the offending path) over the stage.
+
+**(3) The playlist showed no watch state.** `progress` was persisted but never
+displayed. The drawer now shows `看到 mm:ss / mm:ss · 3 天前` (or `已看完`) plus a
+progress bar, and highlights the *playing* entry by path rather than by
+`playlistIndex` — the two diverge once the playing entry is removed. Order is
+deliberately still insertion order: the list doubles as the play queue, so
+re-sorting by recency would silently change what "next" means.
+
+**(4) HDR suppression lied about status.** The HDR branch called `reset()`,
+which tears the renderer down *without* firing the status callbacks, so the panel
+kept showing "已启用 / 补帧运行中". Now calls `disable()`.
+
+**(5) "Clear the resume point when finished" never ran.** Traced in the exe: the
+auto-advance `ended` listener switches media, React flushes that store update
+**synchronously inside the same event dispatch**, the media-keyed effect's
+cleanup unregisters the remaining listeners, and a listener removed mid-dispatch
+is never invoked — so the `clearProgress` that lived next to the save handlers
+was dead code. Moved into the element-keyed effect (which survives media
+changes). `save()` also now bails when `video.ended`, so the cleanup that runs
+while switching cannot write the point back at ~100%.
+
+**(6) A high target fps at 1080p would have thrashed.** Cost is
+`(factor - 1) x processing pixels`, and pools are sized for the worst case: a
+170fps target reserved 23 mid textures (~190 MB at 1080p) and then could not
+finish a pair inside one 24fps interval, so it would oscillate through the
+2-second overload bypass. Added `computeResolutionFactorCap()` — a per-pair
+megapixel budget that leaves 720p at the full 8x and settles 1080p at 4x — and a
+UI note. 480p/720p behaviour is unchanged.
+
+**(7) Smaller ones.** Removing the playing entry now parks the cursor just before
+the freed slot so next/auto-advance carry on instead of going dead;
+`playPlaylistIndex` takes a fresh media copy so re-selecting the current entry
+reloads like `openMedia` does; keyboard shortcuts are ignored inside an open
+overlay (Space no longer steals activation from a focused switch); `progress` is
+capped at 500 entries (least-recently-updated dropped); and the history cap no
+longer leaks when the re-opened item is the oldest one.
+
+**Aspect-ratio fix.** `calculateInterpolationDimensions` used to floor both sides
+onto the 16-pixel grid independently, squashing 640x360 by 2.2% (-> 640x352) and
+1080p by 0.74%. It now picks the aligned width nearest the source aspect
+(640x360 -> 624x352, 1920x1080 -> 1904x1072).

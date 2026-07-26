@@ -314,6 +314,8 @@ export const UpscaleSettings = () => {
               {fi.mode === 'targetFps'
                 ? '实际倍率随片源帧率自动调整；输出帧率不会超过显示器刷新率。'
                 : '输出帧率 = 片源帧率 × 倍率，且不会超过显示器刷新率。'}
+              {fi.resolution === '1080p' &&
+                ' 1080p 下补帧开销约为 720p 的 2 倍，倍率上限自动压到 4×。'}
             </Typography>
           </>
         )}

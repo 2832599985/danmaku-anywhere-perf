@@ -1,3 +1,4 @@
+import { Alert, Box, createTheme, ThemeProvider, useTheme } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { parseDanmakuText } from '@/danmaku/parse'
 import type { Platform } from '@/platform'
@@ -68,7 +69,25 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   const upscaleCtrlRef = useRef<UpscaleController | null>(null)
   const danmakuCtrlRef = useRef<DanmakuController | null>(null)
 
+  // Every MUI overlay portals to document.body by default, and document.body is
+  // hidden behind the fullscreen element (only the fullscreen subtree renders in
+  // the top layer). Defaulting the portal container for Modal/Popover/Popper at
+  // the theme level fixes drawers, dialogs, menus and tooltips at once — and
+  // keeps future overlays fixed by construction rather than per call site.
+  const baseTheme = useTheme()
+  const themeWithPortal = useMemo(() => {
+    if (!stageEl) return baseTheme
+    return createTheme(baseTheme, {
+      components: {
+        MuiModal: { defaultProps: { container: stageEl } },
+        MuiPopover: { defaultProps: { container: stageEl } },
+        MuiPopper: { defaultProps: { container: stageEl } },
+      },
+    })
+  }, [baseTheme, stageEl])
+
   const media = usePlayerStore((s) => s.media)
+  const mediaError = usePlayerStore((s) => s.mediaError)
   const comments = usePlayerStore((s) => s.comments)
   const danmakuSettings = usePlayerStore((s) => s.danmakuSettings)
   const upscale = usePlayerStore((s) => s.upscale)
@@ -207,7 +226,9 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     const ctrl = upscaleCtrlRef.current
     if (!ctrl || !video || !media) return
     if (isHdr && upscale.enabled) {
-      ctrl.reset()
+      // disable() (not reset()) so the reported status matches reality — the
+      // panel would otherwise keep claiming upscale/interpolation are running.
+      ctrl.disable()
       return
     }
     void ctrl.apply(upscale)
@@ -228,8 +249,18 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     if (!video) return
     const onEnded = () => {
       const s = usePlayerStore.getState()
+      // Finishing a video drops its resume point. This has to live in an effect
+      // keyed on the ELEMENT, not on `media`: the moment a listener switches
+      // media, React flushes synchronously and tears down the media-keyed
+      // effects, and a listener removed mid-dispatch is never called — which is
+      // exactly what silently killed the clear when it lived next to the
+      // resume/save handlers.
+      const finished = s.media?.path
+      if (finished) s.clearProgress(finished)
       if (!s.playbackSettings.autoAdvance) return
-      if (s.playlistIndex >= 0 && s.playlistIndex < s.playlist.length - 1) {
+      // playlistIndex can be -1 after the current entry was removed from the
+      // list; advancing from there to 0 is still the right continuation.
+      if (s.playlistIndex < s.playlist.length - 1) {
         const next = s.playlist[s.playlistIndex + 1]
         s.playPlaylistIndex(s.playlistIndex + 1)
         s.showOsd(next.name, '⏭')
@@ -305,6 +336,10 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     }
 
     const save = () => {
+      // Finished playback clears the resume point; without this guard the
+      // cleanup that runs when auto-advance switches media would immediately
+      // write it back at ~100%.
+      if (video.ended) return
       const t = video.currentTime
       if (t > 1 && Number.isFinite(t)) {
         store().saveProgress(path, t, video.duration)
@@ -318,18 +353,18 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       save()
     }
     const onPause = () => save()
-    const onEnded = () => store().clearProgress(path)
+    // NOTE: clearing on 'ended' deliberately lives in the element-keyed
+    // auto-advance effect above — a listener registered here is torn down
+    // mid-dispatch as soon as the video finishes and media switches.
 
     video.addEventListener('loadedmetadata', onMeta, { once: true })
     if (video.readyState >= 1) onMeta()
     video.addEventListener('timeupdate', onTimeUpdate)
     video.addEventListener('pause', onPause)
-    video.addEventListener('ended', onEnded)
     return () => {
       video.removeEventListener('loadedmetadata', onMeta)
       video.removeEventListener('timeupdate', onTimeUpdate)
       video.removeEventListener('pause', onPause)
-      video.removeEventListener('ended', onEnded)
       // Capture the outgoing position before the media effect swaps the src.
       save()
     }
@@ -340,7 +375,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     const onHide = () => {
       const s = usePlayerStore.getState()
       const v = videoRef.current
-      if (s.media?.path && v && v.currentTime > 1) {
+      if (s.media?.path && v && !v.ended && v.currentTime > 1) {
         s.saveProgress(s.media.path, v.currentTime, v.duration)
       }
     }
@@ -370,7 +405,9 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     const playlistStep = (delta: -1 | 1, icon: string) => {
       const s = store()
       const next = s.playlistIndex + delta
-      if (s.playlistIndex < 0 || next < 0 || next >= s.playlist.length) return
+      // A detached cursor (-1, after a restore or after removing the playing
+      // entry) may still step forward into the list.
+      if (next < 0 || next >= s.playlist.length) return
       s.playPlaylistIndex(next)
       s.showOsd(s.playlist[next].name, icon)
     }
@@ -544,67 +581,100 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
 
   return (
     <PlayerCommandsContext.Provider value={commands}>
-      <FullscreenPortalContext.Provider value={stageEl}>
-        <div
-          ref={setStageRef}
-          data-player-stage
-          onMouseMove={revealControls}
-          onMouseLeave={() => {
-            if (usePlayerStore.getState().playback.playing) {
-              setControlsVisible(false)
-            }
-          }}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={onDrop}
-          onDoubleClick={commands.toggleFullscreen}
-          style={{
-            position: 'relative',
-            width: '100%',
-            height: '100%',
-            overflow: 'hidden',
-            background: '#000',
-            cursor: overlaysVisible ? 'default' : 'none',
-          }}
-        >
-          {/** biome-ignore lint/a11y/useMediaCaption: danmaku overlay player, no caption track */}
-          <video
-            ref={setVideoRef}
-            crossOrigin="anonymous"
-            playsInline
-            onClick={commands.togglePlay}
+      <ThemeProvider theme={themeWithPortal}>
+        <FullscreenPortalContext.Provider value={stageEl}>
+          <div
+            ref={setStageRef}
+            data-player-stage
+            onMouseMove={revealControls}
+            onMouseLeave={() => {
+              if (usePlayerStore.getState().playback.playing) {
+                setControlsVisible(false)
+              }
+            }}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={onDrop}
+            onDoubleClick={commands.toggleFullscreen}
             style={{
-              position: 'absolute',
-              inset: 0,
+              position: 'relative',
               width: '100%',
               height: '100%',
-              objectFit: 'contain',
-              background: '#000',
-              zIndex: 0,
-            }}
-          />
-          {/* upscale <canvas> is injected here (zIndex 1) by UpscaleController */}
-          <div
-            ref={danmakuLayerRef}
-            style={{
-              position: 'absolute',
-              inset: 0,
-              zIndex: 2,
-              pointerEvents: 'none',
               overflow: 'hidden',
+              background: '#000',
+              cursor: overlaysVisible ? 'default' : 'none',
             }}
-          />
+          >
+            {/** biome-ignore lint/a11y/useMediaCaption: danmaku overlay player, no caption track */}
+            <video
+              ref={setVideoRef}
+              crossOrigin="anonymous"
+              playsInline
+              onClick={commands.togglePlay}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                background: '#000',
+                zIndex: 0,
+              }}
+            />
+            {/* upscale <canvas> is injected here (zIndex 1) by UpscaleController */}
+            <div
+              ref={danmakuLayerRef}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: 2,
+                pointerEvents: 'none',
+                overflow: 'hidden',
+              }}
+            />
 
-          {!media && <EmptyState />}
+            {!media && <EmptyState />}
 
-          <Osd />
-          <TopBar visible={overlaysVisible} />
-          <Controls visible={overlaysVisible} />
-        </div>
+            {mediaError && (
+              <Alert
+                severity="error"
+                variant="filled"
+                onClose={() => usePlayerStore.getState().setMediaError(null)}
+                sx={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 6,
+                  maxWidth: 'min(560px, 88%)',
+                }}
+              >
+                {mediaError}
+                {media?.path ? (
+                  <Box
+                    component="div"
+                    sx={{
+                      mt: 0.5,
+                      fontSize: 12,
+                      opacity: 0.85,
+                      wordBreak: 'break-all',
+                    }}
+                  >
+                    {media.path}
+                  </Box>
+                ) : null}
+              </Alert>
+            )}
 
-        <SettingsDrawer />
-        <PlaylistDrawer />
-        <DanmakuSourceDialog />
-      </FullscreenPortalContext.Provider>
+            <Osd />
+            <TopBar visible={overlaysVisible} />
+            <Controls visible={overlaysVisible} />
+          </div>
+
+          <SettingsDrawer />
+          <PlaylistDrawer />
+          <DanmakuSourceDialog />
+        </FullscreenPortalContext.Provider>
+      </ThemeProvider>
     </PlayerCommandsContext.Provider>
   )
 }

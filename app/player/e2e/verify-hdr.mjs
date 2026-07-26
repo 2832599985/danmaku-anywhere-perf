@@ -101,6 +101,18 @@ check(
   sup.canvasVisible === false && sup.videoOpacity !== '0',
   JSON.stringify(sup)
 )
+// The reported status must match reality — it used to keep claiming
+// "active" because the HDR path tore the renderer down without notifying.
+const suppressedStatus = await page.evaluate(() => {
+  const s = window.__player.store.getState()
+  return { upscale: s.upscaleStatus, interpolation: s.interpolationStatus }
+})
+check(
+  'status reports suppressed on HDR',
+  suppressedStatus.upscale !== 'active' &&
+    suppressedStatus.interpolation !== 'active',
+  JSON.stringify(suppressedStatus)
+)
 
 // --- 4. switching back to SDR resumes upscale (setting was kept on) ---
 await openAndSettle(SDR)
