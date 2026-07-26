@@ -23,6 +23,7 @@ import type {
 import { DanmakuSourceType } from '@/common/danmaku/enums'
 import { DanmakuAnywhereDb } from '@/common/db/db'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
+import { SeasonMap } from '@/common/seasonMap/SeasonMap'
 import type { DbEntity } from '@/common/types/dbEntity'
 import { tryCatch } from '@/common/utils/tryCatch'
 import { invariant, isServiceWorker } from '@/common/utils/utils'
@@ -481,6 +482,8 @@ export class DanmakuService {
       'rw',
       this.db.episode,
       this.db.season,
+      this.db.seasonMap,
+      this.db.bookmark,
       async () => {
         // Collect seasonIds of episodes about to be deleted
         const affectedSeasonIds = new Set<number>()
@@ -509,6 +512,32 @@ export class DanmakuService {
 
           if (orphanSeasonIds.length > 0) {
             await this.db.season.bulkDelete(orphanSeasonIds)
+
+            /**
+             * Drop the references too, mirroring SeasonService.delete.
+             * Without this a purge leaves seasonMap entries pointing at
+             * deleted seasons (so automatic matching keeps resolving to a
+             * season that is gone) and bookmark rows holding a dangling
+             * unique seasonId.
+             */
+            await this.db.bookmark
+              .where('seasonId')
+              .anyOf(orphanSeasonIds)
+              .delete()
+
+            for (const seasonId of orphanSeasonIds) {
+              await this.db.seasonMap
+                .where('seasonIds')
+                .equals(seasonId)
+                .modify((val) => {
+                  const updated =
+                    SeasonMap.fromSnapshot(val).withoutSeasonId(seasonId)
+                  const snapshot = updated.toSnapshot()
+                  val.seasonIds = snapshot.seasonIds
+                  val.seasons = snapshot.seasons
+                })
+            }
+
             this.logger.log(
               `Cleaned up ${orphanSeasonIds.length} orphan seasons`
             )

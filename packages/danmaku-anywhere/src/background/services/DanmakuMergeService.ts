@@ -9,6 +9,7 @@ import { SeasonService } from '@/background/services/persistence/SeasonService'
 import type { DanmakuSourceType } from '@/common/danmaku/enums'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import { ProviderConfigService } from '@/common/options/providerConfig/service'
+import { dedupeComments } from '@/common/utils/utils'
 import {
   DanmakuProviderFactory,
   type IDanmakuProviderFactory,
@@ -191,11 +192,19 @@ export class DanmakuMergeService {
         continue
       }
 
-      allComments.push(...value.comments)
+      /**
+       * Dedupe within the source before merging. Scoping the key by
+       * providerConfigId keeps each provider's `cid` numbering in its own
+       * namespace — cids collide freely across providers, so an unscoped key
+       * would let one provider's comment mask an unrelated one from another.
+       */
+      const comments = dedupeComments(value.comments, value.providerConfigId)
+
+      allComments.push(...comments)
       sources.push({
         provider: value.provider,
         providerConfigId: value.providerConfigId,
-        commentCount: value.comments.length,
+        commentCount: comments.length,
       })
     }
 

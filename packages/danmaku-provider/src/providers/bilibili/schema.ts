@@ -90,12 +90,65 @@ export type BilibiliBangumiInfo = NonNullable<
   z.infer<typeof zBilibiliBangumiInfoResponse>['result']
 >
 
+interface LongLike {
+  low: number
+  high: number
+  unsigned?: boolean
+}
+
+const isLongLike = (value: unknown): value is LongLike => {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Partial<LongLike>
+  return typeof candidate.low === 'number' && typeof candidate.high === 'number'
+}
+
+// A `Long` stores an int64 as two 32 bit halves, reassemble it exactly.
+// Going through `Number` here would be lossy for real dmids.
+const longLikeToBigInt = ({ low, high, unsigned }: LongLike) => {
+  const highBits = unsigned ? BigInt(high >>> 0) : BigInt(high | 0)
+  return (highBits << 32n) | BigInt(low >>> 0)
+}
+
+/**
+ * `DmSegMobileReply.decode()` returns the int64 `id` as a protobufjs `Long`
+ * ({low, high, unsigned}), or as a plain number when the long shim is absent,
+ * never as a JS bigint. Normalize every shape it may produce to the exact
+ * decimal string. Unrecognized shapes yield undefined instead of failing the
+ * whole parse, the id is only used for deduplication.
+ */
+const normalizeDanmakuId = (value: unknown): string | undefined => {
+  if (typeof value === 'bigint') return value.toString()
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) ? value.toString() : undefined
+  }
+  if (typeof value === 'string') {
+    return /^-?\d+$/.test(value) ? value : undefined
+  }
+  if (isLongLike(value)) return longLikeToBigInt(value).toString()
+  return undefined
+}
+
+/**
+ * `CommentEntity.cid` is a number, so only ids that survive the conversion
+ * exactly may be emitted. Real dmids like 1259181282681056512 are orders of
+ * magnitude above Number.MAX_SAFE_INTEGER and `Number()` would collapse
+ * distinct ids into false duplicates. Omitting `cid` lets downstream dedup
+ * fall back to the `p+m` composite key, which is correct.
+ * `0` is the protobuf default for an absent field, treat it as no id.
+ */
+const toSafeCid = (id: string | undefined): number | undefined => {
+  if (id === undefined || id === '0') return undefined
+  const cid = Number(id)
+  return Number.isSafeInteger(cid) ? cid : undefined
+}
+
 export const zBilibiliCommentProto = z.object({
   elems: z
     .array(
       z
         .object({
-          id: z.bigint().optional(), // 弹幕唯一ID (dmid)
+          // 弹幕唯一ID (dmid)
+          id: z.unknown().transform(normalizeDanmakuId),
           progress: z.int(), // time in milliseconds
           mode: z.int().transform((mode) => {
             switch (mode) {
@@ -121,12 +174,16 @@ export const zBilibiliCommentProto = z.object({
           // discard other modes
           if (data.mode === null) return null
 
-          return {
+          const comment = {
             p: `${data.progress / 1000},${data.mode},${data.color}`,
             m: data.content,
-            // 保留弹幕ID用于去重 (bigint -> number，B站弹幕ID在安全范围内)
-            cid: data.id !== undefined ? Number(data.id) : undefined,
           }
+
+          // 保留弹幕ID用于去重，超出安全整数范围时省略
+          const cid = toSafeCid(data.id)
+          if (cid === undefined) return comment
+
+          return { ...comment, cid }
         })
     )
     .transform((elems) => elems.filter((elem) => elem !== null)),

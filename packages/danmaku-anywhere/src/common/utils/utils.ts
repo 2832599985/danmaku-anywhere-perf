@@ -199,30 +199,54 @@ export const concatArr = <T>(a: T[], b: T[]): T[] => {
 }
 
 /**
+ * Composite key built from the comment payload alone.
+ * Safe to compare across providers, since it carries no provider-local ids.
+ */
+const compositeCommentKey = (comment: { p: string; m: string }): string => {
+  return `pt:${comment.p}|${comment.m}`
+}
+
+/**
  * Build a stable dedup key for a comment.
  * Prefer `cid` when available, fallback to `p+m` composite key.
+ *
+ * `cid` is only unique *within* one provider — DanDanPlay comment ids,
+ * Bilibili dmids and Tencent barrage ids are separate numbering schemes that
+ * overlap freely. Pass `source` (a provider config id, or any per-source
+ * discriminator) whenever comments from more than one provider can land in the
+ * same key space, or two unrelated comments that happen to share a numeric id
+ * will be treated as duplicates and one of them silently dropped.
  */
-export const commentKey = (comment: {
-  cid?: number
-  p: string
-  m: string
-}): string => {
-  return comment.cid !== undefined
+export const commentKey = (
+  comment: {
+    cid?: number
+    p: string
+    m: string
+  },
+  source?: string
+): string => {
+  if (comment.cid === undefined) {
+    return compositeCommentKey(comment)
+  }
+  return source === undefined
     ? `cid:${comment.cid}`
-    : `pt:${comment.p}|${comment.m}`
+    : `cid:${source}:${comment.cid}`
 }
 
 /**
  * 弹幕去重：优先使用 cid，fallback 到 content+time 组合
+ *
+ * Pass `source` when the input can mix providers; see {@link commentKey}.
  */
 export const dedupeComments = <
   T extends { cid?: number; p: string; m: string },
 >(
-  comments: T[]
+  comments: T[],
+  source?: string
 ): T[] => {
   const seen = new Set<string>()
   return comments.filter((comment) => {
-    const key = commentKey(comment)
+    const key = commentKey(comment, source)
 
     if (seen.has(key)) {
       return false
@@ -281,6 +305,12 @@ const extractTime = (p: string): number => {
  * This is a pure function suitable for unit testing.
  * Time complexity: O(n * m) where n = existing, m = incoming, but in practice
  * the inner loop is bounded by the number of comments with the same text.
+ *
+ * Identity here is always the `p+m` composite, never `cid`: this helper exists
+ * to merge *across* providers, and a cid is only unique within one provider.
+ * Keying on cid here made a DanDanPlay comment and an unrelated Bilibili
+ * comment that happened to share an id collide, dropping a real comment before
+ * the text/time comparison below ever ran.
  */
 export const fuzzyDedupeComments = <
   T extends { cid?: number; p: string; m: string },
@@ -294,7 +324,7 @@ export const fuzzyDedupeComments = <
   const result: T[] = []
 
   for (const comment of existing) {
-    const key = commentKey(comment)
+    const key = compositeCommentKey(comment)
     if (!seen.has(key)) {
       seen.add(key)
       result.push(comment)
@@ -312,7 +342,7 @@ export const fuzzyDedupeComments = <
   }
 
   for (const comment of incoming) {
-    const key = commentKey(comment)
+    const key = compositeCommentKey(comment)
     // Exact match dedup
     if (seen.has(key)) {
       continue

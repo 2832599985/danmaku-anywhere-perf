@@ -336,6 +336,7 @@ export class ExtensionOptionsService implements IStoreService {
       .version(27, {
         upgrade: (data) => {
           return produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions) return
             draft.playerOptions.autoNextEpisode ??= true
           })
         },
@@ -343,6 +344,10 @@ export class ExtensionOptionsService implements IStoreService {
       .version(28, {
         upgrade: (data) => {
           return produce<ExtensionOptions>(data, (draft) => {
+            draft.theme ??= {
+              colorMode: ColorMode.System,
+              themeId: 'neon-violet',
+            }
             draft.theme.themeId ??= 'neon-violet'
           })
         },
@@ -368,6 +373,7 @@ export class ExtensionOptionsService implements IStoreService {
       .version(31, {
         upgrade: (data) =>
           produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions) return
             draft.playerOptions.enableFullscreenInteraction = true
           }),
       })
@@ -380,6 +386,7 @@ export class ExtensionOptionsService implements IStoreService {
       .version(33, {
         upgrade: (data) =>
           produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions) return
             draft.playerOptions.enableTranslation = false
             draft.playerOptions.translationTargetLang = 'en'
           }),
@@ -387,6 +394,7 @@ export class ExtensionOptionsService implements IStoreService {
       .version(34, {
         upgrade: (data) =>
           produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions) return
             draft.playerOptions.upscale ??= {
               enabled: false,
               modeId: 'builtin-mode-a',
@@ -403,12 +411,14 @@ export class ExtensionOptionsService implements IStoreService {
       .version(35, {
         upgrade: (data) =>
           produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions?.upscale) return
             draft.playerOptions.upscale.performanceTier ??= 'balanced'
           }),
       })
       .version(36, {
         upgrade: (data) =>
           produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions?.upscale) return
             draft.playerOptions.upscale.frameInterpolation ??= {
               enabled: false,
               resolution: '720p',

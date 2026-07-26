@@ -21,6 +21,22 @@ describe('commentKey', () => {
     const comment = { cid: 0, p: '1.00,1,16777215', m: 'hello' }
     expect(commentKey(comment)).toBe('cid:0')
   })
+
+  it('should namespace the cid key by source when one is given', () => {
+    const comment = { cid: 123, p: '1.00,1,16777215', m: 'hello' }
+    expect(commentKey(comment, 'bilibili')).toBe('cid:bilibili:123')
+  })
+
+  it('should not collide across sources for the same cid', () => {
+    const ddp = { cid: 123, p: '10.00,1,16777215', m: 'from ddp' }
+    const bilibili = { cid: 123, p: '99.00,1,16777215', m: 'from bilibili' }
+    expect(commentKey(ddp, 'ddp')).not.toBe(commentKey(bilibili, 'bilibili'))
+  })
+
+  it('should ignore source when there is no cid', () => {
+    const comment = { p: '1.00,1,16777215', m: 'hello' }
+    expect(commentKey(comment, 'bilibili')).toBe('pt:1.00,1,16777215|hello')
+  })
 })
 
 describe('dedupeComments', () => {
@@ -208,5 +224,67 @@ describe('fuzzyDedupeComments', () => {
       'unique ddp comment',
       'unique bilibili comment',
     ])
+  })
+
+  it('should keep comments from different sources that share a cid', () => {
+    // cid is only unique within one provider: DanDanPlay comment ids and
+    // Bilibili dmids are separate numbering schemes that overlap freely.
+    // Keying on cid here dropped the Bilibili comment before the text/time
+    // comparison ever ran.
+    const ddp = [
+      { cid: 100, p: '10.00,1,16777215', m: 'from ddp' },
+      { cid: 101, p: '20.00,1,16777215', m: 'also from ddp' },
+    ]
+    const bilibili = [
+      { cid: 100, p: '50.00,1,16777215', m: 'unrelated bilibili comment' },
+      { cid: 101, p: '60.00,1,16777215', m: 'another bilibili comment' },
+    ]
+
+    const result = fuzzyDedupeComments(ddp, bilibili)
+
+    expect(result).toHaveLength(4)
+    expect(result.map((c) => c.m)).toEqual([
+      'from ddp',
+      'also from ddp',
+      'unrelated bilibili comment',
+      'another bilibili comment',
+    ])
+  })
+
+  it('should still fuzzy-dedupe matching text across sources with differing cids', () => {
+    const ddp = [{ cid: 1, p: '10.00,1,16777215', m: '233333' }]
+    const bilibili = [{ cid: 999, p: '10.30,1,16777215', m: '233333' }]
+
+    const result = fuzzyDedupeComments(ddp, bilibili)
+
+    expect(result).toHaveLength(1)
+    expect(result[0].m).toBe('233333')
+  })
+})
+
+describe('dedupeComments with a source namespace', () => {
+  it('should not merge same-cid comments from different sources', () => {
+    const comments = [
+      { cid: 7, p: '1.00,1,16777215', m: 'ddp comment' },
+      { cid: 7, p: '2.00,1,16777215', m: 'bilibili comment' },
+    ]
+
+    // Without a source both collapse to `cid:7`
+    expect(dedupeComments(comments)).toHaveLength(1)
+
+    // Scoped per source, each keeps its own key space
+    const perSource = [
+      ...dedupeComments([comments[0]], 'ddp'),
+      ...dedupeComments([comments[1]], 'bilibili'),
+    ]
+    expect(perSource).toHaveLength(2)
+  })
+
+  it('should still dedupe repeats within one source', () => {
+    const comments = [
+      { cid: 7, p: '1.00,1,16777215', m: 'hello' },
+      { cid: 7, p: '1.00,1,16777215', m: 'hello' },
+    ]
+    expect(dedupeComments(comments, 'ddp')).toHaveLength(1)
   })
 })

@@ -2,6 +2,7 @@ import { err, ok, type Result } from '@danmaku-anywhere/result'
 import type { ZodType, z } from 'zod'
 import type { DanmakuProviderError } from '../../exceptions/BaseError.js'
 import { HttpException } from '../../exceptions/HttpException.js'
+import { InputError } from '../../exceptions/InputError.js'
 import { ResponseParseException } from '../../exceptions/ResponseParseException.js'
 import { getApiStore } from '../../shared/store.js'
 import { tryCatch } from './tryCatch.js'
@@ -35,7 +36,8 @@ const validateRequest = <T extends FetchOptions<any>>(options: T) => {
   if (requestSchema?.body) {
     clone.body = requestSchema.body.parse(body)
   }
-  if (requestSchema?.query && query) {
+  if (requestSchema?.query) {
+    // parse even when query is undefined so schema defaults are applied
     clone.query = requestSchema.query.parse(query)
   }
 
@@ -59,7 +61,20 @@ async function defaultGetErrorMessage(res: Response) {
 export const fetchData = async <OutSchema extends ZodType>(
   options: FetchOptions<OutSchema>
 ): Promise<Result<z.output<OutSchema>, DanmakuProviderError>> => {
-  const validatedOptions = validateRequest(options)
+  let validatedOptions: FetchOptions<OutSchema>
+
+  try {
+    validatedOptions = validateRequest(options)
+  } catch (e) {
+    // request schema validation throws, it must not escape the Result boundary
+    return err(
+      new InputError(
+        `Invalid request for ${options.url}: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      )
+    )
+  }
 
   const {
     url,

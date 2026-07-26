@@ -86,6 +86,10 @@ export class SearchMatchingStrategy implements IMatchingStrategy {
     const seenIndexedIds = new Set<string>()
     const seenSeasonIds = new Set<number>()
     let firstSuccessfulProvider: ProviderConfig | undefined
+    // Which provider contributed each season, so the result can name the one
+    // that actually owns the season we pick rather than whichever provider
+    // happened to answer first.
+    const providerBySeasonId = new Map<number, ProviderConfig>()
 
     for (let i = 0; i < searchResults.length; i++) {
       const result = searchResults[i]
@@ -115,6 +119,9 @@ export class SearchMatchingStrategy implements IMatchingStrategy {
         if (!isDuplicate) {
           if (season.indexedId) seenIndexedIds.add(season.indexedId)
           if (season.id !== undefined) seenSeasonIds.add(season.id)
+          if (season.id !== undefined) {
+            providerBySeasonId.set(season.id, autoProvider)
+          }
           allSeasons.push(season as Season)
         }
       }
@@ -145,6 +152,9 @@ export class SearchMatchingStrategy implements IMatchingStrategy {
     }
 
     if (bestSeason) {
+      const bestSeasonProvider =
+        providerBySeasonId.get(bestSeason.id) ?? firstSuccessfulProvider
+
       await this.titleMappingService.add(
         SeasonMap.fromSeason(mapKey, bestSeason)
       )
@@ -167,7 +177,7 @@ export class SearchMatchingStrategy implements IMatchingStrategy {
           data,
           metadata: {
             strategy: 'search',
-            providerConfig: firstSuccessfulProvider,
+            providerConfig: bestSeasonProvider,
           },
         }
       } catch (e) {

@@ -5,8 +5,13 @@
  *   SearchMatchingStrategy.match()
  *     → danmakuProviderFactory(config)  → instance #1 → search() → fills episodeCache
  *     → episodeResolver.resolveEpisode()
- *       → danmakuProviderFactory(config)  → instance #2 → findEpisode() → cache EMPTY
- *         → getEpisodesByIndexedId() → cache miss → re-search by title → refill cache → found
+ *       → danmakuProviderFactory(config)  → instance #2 → findEpisode()
+ *         → getEpisodesByIndexedId() → cache HIT (the cache is module scoped,
+ *           so it survives the factory building a second instance)
+ *
+ * The re-search-by-title recovery still exists for the case the cache really is
+ * empty — a service worker restart — and is covered separately below by
+ * clearing the cache explicitly.
  *
  * We use REAL MacCmsProviderService instances (no mock) but mock the network layer
  * (searchMacCmsVod) so no actual HTTP calls are made.
@@ -22,7 +27,10 @@ import type { MacCmsParsedPlayUrl } from '@danmaku-anywhere/danmaku-provider/mac
 import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest'
 import type { SeasonService } from '@/background/services/persistence/SeasonService'
 import type { TitleMappingService } from '@/background/services/persistence/TitleMappingService'
-import { MacCmsProviderService } from '@/background/services/providers/MacCmsProviderService'
+import {
+  clearMacCmsEpisodeCache,
+  MacCmsProviderService,
+} from '@/background/services/providers/MacCmsProviderService'
 import type { IDanmakuProviderFactory } from '@/background/services/providers/ProviderFactory'
 import type { ProviderConfigService } from '@/common/options/providerConfig/service'
 import { EpisodeResolutionService } from '../EpisodeResolutionService'
@@ -197,6 +205,9 @@ describe('MacCMS end-to-end: 凡人修仙传 full auto-match flow', () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
+    // the episode cache is module scoped, so it would otherwise leak between tests
+    clearMacCmsEpisodeCache()
+
     instanceCounter = 0
 
     // Each call to searchMacCmsVod returns the same API response
@@ -262,12 +273,12 @@ describe('MacCMS end-to-end: 凡人修仙传 full auto-match flow', () => {
     // ProviderFactory was called TWICE: once in SearchMatchingStrategy, once in EpisodeResolutionService
     expect(instanceCounter).toBe(2)
 
-    // searchMacCmsVod was called TWICE:
-    //   1st: SearchMatchingStrategy.match() → instance#1.search()
-    //   2nd: EpisodeResolutionService → instance#2.findEpisode() → cache miss → re-search
-    expect(searchMacCmsVod).toHaveBeenCalledTimes(2)
+    // searchMacCmsVod was called ONCE. The second instance reads the episode
+    // cache filled by the first: the cache is module scoped precisely because
+    // the factory hands out a fresh instance per call, so a per-instance cache
+    // could never be read back and every resolution paid for a second search.
+    expect(searchMacCmsVod).toHaveBeenCalledTimes(1)
 
-    // Despite the cache miss, the flow should succeed
     expect(result).not.toBeNull()
     expect(result?.status).toBe('success')
 
@@ -353,25 +364,49 @@ describe('MacCMS end-to-end: 凡人修仙传 full auto-match flow', () => {
     }
   })
 
-  it('verifies that instance #2 re-search uses season.title as keyword', async () => {
+  it('searches once with the input title when the cache is warm', async () => {
     await strategy.match({
       mapKey: 'example.com::凡人修仙传',
       title: '凡人修仙传',
       episodeNumber: 1,
     })
 
-    // 1st call: SearchMatchingStrategy uses the input title
+    expect(searchMacCmsVod).toHaveBeenCalledTimes(1)
     expect(searchMacCmsVod).toHaveBeenNthCalledWith(
       1,
       'https://example.com/api',
       '凡人修仙传'
     )
+  })
 
-    // 2nd call: EpisodeResolutionService → instance#2 cache miss → re-search with season.title
+  it('re-searches by season.title when the cache was lost (worker restart)', async () => {
+    const result = await strategy.match({
+      mapKey: 'example.com::凡人修仙传',
+      title: '凡人修仙传',
+      episodeNumber: 1,
+    })
+    expect(result?.status).toBe('success')
+    expect(searchMacCmsVod).toHaveBeenCalledTimes(1)
+
+    // simulate the service worker being torn down: the cache is gone, but the
+    // season row in the database survives
+    clearMacCmsEpisodeCache()
+
+    const season = (result as { data: WithSeason<EpisodeMeta> }).data.season
+    const recovered = await new MacCmsProviderService(
+      macCmsConfig as any,
+      createMockLogger()
+    ).findEpisode(season, 1)
+
+    // the cache miss is recovered by re-searching with the season title
+    expect(searchMacCmsVod).toHaveBeenCalledTimes(2)
     expect(searchMacCmsVod).toHaveBeenNthCalledWith(
       2,
       'https://example.com/api',
       '凡人修仙传'
     )
+    expect(recovered?.providerIds).toEqual({
+      url: 'https://play.example.com/fanren/01.m3u8',
+    })
   })
 })

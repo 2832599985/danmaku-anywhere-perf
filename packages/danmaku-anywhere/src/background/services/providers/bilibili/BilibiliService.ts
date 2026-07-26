@@ -169,7 +169,7 @@ export class BilibiliService implements IDanmakuProvider {
     return this.getDanmakuInternal(meta)
   }
 
-  async preloadNextEpisode(request: DanmakuFetchRequest): Promise<void> {
+  async preloadNextEpisode(request: DanmakuFetchByMeta): Promise<void> {
     const { meta } = request
     assertProviderType(meta, DanmakuSourceType.Bilibili)
 

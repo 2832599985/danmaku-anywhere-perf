@@ -12,6 +12,7 @@ import {
   searchMacCmsVod,
 } from '@danmaku-anywhere/danmaku-provider/maccms'
 import type { DanmakuService } from '@/background/services/persistence/DanmakuService'
+import type { DanmakuFetchByMeta } from '@/common/danmaku/dto'
 import { DanmakuSourceType } from '@/common/danmaku/enums'
 import { assertProviderType } from '@/common/danmaku/utils'
 import type { ILogger } from '@/common/Logger'
@@ -25,12 +26,46 @@ import type {
   SeasonSearchParams,
 } from './IDanmakuProvider'
 
+/**
+ * Cache parsed play URLs from search results, keyed by indexedId.
+ *
+ * Module scoped rather than per-instance because DanmakuProviderFactory builds
+ * a new service for every call, so an instance field would be discarded before
+ * anything could read it. The cache still dies with the service worker, which
+ * is what the re-search recovery in getEpisodesByIndexedId is for.
+ */
+const episodeCache = new Map<string, MacCmsParsedPlayUrl[]>()
+
+const MAX_CACHED_SEASONS = 100
+
+/**
+ * Drop every cached season.
+ *
+ * In production only a service worker restart clears this cache, which tests
+ * cannot trigger — they use this to exercise the re-search recovery path.
+ */
+export const clearMacCmsEpisodeCache = (): void => {
+  episodeCache.clear()
+}
+
+const cacheEpisodes = (
+  indexedId: string,
+  playUrls: MacCmsParsedPlayUrl[]
+): void => {
+  // re-insert so the bound evicts the least recently written entry
+  episodeCache.delete(indexedId)
+  episodeCache.set(indexedId, playUrls)
+
+  while (episodeCache.size > MAX_CACHED_SEASONS) {
+    const oldest = episodeCache.keys().next()
+    if (oldest.done) break
+    episodeCache.delete(oldest.value)
+  }
+}
+
 export class MacCmsProviderService implements IDanmakuProvider {
   readonly forProvider = DanmakuSourceType.MacCMS
   private logger: ILogger
-
-  // Cache parsed play URLs from search results, keyed by indexedId
-  private episodeCache = new Map<string, MacCmsParsedPlayUrl[]>()
 
   constructor(
     private config: CustomMacCmsProvider,
@@ -60,8 +95,8 @@ export class MacCmsProviderService implements IDanmakuProvider {
     return res.data.list.map((item) => {
       const indexedId = `custom:${item.vod_id}`
 
-      // Cache parsed play URLs for getEpisodes()
-      this.episodeCache.set(indexedId, item.parsedPlayUrls)
+      // Cache parsed play URLs for getEpisodesByIndexedId()
+      cacheEpisodes(indexedId, item.parsedPlayUrls)
 
       return {
         indexedId,
@@ -81,36 +116,33 @@ export class MacCmsProviderService implements IDanmakuProvider {
     })
   }
 
+  /**
+   * MacCMS seasons are identified by `indexedId`, not by `providerIds` (which
+   * is always `{}`), so this signature carries nothing to look up. Combining
+   * every cached season here would return another show's episodes, so callers
+   * must go through getEpisodesByIndexedId — which is what ProviderService
+   * does for this provider.
+   */
   async getEpisodes(
     _providerIds: Record<string, never>
   ): Promise<OmitSeasonId<EpisodeMeta>[]> {
-    // Episodes were cached during search(). We need to find the right cache entry.
-    // Since getEpisodes is called via season (which has indexedId), we iterate all cached entries.
-    // The caller (ProviderService.fetchEpisodesBySeason) should use the indexedId-based approach instead.
-    // For now, return all cached episodes combined — caller will filter by seasonId.
-
-    // Collect from all cached entries. In practice, this is called after search().
-    const allEpisodes: OmitSeasonId<EpisodeMeta>[] = []
-
-    for (const [, playUrls] of this.episodeCache) {
-      allEpisodes.push(...this.playUrlsToEpisodes(playUrls))
-    }
-
-    return allEpisodes
+    throw new Error(
+      'MacCmsProviderService.getEpisodes cannot identify a season from providerIds; use getEpisodesByIndexedId instead'
+    )
   }
 
   async getEpisodesByIndexedId(
     indexedId: string,
     title?: string
   ): Promise<OmitSeasonId<EpisodeMeta>[]> {
-    let playUrls = this.episodeCache.get(indexedId)
+    let playUrls = episodeCache.get(indexedId)
 
     if (!playUrls && title) {
       this.logger.debug(
         `Cache miss for indexedId: ${indexedId}, re-searching with title: ${title}`
       )
       await this.search({ keyword: title })
-      playUrls = this.episodeCache.get(indexedId)
+      playUrls = episodeCache.get(indexedId)
     }
 
     if (!playUrls) {
@@ -152,7 +184,7 @@ export class MacCmsProviderService implements IDanmakuProvider {
     } as WithSeason<EpisodeMeta>
   }
 
-  async getDanmaku(request: DanmakuFetchRequest): Promise<CommentEntity[]> {
+  async getDanmaku(request: DanmakuFetchByMeta): Promise<CommentEntity[]> {
     assertProviderType(request.meta, DanmakuSourceType.MacCMS)
 
     const url = request.meta.providerIds.url
@@ -172,7 +204,7 @@ export class MacCmsProviderService implements IDanmakuProvider {
     return commentsResult.data
   }
 
-  async preloadNextEpisode(request: DanmakuFetchRequest): Promise<void> {
+  async preloadNextEpisode(request: DanmakuFetchByMeta): Promise<void> {
     assertProviderType(request.meta, DanmakuSourceType.MacCMS)
 
     const { meta } = request
@@ -301,11 +333,33 @@ export class MacCmsProviderService implements IDanmakuProvider {
     title: string,
     index: number
   ): number | undefined {
-    // Try to extract a number from the episode title (e.g., "第01集" -> 1, "EP02" -> 2)
-    const match = title.match(/\d+/)
-    if (match) {
-      return Number.parseInt(match[0])
+    const trimmed = title.trim()
+
+    /**
+     * Anchored patterns first. A bare first-digit-run would pick up years and
+     * resolutions instead of the episode ("2024版 第3集" -> 2024, "1080P 第5集"
+     * -> 1080), which breaks findEpisodeByNumber and silently kills automatic
+     * matching for sources that prefix their episode titles.
+     */
+    const anchored = [
+      /第\s*(\d+)\s*[集話话期]/, // 第01集 / 第 3 话
+      /\bEP?\s*[.\-_]?\s*(\d+)\b/i, // EP02 / E02 / ep.3
+      /^(\d+)$/, // bare "01"
+    ]
+
+    for (const pattern of anchored) {
+      const match = trimmed.match(pattern)
+      if (match) {
+        return Number.parseInt(match[1], 10)
+      }
     }
+
+    // No anchor matched, fall back to the first number anywhere in the title
+    const loose = trimmed.match(/\d+/)
+    if (loose) {
+      return Number.parseInt(loose[0], 10)
+    }
+
     // Fallback to 1-based index
     return index + 1
   }

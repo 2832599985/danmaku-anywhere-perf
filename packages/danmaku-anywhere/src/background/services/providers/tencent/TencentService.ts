@@ -188,7 +188,7 @@ export class TencentService implements IDanmakuProvider {
     return this.fetchDanmaku(meta.providerIds.vid)
   }
 
-  async preloadNextEpisode(request: DanmakuFetchRequest): Promise<void> {
+  async preloadNextEpisode(request: DanmakuFetchByMeta): Promise<void> {
     const { meta } = request
     assertProviderType(meta, DanmakuSourceType.Tencent)
 

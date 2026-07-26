@@ -105,11 +105,17 @@ export class DanmakuAnywhereDb extends Dexie {
         titleMapping: '++id, originalTitle, title, integration',
       })
       .upgrade(async (tx) => {
+        /**
+         * Read the rows up front instead of using each(): Dexie discards the
+         * return value of an each() callback, so an async callback would let
+         * the upgrade resolve while its inserts were still in flight.
+         */
         // Merge danmakuCache to danmaku
-        await tx.table('danmakuCache').each(async (item) => {
+        const danmakuCacheRows = await tx.table('danmakuCache').toArray()
+        for (const item of danmakuCacheRows) {
           // Skip items without episodeTitle, they are invalid under the new schema
           // This can happen in an early implementation of "automatically getting the next episode" where we did not fetch the episode title
-          if (!item.meta.episodeTitle) return
+          if (!item.meta.episodeTitle) continue
 
           await tx.table('danmaku').add({
             provider: 1,
@@ -130,10 +136,11 @@ export class DanmakuAnywhereDb extends Dexie {
             episodeTitle: item.meta.episodeTitle,
             seasonTitle: item.meta.animeTitle,
           })
-        })
+        }
 
         // Merge manualDanmakuCache to danmaku
-        await tx.table('manualDanmakuCache').each(async (item) => {
+        const manualRows = await tx.table('manualDanmakuCache').toArray()
+        for (const item of manualRows) {
           await tx.table('danmaku').add({
             provider: 0,
             meta: {
@@ -154,7 +161,7 @@ export class DanmakuAnywhereDb extends Dexie {
               item.meta.episodeTitle ?? item.meta.episodeNumber?.toString(),
             seasonTitle: item.meta.animeTitle,
           })
-        })
+        }
       })
 
     // This version migrates number enum to string enum
@@ -222,7 +229,14 @@ export class DanmakuAnywhereDb extends Dexie {
         seasonMap: 'key',
       })
       .upgrade(async (tx) => {
-        await tx.table('danmaku').each(async (item: DanmakuV3) => {
+        /**
+         * Read the rows up front instead of using each(): Dexie discards the
+         * return value of an each() callback, so an async callback would let
+         * the upgrade resolve while its writes were still in flight.
+         */
+        const danmakuRows: DanmakuV3[] = await tx.table('danmaku').toArray()
+
+        for (const item of danmakuRows) {
           /**
            * 1. move custom danmaku to a separate table
            * Legacy data from migration v8 uses 'Custom' string instead of enum
@@ -237,7 +251,7 @@ export class DanmakuAnywhereDb extends Dexie {
                   >[0]
                 )
               )
-            return
+            continue
           }
 
           /**
@@ -288,7 +302,7 @@ export class DanmakuAnywhereDb extends Dexie {
            */
           if (seasonId === undefined) {
             console.error('skipped danmaku during migration', item)
-            return
+            continue
           }
 
           const episode: WithoutId<EpisodeV4> = {
@@ -299,9 +313,18 @@ export class DanmakuAnywhereDb extends Dexie {
 
           /**
            * 3. with the season id, move the danmaku to a separate episode table
+           *
+           * Awaited and caught like the season insert above: an unhandled
+           * rejection here would abort the whole transaction, and Dexie would
+           * retry the same failing upgrade on every open, leaving the database
+           * permanently unopenable. Skip the bad row instead.
            */
-          tx.table('episode').add(episode)
-        })
+          try {
+            await tx.table('episode').add(episode)
+          } catch (error) {
+            console.error('skipped episode during migration', item, error)
+          }
+        }
       })
 
     /**

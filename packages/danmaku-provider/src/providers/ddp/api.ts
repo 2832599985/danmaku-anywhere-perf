@@ -80,8 +80,18 @@ const fetchDanDanPlay = async <T extends ZodType>(
 
   // parse query early
   if (options.requestSchema?.query) {
-    const parsedQuery = options.requestSchema.query.parse(options.query)
-    options.query = parsedQuery
+    try {
+      options.query = options.requestSchema.query.parse(options.query)
+    } catch (e) {
+      // schema validation throws, it must not escape the Result boundary
+      return err(
+        new InputError(
+          `Invalid request for ${options.path}: ${
+            e instanceof Error ? e.message : String(e)
+          }`
+        )
+      )
+    }
   }
   // append query to path
   let path = options.path

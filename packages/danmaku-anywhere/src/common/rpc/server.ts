@@ -78,7 +78,14 @@ class RpcServer<TRecords extends RPCRecord> {
     return method in this.handlers
   }
 
-  private async onMessage(
+  /**
+   * Dispatch a payload to its handler and resolve to an RPCResponse.
+   *
+   * Public because callers that own their own listener — the
+   * onMessageExternal whitelist in RpcManager — need to gate the message
+   * before dispatching it, instead of going through `listen()`.
+   */
+  async onMessage(
     message: RPCPayload<unknown>,
     sender: chrome.runtime.MessageSender
   ): Promise<RPCResponse<unknown>> {
