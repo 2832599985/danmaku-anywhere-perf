@@ -38,6 +38,7 @@ export class AutoOffsetService {
   private calibrated = false
   private lastResult: AutoOffsetResult | null = null
   private onResultCallbacks: AutoOffsetCallback[] = []
+  private calibrationTimer: number | null = null
 
   constructor(
     @inject(VideoSkipService)
@@ -78,6 +79,7 @@ export class AutoOffsetService {
     this.comments = []
     this.calibrated = false
     this.lastResult = null
+    this.clearCalibrationTimer()
     this.notifyCallbacks(null)
   }
 
@@ -108,9 +110,18 @@ export class AutoOffsetService {
 
   private scheduleCalibration() {
     // Wait a tick for VideoSkipService to finish parsing targets
-    window.setTimeout(() => {
+    this.clearCalibrationTimer()
+    this.calibrationTimer = window.setTimeout(() => {
+      this.calibrationTimer = null
       this.doCalibrate()
     }, 500)
+  }
+
+  private clearCalibrationTimer() {
+    if (this.calibrationTimer !== null) {
+      window.clearTimeout(this.calibrationTimer)
+      this.calibrationTimer = null
+    }
   }
 
   private doCalibrate(): AutoOffsetResult | null {

@@ -179,10 +179,7 @@ export class VideoSkipService {
 
   debugShowSkipButton() {
     this.logger.debug('Showing debug skip button')
-    if (this.activeButton) {
-      this.activeButton.root.unmount()
-      this.activeButton = null
-    }
+    this.removeSkipButton()
     const time = this.currentVideo?.currentTime ?? 120
     const target = new SkipTarget({
       startTime: time,

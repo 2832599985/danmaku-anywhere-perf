@@ -176,6 +176,11 @@ export class VideoEventService {
 
   private handleVideoRemoved(video: HTMLVideoElement) {
     this.removeListeners(video)
+    // Drop the reference too, otherwise getVideoElement() keeps handing out a
+    // detached element and addVideoEventListener binds to a dead node.
+    if (this.activeVideoElement === video) {
+      this.activeVideoElement = null
+    }
   }
 
   public cleanup() {

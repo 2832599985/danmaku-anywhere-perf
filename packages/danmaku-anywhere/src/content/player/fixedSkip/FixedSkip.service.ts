@@ -59,8 +59,13 @@ export class FixedSkipService {
   }
 
   setOptions(opts: { fixedSkipSeconds: number }) {
-    this.fixedSkipSeconds = opts.fixedSkipSeconds ?? 90
-    if (this.enabled && !this.isDismissed) {
+    const seconds = opts.fixedSkipSeconds ?? 90
+    if (seconds === this.fixedSkipSeconds) return
+    this.fixedSkipSeconds = seconds
+    // Only refresh a button that is already on screen — this runs on every
+    // extension-options write, so rendering unconditionally would flash the
+    // button back mid-playback after an unrelated setting changed.
+    if (this.enabled && !this.isDismissed && this.activeButton) {
       this.renderButton()
     }
   }

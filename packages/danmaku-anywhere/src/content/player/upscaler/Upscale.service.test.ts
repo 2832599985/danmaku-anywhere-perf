@@ -82,9 +82,21 @@ const createStoredOptions = (
 })
 
 const createServiceHarness = (video: HTMLVideoElement) => {
+  const listeners = new Map<string, ((video: HTMLVideoElement) => void)[]>()
   const videoObserver = {
-    activeVideo: video,
-    addEventListener: vi.fn(),
+    activeVideo: video as HTMLVideoElement | null,
+    addEventListener: vi.fn(
+      (event: string, listener: (video: HTMLVideoElement) => void) => {
+        const existing = listeners.get(event) ?? []
+        existing.push(listener)
+        listeners.set(event, existing)
+      }
+    ),
+  }
+  const emit = (event: string, target: HTMLVideoElement) => {
+    for (const listener of listeners.get(event) ?? []) {
+      listener(target)
+    }
   }
   const extensionOptions = {
     get: vi.fn().mockResolvedValue({
@@ -105,7 +117,7 @@ const createServiceHarness = (video: HTMLVideoElement) => {
     extensionOptions as never,
     logger as never
   )
-  return { service, extensionOptions }
+  return { service, extensionOptions, videoObserver, emit }
 }
 
 const createService = (video: HTMLVideoElement) =>
@@ -262,6 +274,87 @@ describe('UpscaleService operation coordination', () => {
     expect(renderer.destroy).toHaveBeenCalledTimes(1)
   })
 
+  it('re-enables for the video that replaces a removed one', async () => {
+    const video = createVideo()
+    const renderer = {
+      destroy: vi.fn(),
+      handleSourceResize: vi.fn(),
+      updateConfiguration: vi.fn(),
+    }
+    mocks.rendererCreate.mockResolvedValue(renderer)
+    const { service, videoObserver, emit } = createServiceHarness(video)
+
+    await service.applyOptions(createStoredOptions())
+    expect(mocks.rendererCreate).toHaveBeenCalledTimes(1)
+
+    // The site tears its player down: the observer reports the removal with no
+    // replacement yet, which shuts the renderer off.
+    videoObserver.activeVideo = null
+    emit('videoNodeRemove', video)
+    expect(service.isEnabled).toBe(false)
+
+    // ...and then mounts a fresh element. The user never turned upscaling off,
+    // so it has to come back on its own.
+    const nextVideo = createVideo()
+    videoObserver.activeVideo = nextVideo
+    emit('videoNodeChange', nextVideo)
+
+    await vi.waitFor(() => {
+      expect(mocks.rendererCreate).toHaveBeenCalledTimes(2)
+    })
+    expect(service.isEnabled).toBe(true)
+  })
+
+  it('stays off after a video swap when the user disabled upscaling', async () => {
+    const video = createVideo()
+    const renderer = {
+      destroy: vi.fn(),
+      handleSourceResize: vi.fn(),
+      updateConfiguration: vi.fn(),
+    }
+    mocks.rendererCreate.mockResolvedValue(renderer)
+    const { service, videoObserver, emit } = createServiceHarness(video)
+
+    await service.applyOptions(createStoredOptions())
+    await service.applyOptions(createStoredOptions({ enabled: false }))
+    expect(service.isEnabled).toBe(false)
+
+    const nextVideo = createVideo()
+    videoObserver.activeVideo = nextVideo
+    emit('videoNodeChange', nextVideo)
+
+    await Promise.resolve()
+    expect(mocks.rendererCreate).toHaveBeenCalledTimes(1)
+    expect(service.isEnabled).toBe(false)
+  })
+
+  it('ignores a stale enable failure instead of killing the newer session', async () => {
+    const video = createVideo()
+    const renderer = {
+      destroy: vi.fn(),
+      handleSourceResize: vi.fn(),
+      updateConfiguration: vi.fn(),
+    }
+    mocks.rendererCreate.mockResolvedValue(renderer)
+    const stale = createDeferred<void>()
+    mocks.waitForVideoReady
+      .mockImplementationOnce(() => stale.promise)
+      .mockResolvedValue(undefined)
+    const service = createService(video)
+
+    const older = service.applyOptions(createStoredOptions())
+    await service.applyOptions(
+      createStoredOptions({ modeId: 'builtin-mode-b' })
+    )
+    expect(service.isEnabled).toBe(true)
+
+    stale.reject(new Error('metadata never arrived'))
+
+    await expect(older).resolves.toBeUndefined()
+    expect(service.isEnabled).toBe(true)
+    expect(renderer.destroy).not.toHaveBeenCalled()
+  })
+
   it('records option changes while suspended and initializes only on resume', async () => {
     const video = createVideo()
     const renderer = {
@@ -345,6 +438,33 @@ describe('UpscaleService operation coordination', () => {
       await enableWithCorsFix(service, video)
 
       service.suspend()
+
+      expect(video.crossOrigin).toBe('anonymous')
+      expect(mocks.upscaleRemoveCorsRule).not.toHaveBeenCalled()
+    })
+
+    it('keeps the CORS fix when options change while suspended', async () => {
+      const video = createVideo()
+      video.src = 'https://cdn.example.com/video.mp4'
+      const renderer = {
+        destroy: vi.fn(),
+        handleSourceResize: vi.fn(),
+        updateConfiguration: vi.fn(),
+      }
+      mocks.rendererCreate.mockResolvedValue(renderer)
+      const service = createService(video)
+
+      await enableWithCorsFix(service, video)
+      service.suspend()
+
+      // The video keeps streaming in the PiP window, so an option write here
+      // must not pull the crossOrigin attribute or the DNR rule out from it.
+      await service.applyOptions(
+        createStoredOptions({
+          enableCrossOriginFix: true,
+          modeId: 'builtin-mode-b',
+        })
+      )
 
       expect(video.crossOrigin).toBe('anonymous')
       expect(mocks.upscaleRemoveCorsRule).not.toHaveBeenCalled()

@@ -60,6 +60,7 @@ export class PlayerCommandHandler {
   private urlChangeCheckInterval: ReturnType<typeof setInterval> | undefined
   private urlChangeCleanups: (() => void)[] = []
   private lastUrl = ''
+  private started = false
   private sendPlayerReady: () => void = () => {
     // no-op, replace in start()
   }
@@ -87,6 +88,18 @@ export class PlayerCommandHandler {
    * Initialize DOM, wire events, create the full RPC server, and start video detection.
    */
   async start(ctx: StartContext) {
+    // The bootstrap keeps its lite server listening until this resolves, and
+    // setupDom() can wait a long time for document.body. A second `start`
+    // arriving in that window must not build a second popover root, a second
+    // RPC server, and a duplicate set of window listeners.
+    // The in-flight first call ends with manager.start(), so nothing is lost
+    // by returning here; starting the manager early would race the lifecycle
+    // wiring and drop the first videoNodeChange relay.
+    if (this.started) {
+      this.logger.debug('Already started, ignoring duplicate start')
+      return
+    }
+    this.started = true
     this.frameId = ctx.frameId
     this.sendPlayerReady = ctx.sendPlayerReady
 

@@ -32,6 +32,12 @@ export class VideoSrcObserver {
 
   public observe(videoNode: HTMLVideoElement) {
     this.observer.disconnect()
+    // Detach the previous element's listeners before rebinding, or every video
+    // swap leaks a pair of listeners on the element we no longer observe.
+    if (this.eventListenerCleanup) {
+      this.eventListenerCleanup()
+      this.eventListenerCleanup = null
+    }
     this.currentSrc = videoNode.src
     this.videoNode = videoNode
 
@@ -43,6 +49,9 @@ export class VideoSrcObserver {
 
     // Event listeners for MSE/srcObject changes that don't modify the src attribute
     const handleSourceChange = () => {
+      // A late event from an element we have since stopped observing must not
+      // be reported as a source change on the current one.
+      if (this.videoNode !== videoNode) return
       this.checkSourceChange()
     }
 

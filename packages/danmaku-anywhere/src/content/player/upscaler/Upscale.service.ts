@@ -122,7 +122,10 @@ export class UpscaleService {
   ) {
     this.logger = logger.sub('[UpscaleService]')
     this.videoObserver.addEventListener('videoNodeChange', (video) => {
-      if (!this.options.enabled) return
+      // Gate on the user's stored intent, not the live state: a preceding
+      // videoNodeRemove clears options.enabled, so keying off it would leave
+      // upscaling dead for every replacement video until the user re-toggles.
+      if (!this.requestedOptions.enabled) return
       if (this.video === video && this.renderer) {
         void this.renderer.handleSourceResize().catch(() => this.disable())
         return
@@ -389,7 +392,9 @@ export class UpscaleService {
   async applyOptions(options: StoredUpscaleOptions) {
     this.requestedOptions = options
     if (this.suspended) {
-      this.disable()
+      // Same reasoning as suspend(): the video keeps streaming while
+      // suspended, so the crossOrigin attribute and the DNR rule must survive.
+      this.disable({ keepCorsFix: true })
       return
     }
     if (!options.enabled) {
@@ -456,9 +461,11 @@ export class UpscaleService {
         },
       })
     } catch (error) {
-      // A newer operation superseded this attempt while it was in flight —
-      // its outcome is the one that matters, so stay silent here.
-      if (epoch !== this.opEpoch) throw error
+      // A newer operation superseded this attempt while it was in flight — its
+      // outcome is the one that matters. Swallow the stale failure instead of
+      // rethrowing: callers recover by disabling, which would tear down the
+      // newer session that has already succeeded.
+      if (epoch !== this.opEpoch) return
       // Clean up the half-built state (orphan canvas, CORS rule) and make
       // the failure visible: without this the panel toggle stays on while
       // nothing renders, which reads as "upscaling has no effect".
@@ -634,13 +641,22 @@ export class UpscaleService {
     } catch {
       // notifier failures must not break the shutdown path
     }
-    const options = await this.extensionOptions.get()
-    if (!options.playerOptions.upscale.enabled) return
-    await this.extensionOptions.update({
-      playerOptions: {
-        ...options.playerOptions,
-        upscale: { ...options.playerOptions.upscale, enabled: false },
-      },
-    })
+    try {
+      const options = await this.extensionOptions.get()
+      if (!options.playerOptions.upscale.enabled) return
+      await this.extensionOptions.update({
+        playerOptions: {
+          ...options.playerOptions,
+          upscale: { ...options.playerOptions.upscale, enabled: false },
+        },
+      })
+    } catch (updateError) {
+      // This runs from the renderer's error callback, so an unhandled
+      // rejection here would surface as a bare console error.
+      this.logger.warn(
+        'Failed to reset upscale option after a runtime error',
+        updateError
+      )
+    }
   }
 }

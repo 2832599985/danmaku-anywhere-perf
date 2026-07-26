@@ -403,10 +403,13 @@ export class DanmakuDensityChart {
 
     // Move progress indicator line
     if (this.progressLine) {
-      this.progressLine
-        .attr('x1', clipWidth)
-        .attr('x2', clipWidth)
-        .style('display', clipWidth > 0 ? null : 'none')
+      this.progressLine.attr('x1', clipWidth).attr('x2', clipWidth)
+      // Split branches: the string|null union defeats d3's style() overloads
+      if (clipWidth > 0) {
+        this.progressLine.style('display', null)
+      } else {
+        this.progressLine.style('display', 'none')
+      }
     }
   }
 

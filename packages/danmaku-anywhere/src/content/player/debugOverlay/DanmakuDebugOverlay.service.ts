@@ -65,12 +65,17 @@ export class DanmakuDebugOverlayService {
 
     this.layoutManager.wrapper.appendChild(stats)
 
+    const rows = (['All', 'Stash', 'View'] as const).map((label) => {
+      const row = document.createElement('div')
+      stats.appendChild(row)
+      return { label, row }
+    })
+
     const updateDebugStats = (all: number, stash: number, view: number) => {
-      stats.innerHTML = `
-      <div>All: ${all}</div>
-      <div>Stash: ${stash}</div>
-      <div>View: ${view}</div>
-    `
+      const values = { All: all, Stash: stash, View: view }
+      for (const { label, row } of rows) {
+        row.textContent = `${label}: ${values[label]}`
+      }
     }
 
     const update = () => {
