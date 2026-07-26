@@ -10,6 +10,7 @@ import {
   DEFAULT_UPSCALE,
   type PlaybackSettings,
   type UpscaleSettings,
+  type UpscaleSettingsPatch,
 } from './settings'
 
 export type UpscaleStatus = 'idle' | 'initializing' | 'active' | 'error'
@@ -20,6 +21,16 @@ export interface PlaylistItem {
   url: string
   name: string
   path?: string
+}
+
+/** Persisted resume point for a local file (keyed by absolute path). */
+export interface ResumeEntry {
+  /** last playback position in seconds. */
+  time: number
+  /** media duration in seconds (to compute near-end and show progress). */
+  duration: number
+  /** epoch ms of the last write (for future pruning). */
+  updatedAt: number
 }
 
 /** Live playback state mirrored from the <video> element (not persisted). */
@@ -91,6 +102,9 @@ export interface PlayerStore {
   playlistIndex: number
   playlistOpen: boolean
 
+  // --- resume history (persisted, keyed by absolute file path) ---
+  progress: Record<string, ResumeEntry>
+
   // --- persisted settings ---
   upscale: UpscaleSettings
   danmakuSettings: DanmakuSettings
@@ -113,21 +127,40 @@ export interface PlayerStore {
   setSettingsOpen: (open: boolean) => void
   setDanmakuDialogOpen: (open: boolean) => void
 
-  updateUpscale: (partial: Partial<UpscaleSettings>) => void
+  updateUpscale: (partial: UpscaleSettingsPatch) => void
   updateDanmakuSettings: (partial: Partial<DanmakuSettings>) => void
   updatePlaybackSettings: (partial: Partial<PlaybackSettings>) => void
   toggleDanmakuVisible: () => void
 
   // --- playlist actions ---
   setPlaylist: (items: PlaylistItem[], startIndex?: number) => void
+  /**
+   * Open media by ADDING it to the (persistent) playlist rather than replacing
+   * it, so the list acts as a running history that survives restarts. Items
+   * already present (by path, or url for blobs) are not duplicated; the first
+   * opened item becomes the current one and starts playing.
+   */
+  openMedia: (items: PlaylistItem[]) => void
   appendToPlaylist: (items: PlaylistItem[]) => void
   playPlaylistIndex: (index: number) => void
   removePlaylistIndex: (index: number) => void
   clearPlaylist: () => void
   setPlaylistOpen: (open: boolean) => void
+
+  // --- resume actions ---
+  /** record/refresh the resume point for a local file. */
+  saveProgress: (path: string, time: number, duration: number) => void
+  /** forget the resume point for a local file (e.g. watched to the end). */
+  clearProgress: (path: string) => void
 }
 
 let osdSeq = 0
+
+/** Upper bound on the persisted history playlist (oldest entries are dropped). */
+const PLAYLIST_MAX = 200
+
+/** Dedup key for a playlist item: absolute path when local, else the url. */
+const playlistKey = (item: PlaylistItem): string => item.path ?? item.url
 
 /**
  * Clamp a number between min and max (inclusive).
@@ -174,6 +207,8 @@ export const usePlayerStore = create<PlayerStore>()(
       playlist: [],
       playlistIndex: -1,
       playlistOpen: false,
+
+      progress: {},
 
       upscale: DEFAULT_UPSCALE,
       danmakuSettings: DEFAULT_DANMAKU,
@@ -290,17 +325,57 @@ export const usePlayerStore = create<PlayerStore>()(
           }
         }),
 
+      openMedia: (items) =>
+        set((s) => {
+          if (items.length === 0) return
+          // Append any not-already-present items (history semantics), dedup by key.
+          const keys = new Set(s.playlist.map(playlistKey))
+          for (const item of items) {
+            const key = playlistKey(item)
+            if (!keys.has(key)) {
+              s.playlist.push(item)
+              keys.add(key)
+            }
+          }
+          const firstKey = playlistKey(items[0])
+          let idx = s.playlist.findIndex((i) => playlistKey(i) === firstKey)
+          // Cap the history, keeping the active item and everything after it.
+          const over = s.playlist.length - PLAYLIST_MAX
+          if (over > 0) {
+            const trim = Math.min(over, idx)
+            if (trim > 0) {
+              s.playlist.splice(0, trim)
+              idx -= trim
+            }
+          }
+          s.playlistIndex = idx
+          // Fresh object reference so re-opening the current file still re-runs
+          // the load + resume effects (which key off a media identity change).
+          s.media = { ...s.playlist[idx] }
+          s.comments = []
+          s.danmakuSource = null
+          resetPlaybackForNewMedia(s)
+        }),
+
       appendToPlaylist: (items) =>
         set((s) => {
           if (items.length === 0) {
             return
           }
+          const keys = new Set(s.playlist.map(playlistKey))
+          const fresh = items.filter((item) => {
+            const key = playlistKey(item)
+            if (keys.has(key)) return false
+            keys.add(key)
+            return true
+          })
+          if (fresh.length === 0) return
           const wasEmpty = s.playlist.length === 0
           const indexOfFirst = s.playlist.length
-          s.playlist = [...s.playlist, ...items]
+          s.playlist.push(...fresh)
           if (wasEmpty && s.media === null) {
             s.playlistIndex = indexOfFirst
-            s.media = items[0]
+            s.media = { ...s.playlist[indexOfFirst] }
             s.comments = []
             s.danmakuSource = null
             resetPlaybackForNewMedia(s)
@@ -342,15 +417,34 @@ export const usePlayerStore = create<PlayerStore>()(
         set((s) => {
           s.playlistOpen = open
         }),
+
+      saveProgress: (path, time, duration) =>
+        set((s) => {
+          if (!path || !Number.isFinite(time)) return
+          s.progress[path] = {
+            time,
+            duration: Number.isFinite(duration) ? duration : 0,
+            updatedAt: Date.now(),
+          }
+        }),
+
+      clearProgress: (path) =>
+        set((s) => {
+          if (path in s.progress) delete s.progress[path]
+        }),
     })),
     {
       name: 'danmaku-player-settings',
       version: 1,
-      // Only persist user settings, never transient/live state.
+      // Persist user settings + the local-file playlist and resume history.
+      // Blob-backed items (browser File opens, no `path`) can't be revived
+      // across launches, so only path-backed items are kept.
       partialize: (state) => ({
         upscale: state.upscale,
         danmakuSettings: state.danmakuSettings,
         playbackSettings: state.playbackSettings,
+        playlist: state.playlist.filter((i) => !!i.path),
+        progress: state.progress,
       }),
       // Deep-merge persisted settings over defaults so settings fields ADDED in
       // newer versions (e.g. playbackSettings.autoAdvance) keep their default
@@ -361,6 +455,8 @@ export const usePlayerStore = create<PlayerStore>()(
           upscale?: Partial<UpscaleSettings>
           danmakuSettings?: Partial<DanmakuSettings>
           playbackSettings?: Partial<PlaybackSettings>
+          playlist?: PlaylistItem[]
+          progress?: Record<string, ResumeEntry>
         }
         return {
           ...current,
@@ -377,6 +473,17 @@ export const usePlayerStore = create<PlayerStore>()(
             ...current.playbackSettings,
             ...p.playbackSettings,
           },
+          // Restore the queue but start detached: nothing plays until the user
+          // clicks an item (which then resumes from `progress`). Media is never
+          // auto-loaded on launch so a moved/deleted file can't wedge startup.
+          playlist: Array.isArray(p.playlist)
+            ? p.playlist.filter((i) => i && !!i.path)
+            : current.playlist,
+          playlistIndex: -1,
+          progress:
+            p.progress && typeof p.progress === 'object'
+              ? p.progress
+              : current.progress,
         }
       },
     }

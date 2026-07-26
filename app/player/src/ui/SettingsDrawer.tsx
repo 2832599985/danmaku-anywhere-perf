@@ -11,6 +11,7 @@ import {
   Typography,
 } from '@mui/material'
 import { useState } from 'react'
+import { useFullscreenPortalContainer } from '@/player/fullscreenPortal'
 import { usePlayerStore } from '@/store/playerStore'
 import { DanmakuSettings } from './DanmakuSettings'
 import { PanelSection } from './shared'
@@ -74,6 +75,7 @@ const PlaybackSettings = () => {
 export const SettingsDrawer = () => {
   const settingsOpen = usePlayerStore((s) => s.settingsOpen)
   const setSettingsOpen = usePlayerStore((s) => s.setSettingsOpen)
+  const container = useFullscreenPortalContainer()
   const [tab, setTab] = useState(0)
 
   return (
@@ -81,7 +83,10 @@ export const SettingsDrawer = () => {
       anchor="right"
       open={settingsOpen}
       onClose={() => setSettingsOpen(false)}
-      slotProps={{ paper: { sx: { width: 360, maxWidth: '92vw' } } }}
+      slotProps={{
+        root: { container },
+        paper: { sx: { width: 360, maxWidth: '92vw' } },
+      }}
     >
       <Stack sx={{ height: '100%' }}>
         <Stack

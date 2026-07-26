@@ -12,6 +12,7 @@ import { TopBar } from '@/ui/TopBar'
 import { type PlayerCommands, PlayerCommandsContext } from './commands'
 import { DanmakuController } from './danmaku/DanmakuController'
 import { detectHdrTransfer } from './detectHdr'
+import { FullscreenPortalContext } from './fullscreenPortal'
 import { UpscaleController } from './upscale/UpscaleController'
 import { useKeyboardControls } from './useKeyboardControls'
 import { useVideoElement } from './useVideoElement'
@@ -47,6 +48,14 @@ interface PlayerHostProps {
 
 export const PlayerHost = ({ platform }: PlayerHostProps) => {
   const stageRef = useRef<HTMLDivElement>(null)
+  // State mirror of the stage element so MUI overlays can portal INTO it (they
+  // otherwise render to document.body, which is hidden under the fullscreen
+  // element). Also lets effects re-run once the stage actually mounts.
+  const [stageEl, setStageEl] = useState<HTMLDivElement | null>(null)
+  const setStageRef = useCallback((el: HTMLDivElement | null) => {
+    stageRef.current = el
+    setStageEl(el)
+  }, [])
   const danmakuLayerRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   // State-backed so hooks/effects re-run once the element actually mounts.
@@ -170,6 +179,26 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     danmakuCtrlRef.current?.updateSettings(danmakuSettings)
   }, [danmakuSettings])
 
+  // --- keep danmaku laid out correctly across container/fullscreen resizes ---
+  // The danmaku engine caches the container width when tracks are created; on a
+  // resize (window drag OR entering/leaving fullscreen) it must re-measure or
+  // new comments spawn from a stale x-position. Nothing else calls resize(), so
+  // observe the overlay and forward size changes (rAF-coalesced).
+  useEffect(() => {
+    const layer = danmakuLayerRef.current
+    if (!layer) return
+    let raf = 0
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => danmakuCtrlRef.current?.resize())
+    })
+    observer.observe(layer)
+    return () => {
+      cancelAnimationFrame(raf)
+      observer.disconnect()
+    }
+  }, [])
+
   // --- upscale decision: apply, but SUPPRESS on HDR sources ---
   // The Anime4K path renders through an 8-bit sRGB WebGPU canvas, which would
   // clip/mangle HDR (PQ/BT.2020). So for HDR sources we keep the native <video>
@@ -250,6 +279,74 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       stale = true
     }
   }, [media, platform])
+
+  // --- resume history: restore last position on open, persist while watching ---
+  // Only local files (with a stable `path`) are tracked; browser blob opens have
+  // no durable key. Saves are throttled; the cleanup captures the position when
+  // switching away, and `pagehide` covers a hard app close.
+  useEffect(() => {
+    const path = media?.path
+    if (!video || !path) return
+    const store = usePlayerStore.getState
+
+    let resumed = false
+    const onMeta = () => {
+      if (resumed) return
+      resumed = true
+      const entry = store().progress[path]
+      if (!entry || !(entry.time > 3)) return
+      const dur = Number.isFinite(video.duration)
+        ? video.duration
+        : entry.duration
+      // Don't resume if we were essentially at the end (let it replay).
+      if (dur && entry.time >= dur * 0.95) return
+      video.currentTime = entry.time
+      store().showOsd(`已恢复到 ${formatClock(entry.time)}`, '⏱')
+    }
+
+    const save = () => {
+      const t = video.currentTime
+      if (t > 1 && Number.isFinite(t)) {
+        store().saveProgress(path, t, video.duration)
+      }
+    }
+    let lastSave = 0
+    const onTimeUpdate = () => {
+      const now = performance.now()
+      if (now - lastSave < 3000) return
+      lastSave = now
+      save()
+    }
+    const onPause = () => save()
+    const onEnded = () => store().clearProgress(path)
+
+    video.addEventListener('loadedmetadata', onMeta, { once: true })
+    if (video.readyState >= 1) onMeta()
+    video.addEventListener('timeupdate', onTimeUpdate)
+    video.addEventListener('pause', onPause)
+    video.addEventListener('ended', onEnded)
+    return () => {
+      video.removeEventListener('loadedmetadata', onMeta)
+      video.removeEventListener('timeupdate', onTimeUpdate)
+      video.removeEventListener('pause', onPause)
+      video.removeEventListener('ended', onEnded)
+      // Capture the outgoing position before the media effect swaps the src.
+      save()
+    }
+  }, [media, video])
+
+  // --- persist the resume point when the app window is closing ---
+  useEffect(() => {
+    const onHide = () => {
+      const s = usePlayerStore.getState()
+      const v = videoRef.current
+      if (s.media?.path && v && v.currentTime > 1) {
+        s.saveProgress(s.media.path, v.currentTime, v.duration)
+      }
+    }
+    window.addEventListener('pagehide', onHide)
+    return () => window.removeEventListener('pagehide', onHide)
+  }, [])
 
   // --- imperative commands ---
   const commands = useMemo<PlayerCommands>(() => {
@@ -346,19 +443,19 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       },
       openVideo: async () => {
         const picked = await platform.pickVideoFiles()
-        if (picked.length) store().setPlaylist(picked, 0)
+        if (picked.length) store().openMedia(picked)
       },
       openVideoFromPath: (path) => {
-        store().setPlaylist([itemFromPath(path)], 0)
+        store().openMedia([itemFromPath(path)])
       },
       openVideoFromFile: (file) => {
-        store().setPlaylist([itemFromFile(file)], 0)
+        store().openMedia([itemFromFile(file)])
       },
       openVideosFromPaths: (paths) => {
-        if (paths.length) store().setPlaylist(paths.map(itemFromPath), 0)
+        if (paths.length) store().openMedia(paths.map(itemFromPath))
       },
       openVideosFromFiles: (files) => {
-        if (files.length) store().setPlaylist(files.map(itemFromFile), 0)
+        if (files.length) store().openMedia(files.map(itemFromFile))
       },
       addVideosToPlaylist: async () => {
         const picked = await platform.pickVideoFiles()
@@ -447,64 +544,67 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
 
   return (
     <PlayerCommandsContext.Provider value={commands}>
-      <div
-        ref={stageRef}
-        onMouseMove={revealControls}
-        onMouseLeave={() => {
-          if (usePlayerStore.getState().playback.playing) {
-            setControlsVisible(false)
-          }
-        }}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={onDrop}
-        onDoubleClick={commands.toggleFullscreen}
-        style={{
-          position: 'relative',
-          width: '100%',
-          height: '100%',
-          overflow: 'hidden',
-          background: '#000',
-          cursor: overlaysVisible ? 'default' : 'none',
-        }}
-      >
-        {/** biome-ignore lint/a11y/useMediaCaption: danmaku overlay player, no caption track */}
-        <video
-          ref={setVideoRef}
-          crossOrigin="anonymous"
-          playsInline
-          onClick={commands.togglePlay}
+      <FullscreenPortalContext.Provider value={stageEl}>
+        <div
+          ref={setStageRef}
+          data-player-stage
+          onMouseMove={revealControls}
+          onMouseLeave={() => {
+            if (usePlayerStore.getState().playback.playing) {
+              setControlsVisible(false)
+            }
+          }}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={onDrop}
+          onDoubleClick={commands.toggleFullscreen}
           style={{
-            position: 'absolute',
-            inset: 0,
+            position: 'relative',
             width: '100%',
             height: '100%',
-            objectFit: 'contain',
-            background: '#000',
-            zIndex: 0,
-          }}
-        />
-        {/* upscale <canvas> is injected here (zIndex 1) by UpscaleController */}
-        <div
-          ref={danmakuLayerRef}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 2,
-            pointerEvents: 'none',
             overflow: 'hidden',
+            background: '#000',
+            cursor: overlaysVisible ? 'default' : 'none',
           }}
-        />
+        >
+          {/** biome-ignore lint/a11y/useMediaCaption: danmaku overlay player, no caption track */}
+          <video
+            ref={setVideoRef}
+            crossOrigin="anonymous"
+            playsInline
+            onClick={commands.togglePlay}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              background: '#000',
+              zIndex: 0,
+            }}
+          />
+          {/* upscale <canvas> is injected here (zIndex 1) by UpscaleController */}
+          <div
+            ref={danmakuLayerRef}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 2,
+              pointerEvents: 'none',
+              overflow: 'hidden',
+            }}
+          />
 
-        {!media && <EmptyState />}
+          {!media && <EmptyState />}
 
-        <Osd />
-        <TopBar visible={overlaysVisible} />
-        <Controls visible={overlaysVisible} />
-      </div>
+          <Osd />
+          <TopBar visible={overlaysVisible} />
+          <Controls visible={overlaysVisible} />
+        </div>
 
-      <SettingsDrawer />
-      <PlaylistDrawer />
-      <DanmakuSourceDialog />
+        <SettingsDrawer />
+        <PlaylistDrawer />
+        <DanmakuSourceDialog />
+      </FullscreenPortalContext.Provider>
     </PlayerCommandsContext.Provider>
   )
 }

@@ -18,6 +18,15 @@ const check = (name, ok, detail = '') => {
 
 const cdp = await chromium.connectOverCDP('http://127.0.0.1:9222')
 const page = cdp.contexts().flatMap((c) => c.pages())[0]
+// Start from clean persisted state so leftover settings (e.g. a prior run's
+// frame-interpolation factor / resume history) can't perturb the HDR asserts.
+await page.addInitScript(() => {
+  try {
+    localStorage.removeItem('danmaku-player-settings')
+  } catch {
+    /* storage may be unavailable pre-boot */
+  }
+})
 await page.reload({ waitUntil: 'load' })
 await page.waitForFunction(() => '__player' in window, null, { timeout: 15000 })
 await page.waitForTimeout(1000)

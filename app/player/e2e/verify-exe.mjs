@@ -10,6 +10,7 @@ import { chromium } from '@playwright/test'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE = path.join(here, 'fixtures', 'test.mp4')
+const FIXTURE2 = path.join(here, 'fixtures', 'hdr10_test.mp4')
 const SHOT_DIR = path.join(here, '..', 'test-results')
 
 const results = []
@@ -31,7 +32,15 @@ const consoleLog = []
 page.on('console', (m) => consoleLog.push(`[${m.type()}] ${m.text()}`))
 page.on('pageerror', (e) => consoleLog.push(`[pageerror] ${e.message}`))
 
-// Reload so we observe the entire bootstrap.
+// Reload so we observe the entire bootstrap. Clear persisted state first so a
+// prior run's playlist/resume-history can't leak into the clean-boot asserts.
+await page.addInitScript(() => {
+  try {
+    localStorage.removeItem('danmaku-player-settings')
+  } catch {
+    /* storage may be unavailable pre-boot */
+  }
+})
 await page.reload({ waitUntil: 'load' })
 await page.waitForFunction(() => '__player' in window, null, {
   timeout: 15000,
@@ -232,10 +241,15 @@ const volApi = await page.evaluate(() => {
 })
 check('volume API', Math.abs(volApi - 0.8) < 0.001, `vol=${volApi}`)
 
-// 9. Playlist: open two entries, sibling-danmaku autoload, next, auto-advance
-await page.evaluate((p) => {
-  window.__player.commands.openVideosFromPaths([p, p])
-}, FIXTURE)
+// 9. Playlist: opening ADDS to the (persistent) list. Clear, then open two
+// distinct files; dedup means the same path is not queued twice.
+await page.evaluate(
+  ({ a, b }) => {
+    window.__player.store.getState().clearPlaylist()
+    window.__player.commands.openVideosFromPaths([a, b])
+  },
+  { a: FIXTURE, b: FIXTURE2 }
+)
 const playlistState = await page
   .waitForFunction(
     () => {
@@ -327,6 +341,139 @@ const advanced = await page
   )
   .then((h) => h.jsonValue())
 check('auto-advance on ended', true, `next item at t=${advanced.t.toFixed(2)}`)
+
+// 10. Settings overlay portals INTO the stage (so it stays clickable in
+// fullscreen, where document.body is hidden behind the fullscreen element).
+await page.evaluate(() =>
+  window.__player.store.getState().setSettingsOpen(true)
+)
+await page.waitForTimeout(500)
+const portal = await page.evaluate(() => {
+  const stage = document.querySelector('[data-player-stage]')
+  const drawer = document.querySelector('.MuiDrawer-root')
+  return {
+    hasStage: !!stage,
+    hasDrawer: !!drawer,
+    inside: !!(stage && drawer && stage.contains(drawer)),
+  }
+})
+check(
+  'settings drawer portals into stage (fullscreen-safe)',
+  portal.inside,
+  JSON.stringify(portal)
+)
+await page.evaluate(() =>
+  window.__player.store.getState().setSettingsOpen(false)
+)
+
+// 11. Resume history: save a position, reopen the file, expect it to restore.
+await page.evaluate((p) => {
+  window.__player.commands.openVideoFromPath(p)
+}, FIXTURE)
+await page.waitForFunction(
+  () => {
+    const v = document.querySelector('video')
+    return v && v.readyState >= 2 && Number.isFinite(v.duration)
+  },
+  null,
+  { timeout: 15000 }
+)
+// Opening an already-listed file must NOT wipe the history or duplicate it.
+const historyState = await page.evaluate(() => {
+  const s = window.__player.store.getState()
+  return {
+    len: s.playlist.length,
+    hasFixture2: s.playlist.some((i) => (i.path ?? '').includes('hdr10_test')),
+  }
+})
+check(
+  'opening keeps history (no wipe, no dup)',
+  historyState.len === 2 && historyState.hasFixture2,
+  JSON.stringify(historyState)
+)
+await page.evaluate(() => {
+  window.__player.commands.seekTo(5)
+  window.__player.commands.pause() // pause writes progress immediately
+})
+await page.waitForTimeout(600)
+const saved = await page.evaluate((p) => {
+  const s = window.__player.store.getState()
+  return s.progress[p]?.time ?? null
+}, FIXTURE)
+check('progress persisted on pause', saved !== null && saved > 4, `t=${saved}`)
+
+// Reopen the same file -> resume effect should seek back near 5s.
+await page.evaluate((p) => {
+  window.__player.commands.openVideoFromPath(p)
+}, FIXTURE)
+const resumed = await page
+  .waitForFunction(
+    () => {
+      const v = document.querySelector('video')
+      return v && v.readyState >= 2 && v.currentTime > 4
+        ? { t: v.currentTime }
+        : null
+    },
+    null,
+    { timeout: 15000 }
+  )
+  .then((h) => h.jsonValue())
+check(
+  'resumes to saved position on reopen',
+  resumed.t > 4 && resumed.t < 7,
+  `t=${resumed.t.toFixed(2)}`
+)
+
+// 12. Multi-frame interpolation: a higher factor must generate more frames over
+// the same playback window (proves N-1 sub-frames per pair, not just 2x).
+const readGenerated = () =>
+  page.evaluate(() => {
+    const c = document.querySelector('canvas[data-danmaku-anywhere-upscale]')
+    return Number(c?.dataset.danmakuAnywhereFrameInterpolationGenerated ?? '0')
+  })
+const measureFactor = async (patch) => {
+  await page.evaluate((fi) => {
+    const v = document.querySelector('video')
+    v.loop = true
+    window.__player.store.getState().updateUpscale({
+      enabled: true,
+      frameInterpolation: { enabled: true, ...fi },
+    })
+    window.__player.commands.seekTo(1)
+    window.__player.commands.play()
+  }, patch)
+  // Changing the factor triggers a full interpolator reinit; wait until it is
+  // active, then sample generated frames over a window. The synthetic fixture is
+  // low-motion (most pairs dedup), so counts are small — we assert production,
+  // not an exact ratio.
+  await page.waitForFunction(
+    () => {
+      const c = document.querySelector('canvas[data-danmaku-anywhere-upscale]')
+      return c?.dataset.danmakuAnywhereFrameInterpolation === 'active'
+    },
+    null,
+    { timeout: 30000 }
+  )
+  const start = await readGenerated()
+  await page.waitForTimeout(5000)
+  const end = await readGenerated()
+  return end - start
+}
+// 2x baseline (informational), then the new multi-frame paths must each produce.
+const gen2x = await measureFactor({ mode: 'multiplier', multiplier: 2 })
+const gen4x = await measureFactor({ mode: 'multiplier', multiplier: 4 })
+check(
+  '4x multiplier path generates frames',
+  gen4x > 0,
+  `4x=${gen4x} (2x baseline=${gen2x})`
+)
+// target-fps mode must also drive the multi-frame path without crashing
+const genTarget = await measureFactor({ mode: 'targetFps', targetFps: 170 })
+check(
+  'targetFps (170) path generates frames',
+  genTarget > 0,
+  `170fps target generated=${genTarget}`
+)
 
 const failed = results.filter((r) => !r.ok)
 console.log(

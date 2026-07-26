@@ -17,10 +17,12 @@ import {
   Typography,
 } from '@mui/material'
 import { usePlayerCommands } from '@/player/commands'
+import { useFullscreenPortalContainer } from '@/player/fullscreenPortal'
 import { usePlayerStore } from '@/store/playerStore'
 
 export const PlaylistDrawer = () => {
   const commands = usePlayerCommands()
+  const container = useFullscreenPortalContainer()
   const playlist = usePlayerStore((s) => s.playlist)
   const playlistIndex = usePlayerStore((s) => s.playlistIndex)
   const playlistOpen = usePlayerStore((s) => s.playlistOpen)
@@ -43,7 +45,10 @@ export const PlaylistDrawer = () => {
       anchor="right"
       open={playlistOpen}
       onClose={() => setPlaylistOpen(false)}
-      slotProps={{ paper: { sx: { width: 360, maxWidth: '92vw' } } }}
+      slotProps={{
+        root: { container },
+        paper: { sx: { width: 360, maxWidth: '92vw' } },
+      }}
     >
       <Stack sx={{ height: '100%' }}>
         {/* Header */}

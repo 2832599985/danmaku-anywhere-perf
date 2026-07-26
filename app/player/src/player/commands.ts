@@ -24,15 +24,15 @@ export interface PlayerCommands {
   /** show/hide danmaku (mirrors settings.visible). */
   toggleDanmaku(): void
 
-  /** open the multi-select file picker and REPLACE the playlist with the pick. */
+  /** open the multi-select file picker and ADD the pick to the playlist. */
   openVideo(): Promise<void>
-  /** load a video from an absolute path (Tauri drag-drop / recent). */
+  /** load a video from an absolute path (Tauri drag-drop / recent); adds to playlist. */
   openVideoFromPath(path: string): void
-  /** load a video that the browser already turned into a File/URL. */
+  /** load a video that the browser already turned into a File/URL; adds to playlist. */
   openVideoFromFile(file: File): void
-  /** replace the playlist with videos from absolute paths (Tauri drop). */
+  /** add videos from absolute paths to the playlist (Tauri drop) and play the first. */
   openVideosFromPaths(paths: string[]): void
-  /** replace the playlist with browser File objects (drag-drop). */
+  /** add browser File objects to the playlist (drag-drop) and play the first. */
   openVideosFromFiles(files: File[]): void
 
   /** multi-select picker; append to the playlist without interrupting playback. */

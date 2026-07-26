@@ -400,3 +400,59 @@ browser suite still pass. Screenshot: `test-results/exe-4-hdr-badge.png`.
   product (Tauri packages via `vite build`). Fix later if `tauri dev` is wanted.
 
 ```
+
+## 16. UX fixes + variable frame interpolation (2026-07-26 — DONE, verified in exe)
+
+Four follow-up items requested after the HDR10 pass. All verified: **24/24**
+`e2e/verify-exe.mjs` (was 19) + **5/5** `verify-hdr.mjs` + **14** engine unit
+tests + browser e2e.
+
+**(1) Danmaku position wrong after fullscreen toggle.** The `@mr-quin/danmu`
+engine caches the container width when tracks are built and nothing called
+`DanmakuRenderer.resize()` on a resize, so comments spawned from a stale
+x-position after entering/leaving fullscreen. Fix: `PlayerHost` observes the
+danmaku overlay with a `ResizeObserver` (rAF-coalesced) → `danmakuCtrl.resize()`.
+
+**(2) Settings/danmaku/playlist unreachable in fullscreen.** MUI `Drawer`/`Dialog`
+portal to `document.body`, which is hidden behind the fullscreen element (only the
+fullscreen subtree renders). Fix: `FullscreenPortalContext` (`src/player/fullscreenPortal.ts`)
+carries the stage element; the three overlays pass `slotProps={{ root: { container } }}`
+so they portal INTO the stage (which is the fullscreen root). The stage carries a
+`data-player-stage` attribute; verify-exe asserts `stage.contains(drawer)`.
+
+**(3) Persistent playlist as history + resume.** `playerStore` persists the
+`playlist` (path-backed items only — blob opens can't be revived) and a
+`progress: Record<path, {time, duration, updatedAt}>` map. Opening media now
+**adds to** the playlist instead of replacing it (dedup by path/url, capped at
+200, oldest dropped) via the `openMedia` action, so the list is a running history
+that survives restarts; the first opened item becomes current and plays. On
+launch the queue is restored **detached** (`playlistIndex: -1`, media never
+auto-loaded — a moved/deleted file can't wedge startup); clicking an item resumes
+from `progress`. `openMedia` assigns a fresh media object so re-opening the
+current file still re-runs load + resume. Resume seeks on `loadedmetadata` when
+`3 < time < duration*0.95`; progress is saved throttled on `timeupdate`, on
+`pause`, on `pagehide`, and cleared on `ended`. verify-exe/verify-hdr clear
+localStorage via `addInitScript` for determinism.
+
+**(4) Variable frame interpolation (factor / target fps).** The Framegen model's
+`runT(t)` accepts any `t`, so N-1 intermediate frames per source pair is a direct
+extension (was hard-coded `runT(0.5)`). `FrameInterpolationOptions` gained
+optional `multiplier` and `targetFps` (extension passes neither → 2×, unchanged).
+Engine (`frame-interpolator.ts`): pure `resolveInterpolationFactor` / 
+`computeMaxInterpolationFactor` (unit-tested), mid-texture pool sized to
+`(maxFactor-1)*3+2`, `processPair` loops `k/factor` and enqueues each at a
+proportional `displayAt`; overload budget is now the whole source interval
+(`intervalMs*0.85`). `takeDueFrame` already pulls at the monitor refresh via rAF,
+so output naturally caps at the refresh rate. Factor cap is 8. Player UI adds a
+mode toggle (倍率 2×/3×/4× · 目标帧率 60/120/144/170); `targetFps` adapts the live
+factor to the measured source fps. **Ceiling reality:** output ≤ display refresh;
+2× already saturates 60Hz for 24–30fps content — higher factors only pay off on
+high-refresh monitors (targeted here at a 170Hz display).
+
+### One caveat observed
+Rapidly changing the factor 3× back-to-back (verify-exe #12) logs a transient
+`getCurrentTexture: context is not configured` from the presentation loop firing
+mid-reconfigure. It is caught, non-fatal, and self-heals to `active`; it is the
+renderer's existing reconfigure path, not the multi-frame change. A single
+user-driven factor change triggers one reinit and is unaffected.
+

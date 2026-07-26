@@ -32,6 +32,7 @@ import { useState } from 'react'
 import type { DdpAnime, DdpEpisode } from '@/danmaku/ddp'
 import { fetchEpisodeComments, searchDanmaku } from '@/danmaku/ddp'
 import { usePlayerCommands } from '@/player/commands'
+import { useFullscreenPortalContainer } from '@/player/fullscreenPortal'
 import { usePlayerStore } from '@/store/playerStore'
 import { errorMessage } from './shared'
 
@@ -235,12 +236,19 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
 export const DanmakuSourceDialog = () => {
   const open = usePlayerStore((s) => s.danmakuDialogOpen)
   const setDanmakuDialogOpen = usePlayerStore((s) => s.setDanmakuDialogOpen)
+  const container = useFullscreenPortalContainer()
   const [tab, setTab] = useState(0)
 
   const close = () => setDanmakuDialogOpen(false)
 
   return (
-    <Dialog open={open} onClose={close} fullWidth maxWidth="sm">
+    <Dialog
+      open={open}
+      onClose={close}
+      fullWidth
+      maxWidth="sm"
+      slotProps={{ root: { container } }}
+    >
       <DialogTitle
         sx={{
           display: 'flex',
