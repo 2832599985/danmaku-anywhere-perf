@@ -10,7 +10,7 @@ import {
   Typography,
 } from '@mui/material'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Suspense, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { ErrorBoundary } from 'react-error-boundary'
 import { useTranslation } from 'react-i18next'
 import { BookmarkToggleButton } from '@/common/bookmark/components/BookmarkToggleButton'
@@ -51,6 +51,10 @@ export const SeasonDetailsPage = () => {
   })
 
   const { mutateAsync: load, isPending, variables } = useFetchDanmakuLite()
+  // Batch failures are reported once as a summary, so this instance stays quiet.
+  const { mutateAsync: loadForBatch } = useFetchDanmakuLite({
+    showErrorToast: false,
+  })
 
   const [isSelectMode, setIsSelectMode] = useState(false)
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set())
@@ -59,6 +63,13 @@ export const SeasonDetailsPage = () => {
     completed: number
   }>(null)
   const cancelBatchRef = useRef(false)
+  const isUnmountedRef = useRef(false)
+
+  useEffect(() => {
+    return () => {
+      isUnmountedRef.current = true
+    }
+  }, [])
 
   const allEpisodes = episodesQuery.data ?? []
 
@@ -112,72 +123,78 @@ export const SeasonDetailsPage = () => {
       })
     )
 
-    let completed = 0
-    let batchError: unknown
+    let processed = 0
+    let succeeded = 0
+    const failures: string[] = []
 
-    try {
-      for (let i = 0; i < selectedEpisodes.length; i++) {
-        if (cancelBatchRef.current) break
+    for (const meta of selectedEpisodes) {
+      // The loop outlives the component, so stop as soon as it goes away
+      // instead of downloading into a page the user has already left.
+      if (cancelBatchRef.current || isUnmountedRef.current) break
 
-        const meta = selectedEpisodes[i]
-        await load({
+      try {
+        await loadForBatch({
           type: 'by-meta',
           meta,
           options: {
             forceUpdate: true,
           },
         })
-
-        completed = i + 1
-        setBatchProgress((prev) => {
-          if (!prev) return prev
-          return { ...prev, completed }
-        })
-
-        // Yield so the UI can update progress and remain responsive.
-        // eslint-disable-next-line no-await-in-loop
-        await new Promise((r) => setTimeout(r, 0))
-      }
-    } catch (e) {
-      batchError = e
-    } finally {
-      // Refresh the season/episode caches once at the end so the list reflects newly downloaded items.
-      void queryClient.invalidateQueries({
-        queryKey: seasonQueryKeys.all(),
-        exact: true,
-      })
-      void queryClient.invalidateQueries({ queryKey: episodeQueryKeys.all() })
-
-      const result = resolveBatchDownloadOutcome({
-        total: selectedEpisodes.length,
-        completed,
-        cancelled: cancelBatchRef.current,
-        error: batchError,
-      })
-
-      if (result.outcome === 'success') {
-        toast.success(t('searchPage.batchDownload.done'))
-      } else if (result.outcome === 'cancelled') {
-        toast.info(
-          t('searchPage.batchDownload.cancelled', {
-            done: result.completed,
-            total: result.total,
-          })
-        )
-      } else {
-        const message =
-          batchError instanceof Error ? batchError.message : String(batchError)
-        toast.error(
-          t('searchPage.batchDownload.failed', {
-            message,
-          })
-        )
+        succeeded++
+      } catch (e) {
+        // One bad episode must not strand the rest of the batch.
+        failures.push(e instanceof Error ? e.message : String(e))
       }
 
-      setBatchProgress(null)
-      clearSelection()
-      setIsSelectMode(false)
+      processed++
+      setBatchProgress((prev) => {
+        if (!prev) return prev
+        return { ...prev, completed: processed }
+      })
+
+      // Yield so the UI can update progress and remain responsive.
+      await new Promise((r) => setTimeout(r, 0))
     }
+
+    if (isUnmountedRef.current) return
+
+    // Refresh the season/episode caches once at the end so the list reflects newly downloaded items.
+    void queryClient.invalidateQueries({
+      queryKey: seasonQueryKeys.all(),
+      exact: true,
+    })
+    void queryClient.invalidateQueries({ queryKey: episodeQueryKeys.all() })
+
+    const result = resolveBatchDownloadOutcome({
+      total: selectedEpisodes.length,
+      completed: processed,
+      cancelled: cancelBatchRef.current,
+      error: failures.length > 0 ? failures[0] : undefined,
+    })
+
+    if (result.outcome === 'success') {
+      toast.success(t('searchPage.batchDownload.done'))
+    } else if (failures.length > 0) {
+      toast.error(
+        t('searchPage.batchDownload.partial', {
+          done: succeeded,
+          total: result.total,
+          failed: failures.length,
+          message: failures[0],
+        })
+      )
+    } else {
+      toast.info(
+        t('searchPage.batchDownload.cancelled', {
+          done: succeeded,
+          total: result.total,
+        })
+      )
+    }
+
+    setBatchProgress(null)
+    clearSelection()
+    setIsSelectMode(false)
   }
 
   const handleCancelBatch = () => {

@@ -7,13 +7,21 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 
 import { useToast } from '@/common/components/Toast/toastStore'
+import type { TranslationKey } from '@/common/localization/translationKey'
 import { createMountConfig } from '@/common/options/mountConfig/constant'
 import { useEditMountConfig } from '@/common/options/mountConfig/useMountConfig'
 import type { MountAvailability } from '@/popup/hooks/useMountAvailability'
 import { useMountAvailability } from '@/popup/hooks/useMountAvailability'
 import { useStore } from '@/popup/store'
 
-type TFunc = ReturnType<typeof useTranslation>['t']
+// A narrow structural signature rather than i18next's full `TFunction`: passing
+// that around makes TS resolve its conditional return type at every call here
+// and blow the instantiation depth limit.
+type TFunc = (
+  key: TranslationKey,
+  defaultValue: string,
+  options?: Record<string, unknown>
+) => string
 
 interface AlertDescriptor {
   severity: AlertColor

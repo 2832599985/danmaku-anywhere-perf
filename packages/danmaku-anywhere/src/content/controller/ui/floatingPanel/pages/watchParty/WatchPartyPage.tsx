@@ -55,20 +55,17 @@ export const WatchPartyPage = () => {
 
   return (
     <TabLayout>
-      <TabToolbar
-        title={t('watchParty.title')}
-        rightElement={
-          connected ? (
-            <Chip
-              icon={<Group />}
-              label={t('watchParty.members', { count: memberCount })}
-              size="small"
-              color="success"
-              variant="outlined"
-            />
-          ) : undefined
-        }
-      />
+      <TabToolbar title={t('watchParty.title')}>
+        {connected && (
+          <Chip
+            icon={<Group />}
+            label={t('watchParty.members', { count: memberCount })}
+            size="small"
+            color="success"
+            variant="outlined"
+          />
+        )}
+      </TabToolbar>
       <Divider />
       <ScrollBox px={2} pb={2} pt={2} flexGrow={1}>
         {connected ? (

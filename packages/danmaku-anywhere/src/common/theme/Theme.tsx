@@ -1,4 +1,3 @@
-import { useMediaQuery } from '@mui/material'
 import type { CSSObject, ThemeOptions } from '@mui/material/styles'
 import { createTheme, ThemeProvider } from '@mui/material/styles'
 import type { Localization } from '@mui/x-data-grid/internals'
@@ -11,6 +10,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useState,
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { UserTheme } from '@/common/options/extensionOptions/schema'
@@ -186,6 +186,39 @@ const context = createContext<ThemeContext>({
   palette: getThemePalette('neon-violet'),
 })
 
+const DARK_MODE_QUERY = '(prefers-color-scheme: dark)'
+
+/**
+ * `useMediaQuery` used to be called inside a try-catch callback because it
+ * crashes in some Firefox builds (see facebook/react#16606). A hook that only
+ * sometimes runs corrupts hook order for the whole provider, so the guard moved
+ * inside an effect where throwing is harmless.
+ */
+const usePrefersDarkMode = () => {
+  const [prefersDarkMode, setPrefersDarkMode] = useState<boolean | undefined>(
+    undefined
+  )
+
+  useEffect(() => {
+    const [mediaQuery] = tryCatchSync(() => window.matchMedia(DARK_MODE_QUERY))
+    if (!mediaQuery) return
+
+    setPrefersDarkMode(mediaQuery.matches)
+
+    const onChange = (event: MediaQueryListEvent) => {
+      setPrefersDarkMode(event.matches)
+    }
+
+    mediaQuery.addEventListener('change', onChange)
+
+    return () => {
+      mediaQuery.removeEventListener('change', onChange)
+    }
+  }, [])
+
+  return prefersDarkMode
+}
+
 interface ThemeProps extends PropsWithChildren {
   options?: ThemeOptions
   /**
@@ -196,11 +229,7 @@ interface ThemeProps extends PropsWithChildren {
 }
 
 export const Theme = ({ children, options = {}, themeStyleEl }: ThemeProps) => {
-  // TODO: for some reason, useMediaQuery crashes in Firefox so we wrap it in a try-catch
-  // probably for the same reason as https://github.com/facebook/react/issues/16606
-  const [prefersDarkMode] = tryCatchSync(() =>
-    useMediaQuery('(prefers-color-scheme: dark)')
-  )
+  const prefersDarkMode = usePrefersDarkMode()
 
   const { i18n } = useTranslation()
 

@@ -152,7 +152,7 @@ export const HighlightsPage = () => {
   }, [comments])
 
   const handleJump = (time: number) => {
-    useStore.getState().danmaku.seekToTime(time)
+    useStore.getState().seekToTime(time)
   }
 
   const handleShare = () => {
@@ -178,20 +178,17 @@ export const HighlightsPage = () => {
 
   return (
     <TabLayout>
-      <TabToolbar
-        title={t('highlights.title')}
-        rightElement={
-          highlights.length > 0 ? (
-            <IconButton
-              size="small"
-              onClick={handleShare}
-              title={t('highlights.share')}
-            >
-              <ContentCopy fontSize="small" />
-            </IconButton>
-          ) : undefined
-        }
-      />
+      <TabToolbar title={t('highlights.title')}>
+        {highlights.length > 0 && (
+          <IconButton
+            size="small"
+            onClick={handleShare}
+            title={t('highlights.share')}
+          >
+            <ContentCopy fontSize="small" />
+          </IconButton>
+        )}
+      </TabToolbar>
       <Divider />
       <ScrollBox px={2} pb={2} pt={1} flexGrow={1} sx={{ overflowX: 'hidden' }}>
         <Stack spacing={1}>

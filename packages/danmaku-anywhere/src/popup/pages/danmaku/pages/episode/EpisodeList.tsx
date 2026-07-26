@@ -21,7 +21,7 @@ import { NothingHere } from '@/common/components/NothingHere'
 import { useCustomEpisodeLite } from '@/common/danmaku/queries/useCustomEpisodes'
 import { useDeleteEpisode } from '@/common/danmaku/queries/useDeleteEpisode'
 import { useEpisodesLite } from '@/common/danmaku/queries/useEpisodes'
-import { isProvider } from '@/common/danmaku/utils'
+import { isNotCustom, isProvider } from '@/common/danmaku/utils'
 import { useExportDanmaku } from '@/popup/hooks/useExportDanmaku'
 import { useExportXml } from '@/popup/hooks/useExportXml'
 import { useRefreshDanmaku } from '@/popup/hooks/useRefreshDanmaku'
@@ -63,6 +63,8 @@ export const EpisodeList = () => {
   const deleteMutation = useDeleteEpisode()
 
   const handleFetchDanmaku = async (episode: EpisodeRow) => {
+    // Custom and MacCMS episodes have no season to re-query the provider with.
+    if (!isNotCustom(episode)) return
     if (isProvider(episode, DanmakuSourceType.MacCMS)) return
     return refreshDanmaku(episode)
   }

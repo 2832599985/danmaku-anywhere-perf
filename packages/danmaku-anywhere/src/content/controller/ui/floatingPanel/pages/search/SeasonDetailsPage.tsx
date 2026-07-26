@@ -26,6 +26,7 @@ import { TabLayout } from '@/common/components/layout/TabLayout'
 import { TabToolbar } from '@/common/components/layout/TabToolbar'
 import { useToast } from '@/common/components/Toast/toastStore'
 import { resolveBatchDownloadOutcome } from '@/common/danmaku/batchDownloadOutcome'
+import type { DanmakuFetchDto } from '@/common/danmaku/dto'
 import { useFetchDanmakuLite } from '@/common/danmaku/queries/useFetchDanmakuLite'
 import { seasonQueryKeys } from '@/common/queries/queryKeys'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
@@ -39,6 +40,11 @@ type SeasonDetailsPageProps = {
 
 const buildEpisodeKey = (meta: WithSeason<EpisodeMeta>) => {
   return `${meta.provider}:${meta.seasonId}:${meta.indexedId}`
+}
+
+// Only `by-meta` requests carry an episode, so `by-stub` never highlights a row.
+const getPendingIndexedId = (variables?: DanmakuFetchDto) => {
+  return variables?.type === 'by-meta' ? variables.meta.indexedId : undefined
 }
 
 export const SeasonDetailsPage = ({
@@ -330,12 +336,11 @@ export const SeasonDetailsPage = ({
               }
 
               const isLoadingThisEpisode =
-                (loadMutation.isPending || mergeLoadMutation.isPending) &&
-                (loadMutation.variables?.type === 'by-meta' ||
-                  mergeLoadMutation.variables?.type === 'by-meta') &&
-                (loadMutation.variables?.meta?.indexedId ===
-                  data.episode.indexedId ||
-                  mergeLoadMutation.variables?.meta?.indexedId ===
+                (loadMutation.isPending &&
+                  getPendingIndexedId(loadMutation.variables) ===
+                    data.episode.indexedId) ||
+                (mergeLoadMutation.isPending &&
+                  getPendingIndexedId(mergeLoadMutation.variables) ===
                     data.episode.indexedId)
 
               const key = buildEpisodeKey(data.episode)

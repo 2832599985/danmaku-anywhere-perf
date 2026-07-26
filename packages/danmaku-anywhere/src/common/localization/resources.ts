@@ -12,6 +12,10 @@ export const resources = {
 
 declare module 'i18next' {
   interface CustomTypeOptions {
-    resources: typeof enTranslation
+    // Must stay namespace-keyed. Assigning `typeof enTranslation` directly makes
+    // i18next read every top-level section as a namespace, so the default
+    // namespace collapses onto the unrelated `translation` section and every
+    // t() key in the app fails to type-check.
+    resources: { translation: typeof enTranslation }
   }
 }

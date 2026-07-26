@@ -26,7 +26,8 @@ import { compareLocale } from '@/common/utils/collator'
 import { matchWithPinyin } from '@/common/utils/utils'
 
 const stringifyDanmakuMeta = (episode: GenericEpisodeLite) => {
-  if (isProvider(episode, DanmakuSourceType.MacCMS)) {
+  // Custom and MacCMS episodes carry no season to prefix with.
+  if (!isNotCustom(episode) || isProvider(episode, DanmakuSourceType.MacCMS)) {
     return episode.title
   }
   return `${episode.season.title} ${episode.title}`

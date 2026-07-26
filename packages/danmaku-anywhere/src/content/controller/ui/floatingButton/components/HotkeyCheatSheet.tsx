@@ -2,6 +2,7 @@ import { Box, Fade, Typography } from '@mui/material'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import type { TranslationKey } from '@/common/localization/translationKey'
 import type { AllHotkeys } from '@/common/options/extensionOptions/hotkeys'
 import {
   getKeySymbolMap,
@@ -14,7 +15,7 @@ import { RADIUS } from '@/common/theme/tokens'
 import { getOS, properCase } from '@/common/utils/utils'
 
 interface HotkeyGroup {
-  labelKey: string
+  labelKey: TranslationKey
   hotkeys: AllHotkeys[]
 }
 

@@ -69,13 +69,13 @@
     "remove": "Remove Bookmark"
   },
   "cheatSheet": {
-    "hint": "Hold ? to show, release to dismiss",
-    "title": "Keyboard Shortcuts",
     "group": {
       "danmaku": "Danmaku Controls",
-      "video": "Video Controls",
-      "panel": "Panel Controls"
-    }
+      "panel": "Panel Controls",
+      "video": "Video Controls"
+    },
+    "hint": "Hold ? to show, release to dismiss",
+    "title": "Keyboard Shortcuts"
   },
   "common": {
     "acknowledge": "Ok",
@@ -130,12 +130,7 @@
   },
   "community": {
     "inputPlaceholder": "Type a danmaku...",
-    "title": "Community",
-    "send": "Send",
-    "loginRequired": "Please sign in to send danmaku",
-    "sendSuccess": "Sent successfully",
-    "sendFailed": "Failed to send",
-    "fetchFailed": "Failed to fetch community danmaku"
+    "title": "Community"
   },
   "configPage": {
     "copyShareCode": "Copy Share Code",
@@ -225,7 +220,6 @@
       "exported": "Export successful",
       "exportError": "Export failed: {{message}}",
       "fetchError": "Failed to fetch danmaku: {{message}}",
-      "frameListEmpty": "Browser returned an empty frame list, this likely indicates a bug in the browser.",
       "merged_one": "Danmaku Merged: {{name}} (total: {{count}})",
       "merged_other": "Danmaku Merged: {{name}} (total: {{count}})",
       "mergedMultiple_one": "Merged {{count}} source (total: {{total}})",
@@ -263,8 +257,7 @@
       "sourceCount_other": "{{count}} danmaku sources loaded",
       "sources": "Merged Sources",
       "totalMerged_one": "Total: {{count}} comment",
-      "totalMerged_other": "Total: {{count}} comments",
-      "totalMerged": "Total: {{count}} comments"
+      "totalMerged_other": "Total: {{count}} comments"
     },
     "mountShort": "Mount",
     "noComments": "No comments",
@@ -345,10 +338,7 @@
     "count_other": "{{count}} comments",
     "noData": "Mount danmaku to see highlights",
     "share": "Copy to share",
-    "title": "Highlights",
-    "peakDensity": "Peak density",
-    "jumpTo": "Jump",
-    "count": "{{count}} comments"
+    "title": "Highlights"
   },
   "importPage": {
     "confirm": "Confirm Import",
@@ -385,10 +375,7 @@
       "noIntegration": "Integration policy not configured",
       "search": "Searching for anime: {{title}}",
       "usingAI": "Using AI to parse show information",
-      "usingMode": "Using Mode: {{mode}}",
-      "matchedLocalDanmaku": "Matched local danmaku",
-      "noEpisodeMatched": "No episode matched for {{title}}: {{cause}}",
-      "openSearch": "Open search page"
+      "usingMode": "Using Mode: {{mode}}"
     },
     "autoMode": "Auto Mode",
     "createConfig": "Create Integration",
@@ -477,6 +464,13 @@
       "xpathSelectors": "XPath Selectors"
     },
     "name": "Integration Policy"
+  },
+  "matching": {
+    "allStrategiesExhausted": "All matching strategies exhausted, no match found",
+    "episodeNumberUndefined": "Episode number could not be determined",
+    "noSeasonsAllProviders": "No seasons found across all providers",
+    "passedToNext": "No match found, passed to next strategy",
+    "previousStrategyTerminal": "Skipped: previous strategy returned a terminal result"
   },
   "mountPage": {
     "alert": {
@@ -593,6 +587,7 @@
     "enableAnalytics": "Enable anonymous analytics",
     "enableFullscreenInteraction": "Enable fullscreen interaction",
     "enableMultiSourceMerge": "Enable multi-source danmaku merge",
+    "enableMultiSourceMergeDescription": "After matching an episode, also search other enabled providers and merge all danmaku together with deduplication.",
     "help": {
       "feedback": "Provide feedback",
       "reportBug": "Report Bug"
@@ -653,10 +648,7 @@
         "crossOriginFix": "Enable cross-origin video compatibility fix",
         "description": "Enhance the active video with WebGPU while keeping danmaku above the processed image.",
         "title": "Video super resolution (Anime4K)"
-      },
-      "densityOpLabel": "Opening (OP)",
-      "densityEdLabel": "Ending (ED)",
-      "densitySkipRegionTooltip": "Detected OP/ED regions are highlighted on the density timeline"
+      }
     },
     "restrictInitiatorDomain": "Limit DNR initiator domains to this extension",
     "retentionPolicy": {
@@ -687,8 +679,7 @@
       }
     },
     "uploadDebugData": "Submit Debug Data",
-    "uploadDebugDataSuccess": "Submitted {{ id }}",
-    "enableMultiSourceMergeDescription": "After matching an episode, also search other enabled providers and merge all danmaku together with deduplication."
+    "uploadDebugDataSuccess": "Submitted {{ id }}"
   },
   "providers": {
     "alert": {
@@ -734,21 +725,17 @@
       "download_other": "Download ({{count}})",
       "enable": "Batch download",
       "failed": "Batch download failed: {{message}}",
+      "partial": "Batch download finished: {{done}}/{{total}} downloaded, {{failed}} failed ({{message}})",
       "progress": "Download progress: {{done}}/{{total}}",
       "start_one": "Start batch download: {{count}} episode",
-      "start_other": "Start batch download: {{count}} episodes",
-      "start": "Start batch download: {{count}} episodes",
-      "download": "Download ({{count}})"
+      "start_other": "Start batch download: {{count}} episodes"
     },
     "error": {
       "noProviders": "No danmaku sources enabled, please enable in settings",
       "noResultFound": "No results found, try a different search term"
     },
     "favorites": {
-      "title": "Favorites",
-      "add": "Add to favorites",
-      "empty": "No favorites yet",
-      "remove": "Remove from favorites"
+      "title": "Favorites"
     },
     "name": "Search Anime",
     "parse": {
@@ -778,10 +765,6 @@
     "titleMappingDialog": {
       "confirmation": "Map `{{original}}` to `{{mapped}}` ?",
       "searchOnly": "No, just search"
-    },
-    "history": {
-      "clear": "Clear history",
-      "title": "Recent Searches"
     }
   },
   "selectorPage": {
@@ -843,6 +826,13 @@
     "speed": "Speed",
     "speedSettings": "Speed Settings",
     "strokePreset": "Stroke / Shadow",
+    "strokePresets": {
+      "3d": "3D Shadow",
+      "glow": "Glow",
+      "none": "Default",
+      "thick": "Thick Stroke",
+      "thin": "Thin Stroke"
+    },
     "style": "Style",
     "tooltip": {
       "distribution": "Random: danmaku will be distributed uniformly. Order: danmaku will fill the screen from top to bottom.",
@@ -857,14 +847,7 @@
       "trackHeight": "Higher values makes danmaku farther apart"
     },
     "trackHeight": "Track Height",
-    "useCustomCss": "Use Custom CSS",
-    "strokePresets": {
-      "none": "Default",
-      "thin": "Thin Stroke",
-      "thick": "Thick Stroke",
-      "glow": "Glow",
-      "3d": "3D Shadow"
-    }
+    "useCustomCss": "Use Custom CSS"
   },
   "tabGroups": {
     "content": "Content",
@@ -888,11 +871,11 @@
     "titleMapping": "Title Mapping"
   },
   "theme": {
-    "selectTheme": "Select Theme",
-    "neonViolet": "Neon Violet",
     "emberGlow": "Ember Glow",
+    "neonViolet": "Neon Violet",
     "oceanDepth": "Ocean Depth",
-    "sakuraNoir": "Sakura Noir"
+    "sakuraNoir": "Sakura Noir",
+    "selectTheme": "Select Theme"
   },
   "titleMapping": {
     "deleteConfirm_one": "Are you sure you want to delete {{count}} title mapping?",
@@ -904,21 +887,13 @@
     "unmapped": "Unmapped"
   },
   "translation": {
-    "enable": "Enable danmaku translation",
-    "targetLang": "Translation language",
-    "translating": "Translating...",
-    "languages": {
-      "en": "English",
-      "ja": "Japanese",
-      "zh": "Chinese",
-      "ko": "Korean"
-    }
+    "enable": "Enable danmaku translation"
   },
   "upscale": {
     "alert": {
       "crossOriginBlocked": "This video source blocks cross-origin access, upscaling is unavailable here",
-      "frameInterpolationUnavailable": "Frame interpolation is unavailable on this video or GPU; Anime4K remains enabled",
-      "failed": "Upscaling hit an error and was turned off"
+      "failed": "Upscaling hit an error and was turned off",
+      "frameInterpolationUnavailable": "Frame interpolation is unavailable on this video or GPU; Anime4K remains enabled"
     },
     "corsFix": "CORS fix",
     "enable": "Super resolution",
@@ -954,22 +929,6 @@
     "members_one": "{{count}} online",
     "members_other": "{{count}} online",
     "roomId": "Room ID",
-    "title": "Watch Party",
-    "members": "{{count}} online",
-    "disconnected": "Disconnected",
-    "hostControls": "Host Controls",
-    "syncPlayback": "Sync Playback"
-  },
-  "matching": {
-    "allStrategiesExhausted": "All matching strategies exhausted, no match found",
-    "episodeNumberUndefined": "Episode number could not be determined",
-    "noSeasonsAllProviders": "No seasons found across all providers",
-    "passedToNext": "No match found, passed to next strategy",
-    "previousStrategyTerminal": "Skipped: previous strategy returned a terminal result"
-  },
-  "densityChart": {
-    "comments_one": "{{count}} comment",
-    "comments_other": "{{count}} comments",
-    "clickToSeek": "Click to seek"
+    "title": "Watch Party"
   }
 }

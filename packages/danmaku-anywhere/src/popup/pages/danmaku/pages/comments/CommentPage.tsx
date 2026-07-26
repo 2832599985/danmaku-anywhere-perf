@@ -11,7 +11,7 @@ import { TabToolbar } from '@/common/components/layout/TabToolbar'
 import { NothingHere } from '@/common/components/NothingHere'
 import { useCustomEpisodeSuspense } from '@/common/danmaku/queries/useCustomEpisodes'
 import { useEpisodesSuspense } from '@/common/danmaku/queries/useEpisodes'
-import { isProvider } from '@/common/danmaku/utils'
+import { isNotCustom, isProvider } from '@/common/danmaku/utils'
 import { useGoBack } from '@/popup/hooks/useGoBack'
 import { useRefreshDanmaku } from '@/popup/hooks/useRefreshDanmaku'
 
@@ -72,8 +72,12 @@ export const CommentPage = () => {
 
   const { title, episode } = getData()
 
+  // Refreshing needs a season to re-query the provider with, which custom and
+  // MacCMS episodes do not have.
   const canRefresh =
-    episode !== null && !isProvider(episode, DanmakuSourceType.MacCMS)
+    episode !== null &&
+    isNotCustom(episode) &&
+    !isProvider(episode, DanmakuSourceType.MacCMS)
 
   const handleRefresh = () => {
     if (!canRefresh) {

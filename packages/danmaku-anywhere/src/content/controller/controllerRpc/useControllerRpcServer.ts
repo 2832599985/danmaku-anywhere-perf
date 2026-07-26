@@ -2,14 +2,10 @@ import { useEventCallback } from '@mui/material'
 import { useEffect } from 'react'
 import { IS_STANDALONE_RUNTIME } from '@/common/environment/isStandalone'
 import { useInvalidateSeasonAndEpisode } from '@/common/hooks/useInvalidateSeasonAndEpisode'
-import { uiContainer } from '@/common/ioc/uiIoc'
 import { createRpcServer } from '@/common/rpc/server'
 import type { ControllerMethods } from '@/common/rpcClient/controller/types'
-import { FrameInjector } from '@/content/controller/danmaku/frame/FrameInjector.service'
 import { useStore } from '@/content/controller/store/store'
 import { useManualDanmaku } from './useManualDanmaku'
-
-const frameInjector = uiContainer.get(FrameInjector)
 
 export const useControllerRpcServer = () => {
   const { handleUnsetDanmaku, handleSetDanmaku } = useManualDanmaku()
@@ -43,8 +39,9 @@ export const useControllerRpcServer = () => {
       navigationStateUpdated: async () => {
         // Handled by background NavigationWatcherService; no-op in controller
       },
-      frameNavigated: async ({ frameId, url }) => {
-        frameInjector.onFrameNavigated(frameId, url)
+      frameNavigated: async () => {
+        // Frames register themselves through `relay:event:playerReady`, which
+        // FrameManager handles. Nothing to do here.
       },
     })
 

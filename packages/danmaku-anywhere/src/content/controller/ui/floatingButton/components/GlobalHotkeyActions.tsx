@@ -5,6 +5,7 @@ import { useHotkeys } from 'react-hotkeys-hook'
 import { useTranslation } from 'react-i18next'
 
 import { useToast } from '@/common/components/Toast/toastStore'
+import { useUpdateExtensionOptions } from '@/common/hooks/useUpdateExtensionOptions'
 import { useDanmakuOptions } from '@/common/options/danmakuOptions/useDanmakuOptions'
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
 import { useHotkeyOptions } from '@/common/options/extensionOptions/useHotkeyOptions'
@@ -25,8 +26,8 @@ export const GlobalHotkeyActions = () => {
   const { t } = useTranslation()
   const { getKeyCombo } = useHotkeyOptions()
   const { data: danmakuOptions, partialUpdate } = useDanmakuOptions()
-  const { data: extensionOptions, partialUpdate: partialUpdateExtension } =
-    useExtensionOptions()
+  const { data: extensionOptions } = useExtensionOptions()
+  const updateExtensionOptions = useUpdateExtensionOptions()
   const { toast } = useToast()
   const { toggleOpen, setTab, isOpen, tab } = usePopup()
   const { activeFrame } = useStore.use.frame()
@@ -191,12 +192,12 @@ export const GlobalHotkeyActions = () => {
 
   const toggleDensityPlot = useEventCallback(() => {
     const current = extensionOptions.playerOptions.showDanmakuTimeline
-    partialUpdateExtension({
+    void updateExtensionOptions((prev) => ({
       playerOptions: {
-        ...extensionOptions.playerOptions,
+        ...prev.playerOptions,
         showDanmakuTimeline: !current,
       },
-    })
+    }))
     toast.info(
       t('optionsPage.hotkeys.densityPlotChanged', {
         defaultValue: 'Density plot: {{value}}',

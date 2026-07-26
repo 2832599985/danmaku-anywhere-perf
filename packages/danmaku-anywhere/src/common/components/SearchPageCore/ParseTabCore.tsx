@@ -204,7 +204,7 @@ export const ParseTabCore = ({ onImportSuccess }: ParseTabCoreProps) => {
             slotProps={{
               input: {
                 startAdornment: (
-                  <InputAdornment position="start">{t(urlType)}</InputAdornment>
+                  <InputAdornment position="start">{urlType}</InputAdornment>
                 ),
               },
             }}

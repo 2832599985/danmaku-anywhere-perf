@@ -15,6 +15,7 @@ import {
 } from '@mui/material'
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useUpdateExtensionOptions } from '@/common/hooks/useUpdateExtensionOptions'
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
 import { getLiquidGlassSx } from '@/common/theme/liquidGlass'
 import { useThemeContext } from '@/common/theme/Theme'
@@ -23,19 +24,20 @@ import { RADIUS } from '@/common/theme/tokens'
 export const UpscaleControls = () => {
   const { t } = useTranslation()
   const { palette } = useThemeContext()
-  const { data: options, partialUpdate } = useExtensionOptions()
+  const { data: options } = useExtensionOptions()
+  const updateOptions = useUpdateExtensionOptions()
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLDivElement>(null)
   const supported = 'gpu' in navigator && Boolean(navigator.gpu)
   const upscale = options.playerOptions.upscale
 
   const update = (next: Partial<typeof upscale>) => {
-    void partialUpdate({
+    void updateOptions((prev) => ({
       playerOptions: {
-        ...options.playerOptions,
-        upscale: { ...upscale, ...next },
+        ...prev.playerOptions,
+        upscale: { ...prev.playerOptions.upscale, ...next },
       },
-    })
+    }))
   }
 
   return (

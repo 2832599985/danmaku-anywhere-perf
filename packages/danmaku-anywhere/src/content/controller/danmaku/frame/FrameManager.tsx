@@ -59,8 +59,34 @@ export const FrameManager = () => {
     }
   })
 
+  // Events can arrive after the frame unregistered (a navigating iframe emits
+  // videoRemoved and playerUnload back to back, and the order is not
+  // guaranteed). `updateFrame` throws for unknown frames, so check first.
+  const isFrameRegistered = (frameId: number) => {
+    return useStore.getState().frame.allFrames.has(frameId)
+  }
+
+  const playerReadyHandler = useEventCallback(
+    async (frameId: number, data: { url: string; documentId: string }) => {
+      frameRegistry.registerFrame({
+        frameId,
+        url: data.url,
+        documentId: data.documentId,
+      })
+
+      await playerRpcClient.player['relay:command:start']({
+        data: config.mediaQuery,
+        frameId,
+      })
+
+      if (!isFrameRegistered(frameId)) return
+      updateFrame(frameId, { started: true })
+    }
+  )
+
   const videoChangeHandler = useEventCallback(
     (frameId: number, data: VideoInfo) => {
+      if (!isFrameRegistered(frameId)) return
       const frame = useStore.getState().frame.allFrames.get(frameId)
       updateFrame(frameId, {
         hasVideo: true,
@@ -94,6 +120,10 @@ export const FrameManager = () => {
       if (activeFrame.mounted) {
         unmountDanmaku.mutate(frameId)
       }
+    }
+    if (!isFrameRegistered(frameId)) {
+      reEvaluateActiveFrame()
+      return
     }
     updateFrame(frameId, {
       hasVideo: false,
@@ -163,17 +193,7 @@ export const FrameManager = () => {
     const controllerRpcServer = createRpcServer<PlayerRelayEvents>(
       {
         'relay:event:playerReady': async ({ frameId, data }) => {
-          frameRegistry.registerFrame({
-            frameId,
-            url: data.url,
-            documentId: data.documentId,
-          })
-
-          await playerRpcClient.player['relay:command:start']({
-            data: config.mediaQuery,
-            frameId,
-          })
-          updateFrame(frameId, { started: true })
+          await playerReadyHandler(frameId, data)
         },
         'relay:event:playerUnload': async ({ frameId }) => {
           frameRegistry.unregisterFrame(frameId)

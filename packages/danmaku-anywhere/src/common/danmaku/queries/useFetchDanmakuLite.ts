@@ -5,6 +5,14 @@ import { episodeQueryKeys, seasonQueryKeys } from '@/common/queries/queryKeys'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { getTrackingService } from '@/common/telemetry/getTrackingService'
 
+type UseFetchDanmakuLiteOptions = {
+  /**
+   * Set to false when the caller reports failures itself (e.g. batch download
+   * summarizes them), otherwise every episode raises its own error toast.
+   */
+  showErrorToast?: boolean
+}
+
 /**
  * Fetches danmaku from cache or server and saves to cache.
  *
@@ -12,7 +20,9 @@ import { getTrackingService } from '@/common/telemetry/getTrackingService'
  * which avoids freezing/janky UI when large comment arrays are transferred across
  * the extension messaging channel (common in popup pages).
  */
-export const useFetchDanmakuLite = () => {
+export const useFetchDanmakuLite = ({
+  showErrorToast = true,
+}: UseFetchDanmakuLiteOptions = {}) => {
   const queryClient = useQueryClient()
   const toast = useToast.use.toast()
 
@@ -29,6 +39,21 @@ export const useFetchDanmakuLite = () => {
         exact: true,
       })
 
+      void queryClient.invalidateQueries({
+        queryKey: episodeQueryKeys.filter({ id: episode.id }),
+      })
+
+      // `by-stub` requests carry no meta, so the per-episode filters below
+      // cannot be built for them. The season id is still known either way.
+      const seasonId =
+        input.type === 'by-meta' ? input.meta.seasonId : input.seasonId
+
+      void queryClient.invalidateQueries({
+        queryKey: episodeQueryKeys.filterLite({ seasonId }),
+      })
+
+      if (input.type !== 'by-meta') return
+
       const byMetaFilter = {
         provider: input.meta.provider,
         indexedId: input.meta.indexedId,
@@ -42,18 +67,9 @@ export const useFetchDanmakuLite = () => {
       void queryClient.invalidateQueries({
         queryKey: episodeQueryKeys.filterLite(byMetaFilter),
       })
-
-      void queryClient.invalidateQueries({
-        queryKey: episodeQueryKeys.filter({ id: episode.id }),
-      })
-
-      void queryClient.invalidateQueries({
-        queryKey: episodeQueryKeys.filterLite({
-          seasonId: input.meta.seasonId,
-        }),
-      })
     },
     onError: async (error) => {
+      if (!showErrorToast) return
       toast.error(error.message)
     },
   })

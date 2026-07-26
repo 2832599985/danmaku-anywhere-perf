@@ -1,3 +1,4 @@
+import type { TranslationKey } from '@/common/localization/translationKey'
 import { ColorMode } from '@/common/theme/enums'
 
 export type ThemeColorScheme = 'dark' | 'light'
@@ -61,7 +62,8 @@ export interface GlassPalette {
 
 export interface ThemePalette {
   id: string
-  name: string
+  /** Translation key, resolved by the consumer. */
+  name: TranslationKey
   primary: string
   secondary: string
   darkBg: string

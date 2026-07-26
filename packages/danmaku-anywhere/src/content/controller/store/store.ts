@@ -144,6 +144,11 @@ interface StoreState {
     allFrames: Map<number, FrameState>
     activeFrame?: FrameState
     getActiveFrame: () => FrameState | undefined
+    /**
+     * Same as `getActiveFrame`, but throws instead of returning undefined.
+     * For callers that cannot proceed without a frame (mount/seek/calibrate).
+     */
+    mustGetActiveFrame: () => FrameState
     setActiveFrame: (frameId: number) => void
     addFrame: (init: Pick<FrameState, 'frameId' | 'url'>) => void
     removeFrame: (frameId: number) => void
@@ -322,6 +327,15 @@ const useStoreBase = create<StoreState>()(
       activeFrame: undefined,
       getActiveFrame: () => {
         return get().frame.activeFrame
+      },
+      mustGetActiveFrame: () => {
+        const activeFrame = get().frame.activeFrame
+
+        if (!activeFrame) {
+          throw new Error('No active frame')
+        }
+
+        return activeFrame
       },
       setActiveFrame: (frameId) => {
         set((state) => {

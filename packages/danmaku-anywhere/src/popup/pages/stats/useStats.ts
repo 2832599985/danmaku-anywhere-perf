@@ -79,57 +79,42 @@ export function useStats(): UseStatsResult {
 
     // Compute heavy stats in requestIdleCallback to avoid blocking UI
     let cancelled = false
-    const hasRIC = typeof requestIdleCallback === 'function'
 
-    const handle = hasRIC
-      ? requestIdleCallback(() => {
-          if (cancelled) return
-          const typeDistribution = computeTypeDistribution(allComments)
-          const topKeywords = computeTopKeywords(allComments, 10)
-          const densityBins = computeGlobalDensityBins(allComments, 10)
-          const avgLength = computeAvgLength(allComments)
-          const peakTime = computePeakTime(densityBins)
+    const compute = () => {
+      if (cancelled) return
+      const typeDistribution = computeTypeDistribution(allComments)
+      const topKeywords = computeTopKeywords(allComments, 10)
+      const densityBins = computeGlobalDensityBins(allComments, 10)
+      const avgLength = computeAvgLength(allComments)
+      const peakTime = computePeakTime(densityBins)
 
-          setStats({
-            totalComments: allComments.length,
-            seasonCount,
-            episodeCount,
-            typeDistribution,
-            topKeywords,
-            densityBins,
-            avgLength,
-            peakTime,
-          })
-          setIsComputing(false)
-        })
-      : setTimeout(() => {
-          if (cancelled) return
-          const typeDistribution = computeTypeDistribution(allComments)
-          const topKeywords = computeTopKeywords(allComments, 10)
-          const densityBins = computeGlobalDensityBins(allComments, 10)
-          const avgLength = computeAvgLength(allComments)
-          const peakTime = computePeakTime(densityBins)
+      setStats({
+        totalComments: allComments.length,
+        seasonCount,
+        episodeCount,
+        typeDistribution,
+        topKeywords,
+        densityBins,
+        avgLength,
+        peakTime,
+      })
+      setIsComputing(false)
+    }
 
-          setStats({
-            totalComments: allComments.length,
-            seasonCount,
-            episodeCount,
-            typeDistribution,
-            topKeywords,
-            densityBins,
-            avgLength,
-            peakTime,
-          })
-          setIsComputing(false)
-        }, 0)
+    if (typeof requestIdleCallback === 'function') {
+      const handle = requestIdleCallback(compute)
+
+      return () => {
+        cancelled = true
+        cancelIdleCallback(handle)
+      }
+    }
+
+    const handle = setTimeout(compute, 0)
 
     return () => {
       cancelled = true
-      if (hasRIC) {
-        cancelIdleCallback(handle)
-      } else {
-        clearTimeout(handle)
-      }
+      clearTimeout(handle)
     }
   }, [
     isLoading,

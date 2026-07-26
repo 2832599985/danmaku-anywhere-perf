@@ -69,13 +69,13 @@
     "remove": "取消收藏"
   },
   "cheatSheet": {
-    "hint": "按住 ? 显示，松开关闭",
-    "title": "快捷键一览",
     "group": {
       "danmaku": "弹幕控制",
-      "video": "视频控制",
-      "panel": "面板控制"
-    }
+      "panel": "面板控制",
+      "video": "视频控制"
+    },
+    "hint": "按住 ? 显示，松开关闭",
+    "title": "快捷键一览"
   },
   "common": {
     "acknowledge": "知道了",
@@ -130,12 +130,7 @@
   },
   "community": {
     "inputPlaceholder": "发个弹幕吧~",
-    "title": "社区弹幕",
-    "send": "发送",
-    "loginRequired": "请先登录后发送弹幕",
-    "sendSuccess": "发送成功",
-    "sendFailed": "发送失败",
-    "fetchFailed": "获取社区弹幕失败"
+    "title": "社区弹幕"
   },
   "configPage": {
     "copyShareCode": "复制分享码",
@@ -225,7 +220,6 @@
       "exported": "导出成功",
       "exportError": "导出失败：{{message}}",
       "fetchError": "获取弹幕失败：{{message}}",
-      "frameListEmpty": "浏览器返回的Frame列表为空，这可能是浏览器的bug。",
       "merged_one": "弹幕已合并：{{name}} (总计: {{count}})",
       "merged_other": "弹幕已合并：{{name}} (总计: {{count}})",
       "mergedMultiple_one": "已合并{{count}}个来源 (总计: {{total}})",
@@ -243,8 +237,7 @@
       "refreshingDanmaku": "正在刷新弹幕",
       "unmounted": "弹幕已卸载",
       "xmlExported": "导出XML成功",
-      "xmlExportError": "导出XML失败：{{message}}",
-      "multipleFrames": "检测到多个含有视频的Frame"
+      "xmlExportError": "导出XML失败：{{message}}"
     },
     "backup": "导出备份",
     "commentContent": "弹幕内容",
@@ -263,8 +256,7 @@
       "sourceCount_one": "已加载{{count}}个弹幕来源",
       "sourceCount_other": "已加载{{count}}个弹幕来源",
       "sources": "已合并来源",
-      "totalMerged_other": "总计: {{count}}条弹幕",
-      "totalMerged": "总计: {{count}}条弹幕"
+      "totalMerged_other": "总计: {{count}}条弹幕"
     },
     "mountShort": "装填",
     "noComments": "弹幕列表为空",
@@ -344,10 +336,7 @@
     "count_other": "{{count}}条弹幕",
     "noData": "装填弹幕后可查看高能时刻",
     "share": "复制分享",
-    "title": "高能时刻",
-    "peakDensity": "弹幕密度",
-    "jumpTo": "跳转",
-    "count": "{{count}}条弹幕"
+    "title": "高能时刻"
   },
   "importPage": {
     "confirm": "确认导入",
@@ -384,10 +373,7 @@
       "noIntegration": "未设置自动化配置",
       "search": "搜索番剧：{{title}}",
       "usingAI": "正在使用AI解析",
-      "usingMode": "正在使用模式：{{mode}}",
-      "matchedLocalDanmaku": "以匹配本地弹幕",
-      "noEpisodeMatched": "未找到匹配的剧集（{{title}}）：{{cause}}",
-      "openSearch": "打开搜索页面"
+      "usingMode": "正在使用模式：{{mode}}"
     },
     "autoMode": "自动模式",
     "createConfig": "创建配置",
@@ -476,6 +462,13 @@
       "xpathSelectors": "XPath"
     },
     "name": "自动化配置"
+  },
+  "matching": {
+    "allStrategiesExhausted": "所有匹配策略均已尝试，未找到匹配",
+    "episodeNumberUndefined": "无法确定集数",
+    "noSeasonsAllProviders": "所有弹幕源均未找到匹配的番剧",
+    "passedToNext": "未找到匹配，已传递给下一策略",
+    "previousStrategyTerminal": "已跳过：上一策略返回了终止结果"
   },
   "mountPage": {
     "alert": {
@@ -592,6 +585,7 @@
     "enableAnalytics": "匿名数据收集",
     "enableFullscreenInteraction": "全屏时启用交互",
     "enableMultiSourceMerge": "启用多源弹幕合并",
+    "enableMultiSourceMergeDescription": "匹配到集数后，同时搜索其他已启用的弹幕源并合并去重后显示。",
     "help": {
       "feedback": "提交意见或建议",
       "reportBug": "报告Bug"
@@ -652,10 +646,7 @@
         "crossOriginFix": "启用跨域视频兼容修复",
         "description": "使用 WebGPU 增强当前视频，并保持弹幕显示在超分画面之上。",
         "title": "视频超分辨率（Anime4K）"
-      },
-      "densityOpLabel": "片头（OP）",
-      "densityEdLabel": "片尾（ED）",
-      "densitySkipRegionTooltip": "检测到的OP/ED区域会在弹幕密度时间轴上高亮显示"
+      }
     },
     "restrictInitiatorDomain": "限制DNR至发起自扩展的请求",
     "retentionPolicy": {
@@ -686,8 +677,7 @@
       }
     },
     "uploadDebugData": "提交调试数据",
-    "uploadDebugDataSuccess": "提交成功 {{ id }}",
-    "enableMultiSourceMergeDescription": "匹配到集数后，同时搜索其他已启用的弹幕源并合并去重后显示。"
+    "uploadDebugDataSuccess": "提交成功 {{ id }}"
   },
   "providers": {
     "alert": {
@@ -732,20 +722,16 @@
       "download_other": "下载 ({{count}})",
       "enable": "批量下载",
       "failed": "批量下载失败：{{message}}",
+      "partial": "批量下载结束：成功 {{done}}/{{total}}，失败 {{failed}} 集（{{message}}）",
       "progress": "下载进度：{{done}}/{{total}}",
-      "start_other": "开始批量下载：{{count}} 集",
-      "start": "开始批量下载：{{count}} 集",
-      "download": "下载 ({{count}})"
+      "start_other": "开始批量下载：{{count}} 集"
     },
     "error": {
       "noProviders": "没有启用的弹幕来源，请在设置中启用",
       "noResultFound": "没有找到结果, 请尝试其他关键词"
     },
     "favorites": {
-      "title": "收藏",
-      "add": "添加收藏",
-      "empty": "暂无收藏",
-      "remove": "取消收藏"
+      "title": "收藏"
     },
     "name": "搜索番剧",
     "parse": {
@@ -775,10 +761,6 @@
     "titleMappingDialog": {
       "confirmation": "是否将`{{original}}` 映射为 `{{mapped}}` ?",
       "searchOnly": "不映射，仅搜索"
-    },
-    "history": {
-      "clear": "清除搜索历史",
-      "title": "最近搜索"
     }
   },
   "selectorPage": {
@@ -840,6 +822,13 @@
     "speed": "弹幕速度",
     "speedSettings": "速度设置",
     "strokePreset": "描边 / 阴影",
+    "strokePresets": {
+      "3d": "立体阴影",
+      "glow": "发光",
+      "none": "默认",
+      "thick": "粗描边",
+      "thin": "细描边"
+    },
     "style": "样式",
     "tooltip": {
       "distribution": "均匀：弹幕将均匀地填充屏幕。顺序：弹幕将从上到下填充屏幕",
@@ -854,14 +843,7 @@
       "trackHeight": "行高越高，弹幕之间的间距越大"
     },
     "trackHeight": "弹幕行高",
-    "useCustomCss": "使用自定义 CSS",
-    "strokePresets": {
-      "none": "默认",
-      "thin": "细描边",
-      "thick": "粗描边",
-      "glow": "发光",
-      "3d": "立体阴影"
-    }
+    "useCustomCss": "使用自定义 CSS"
   },
   "tabGroups": {
     "content": "内容",
@@ -885,11 +867,11 @@
     "titleMapping": "标题映射"
   },
   "theme": {
-    "selectTheme": "选择主题",
-    "neonViolet": "霓虹紫",
     "emberGlow": "琥珀焰",
+    "neonViolet": "霓虹紫",
     "oceanDepth": "深海蓝",
-    "sakuraNoir": "樱花黑"
+    "sakuraNoir": "樱花黑",
+    "selectTheme": "选择主题"
   },
   "titleMapping": {
     "deleteConfirm_other": "确定要删除 {{count}} 个标题映射吗？",
@@ -900,21 +882,13 @@
     "unmapped": "未映射"
   },
   "translation": {
-    "enable": "启用弹幕翻译",
-    "targetLang": "翻译目标语言",
-    "translating": "翻译中...",
-    "languages": {
-      "en": "英语",
-      "ja": "日语",
-      "zh": "中文",
-      "ko": "韩语"
-    }
+    "enable": "启用弹幕翻译"
   },
   "upscale": {
     "alert": {
       "crossOriginBlocked": "该视频源跨域受限，无法超分",
-      "frameInterpolationUnavailable": "当前视频或 GPU 无法使用补帧，Anime4K 超分将继续运行",
-      "failed": "超分出错，已自动关闭"
+      "failed": "超分出错，已自动关闭",
+      "frameInterpolationUnavailable": "当前视频或 GPU 无法使用补帧，Anime4K 超分将继续运行"
     },
     "corsFix": "跨域修复",
     "enable": "超分辨率",
@@ -949,22 +923,6 @@
     "leave": "离开房间",
     "members_other": "{{count}}人在线",
     "roomId": "房间号",
-    "title": "一起看",
-    "members": "{{count}}人在线",
-    "disconnected": "已断开",
-    "hostControls": "房主控制",
-    "syncPlayback": "同步播放进度"
-  },
-  "matching": {
-    "allStrategiesExhausted": "所有匹配策略均已尝试，未找到匹配",
-    "episodeNumberUndefined": "无法确定集数",
-    "noSeasonsAllProviders": "所有弹幕源均未找到匹配的番剧",
-    "passedToNext": "未找到匹配，已传递给下一策略",
-    "previousStrategyTerminal": "已跳过：上一策略返回了终止结果"
-  },
-  "densityChart": {
-    "comments_one": "{{count}}条弹幕",
-    "comments_other": "{{count}}条弹幕",
-    "clickToSeek": "点击跳转"
+    "title": "一起看"
   }
 }
