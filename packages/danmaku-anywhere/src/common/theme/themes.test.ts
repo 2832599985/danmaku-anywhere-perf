@@ -16,20 +16,19 @@ describe('theme palette resolution', () => {
     expect(resolveColorScheme(ColorMode.Dark, false)).toBe('dark')
   })
 
-  it.each(themeIds)(
-    'provides distinct light glass tokens for %s',
-    (themeId) => {
-      const dark = getThemePalette(themeId, 'dark')
-      const light = getThemePalette(themeId, 'light')
+  it.each(
+    themeIds
+  )('provides distinct light glass tokens for %s', (themeId) => {
+    const dark = getThemePalette(themeId, 'dark')
+    const light = getThemePalette(themeId, 'light')
 
-      expect(Object.keys(dark.glass)).toHaveLength(12)
-      expect(Object.keys(light.glass)).toHaveLength(12)
-      expect(light.glass).not.toEqual(dark.glass)
-      expect(light.glass.base).toContain('255, 255, 255')
-      expect(light.skipButton.text).not.toBe(dark.skipButton.text)
-      expect(themes[themeId].glass).toBe(dark.glass)
-    }
-  )
+    expect(Object.keys(dark.glass)).toHaveLength(12)
+    expect(Object.keys(light.glass)).toHaveLength(12)
+    expect(light.glass).not.toEqual(dark.glass)
+    expect(light.glass.base).toContain('255, 255, 255')
+    expect(light.skipButton.text).not.toBe(dark.skipButton.text)
+    expect(themes[themeId].glass).toBe(dark.glass)
+  })
 
   it('emits the resolved light palette into player CSS variables', () => {
     const light = getThemePalette('ocean-depth', 'light')
