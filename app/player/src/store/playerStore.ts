@@ -69,6 +69,10 @@ export interface PlayerStore {
   comments: CommentEntity[]
   danmakuSource: DanmakuSource | null
 
+  // --- source HDR (detected from the decoded frame; session-only) ---
+  isHdr: boolean
+  hdrTransfer: string | null
+
   // --- live playback ---
   playback: PlaybackState
 
@@ -96,6 +100,8 @@ export interface PlayerStore {
   setMedia: (media: PickedMedia | null) => void
   setComments: (comments: CommentEntity[], source: DanmakuSource | null) => void
   clearDanmaku: () => void
+  /** record the detected HDR transfer ('pq'/'hlg') or null for SDR. */
+  setHdr: (transfer: string | null) => void
 
   patchPlayback: (partial: Partial<PlaybackState>) => void
 
@@ -131,10 +137,13 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * Switching media invalidates the live playback mirror; reset it the same way
- * `setMedia` does (volume/mute are user prefs and survive the switch).
+ * Switching media invalidates the live playback mirror and the detected HDR
+ * state; reset both the same way `setMedia` does (volume/mute are user prefs
+ * and survive the switch).
  */
 function resetPlaybackForNewMedia(s: PlayerStore): void {
+  s.isHdr = false
+  s.hdrTransfer = null
   s.playback = {
     ...INITIAL_PLAYBACK,
     volume: s.playback.volume,
@@ -148,6 +157,9 @@ export const usePlayerStore = create<PlayerStore>()(
       media: null,
       comments: [],
       danmakuSource: null,
+
+      isHdr: false,
+      hdrTransfer: null,
 
       playback: INITIAL_PLAYBACK,
 
@@ -170,6 +182,9 @@ export const usePlayerStore = create<PlayerStore>()(
       setMedia: (media) =>
         set((s) => {
           s.media = media
+          // new source: HDR is unknown until the first frame is decoded
+          s.isHdr = false
+          s.hdrTransfer = null
           // reset live playback for the new media
           s.playback = {
             ...INITIAL_PLAYBACK,
@@ -188,6 +203,12 @@ export const usePlayerStore = create<PlayerStore>()(
         set((s) => {
           s.comments = []
           s.danmakuSource = null
+        }),
+
+      setHdr: (transfer) =>
+        set((s) => {
+          s.hdrTransfer = transfer
+          s.isHdr = transfer !== null
         }),
 
       patchPlayback: (partial) =>

@@ -11,6 +11,7 @@ import { SettingsDrawer } from '@/ui/SettingsDrawer'
 import { TopBar } from '@/ui/TopBar'
 import { type PlayerCommands, PlayerCommandsContext } from './commands'
 import { DanmakuController } from './danmaku/DanmakuController'
+import { detectHdrTransfer } from './detectHdr'
 import { UpscaleController } from './upscale/UpscaleController'
 import { useKeyboardControls } from './useKeyboardControls'
 import { useVideoElement } from './useVideoElement'
@@ -62,6 +63,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   const comments = usePlayerStore((s) => s.comments)
   const danmakuSettings = usePlayerStore((s) => s.danmakuSettings)
   const upscale = usePlayerStore((s) => s.upscale)
+  const isHdr = usePlayerStore((s) => s.isHdr)
   const playing = usePlayerStore((s) => s.playback.playing)
 
   const [controlsVisible, setControlsVisible] = useState(true)
@@ -105,14 +107,46 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     // (The exe allows this via --autoplay-policy; browsers may reject → ignore.)
     void video.play().catch(() => undefined)
     upscaleCtrlRef.current?.reset()
+    // Upscale is (re)applied by the HDR-aware decision effect below, once the
+    // source's HDR state is known.
     const store = usePlayerStore.getState()
-    void upscaleCtrlRef.current?.apply(store.upscale)
     if (store.comments.length) {
       danmakuCtrlRef.current?.setComments(
         video,
         store.comments,
         store.danmakuSettings
       )
+    }
+  }, [media, video])
+
+  // --- detect HDR from the first decoded frame (drives the upscale decision) ---
+  useEffect(() => {
+    if (!video || !media) return
+    let cancelled = false
+    const detect = () => {
+      if (cancelled) return
+      const transfer = detectHdrTransfer(video)
+      const store = usePlayerStore.getState()
+      store.setHdr(transfer)
+      if (transfer && store.upscale.enabled) {
+        store.showOsd(
+          `${transfer === 'hlg' ? 'HLG' : 'HDR10'} 片源 · 已暂停超分`,
+          '🌈'
+        )
+      }
+    }
+    type RVFC = HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: () => void) => number
+    }
+    const v = video as RVFC
+    if (typeof v.requestVideoFrameCallback === 'function') {
+      v.requestVideoFrameCallback(detect)
+    } else {
+      video.addEventListener('loadeddata', detect, { once: true })
+    }
+    return () => {
+      cancelled = true
+      video.removeEventListener('loadeddata', detect)
     }
   }, [media, video])
 
@@ -136,10 +170,19 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     danmakuCtrlRef.current?.updateSettings(danmakuSettings)
   }, [danmakuSettings])
 
-  // --- upscale settings -> apply ---
+  // --- upscale decision: apply, but SUPPRESS on HDR sources ---
+  // The Anime4K path renders through an 8-bit sRGB WebGPU canvas, which would
+  // clip/mangle HDR (PQ/BT.2020). So for HDR sources we keep the native <video>
+  // (which WebView2 outputs/tone-maps correctly) and skip upscaling.
   useEffect(() => {
-    void upscaleCtrlRef.current?.apply(upscale)
-  }, [upscale])
+    const ctrl = upscaleCtrlRef.current
+    if (!ctrl || !video || !media) return
+    if (isHdr && upscale.enabled) {
+      ctrl.reset()
+      return
+    }
+    void ctrl.apply(upscale)
+  }, [upscale, isHdr, media, video])
 
   // --- fullscreen state mirror ---
   useEffect(() => {

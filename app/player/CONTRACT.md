@@ -352,6 +352,44 @@ this frozen contract; leader owned commands/PlayerHost/keyboard/verification.
 creation, sibling-danmaku autoload, drawer UI, next-switching, auto-advance
 on ended). Screenshot: `test-results/exe-3-playlist.png`.
 
+## 15. HDR10 support (2026-07-26 — DONE, verified in exe)
+
+Scope decision: full **Dolby Vision / Dolby Atmos are NOT feasible** in the
+WebView2 `<video>` architecture (Chromium doesn't decode DV RPU or render Atmos
+objects / bitstream-passthrough, and both are Dolby-licensed). What IS feasible
+and shipped is **HDR10** — Chromium/WebView2 does the decode + tone-mapping; our
+job is detection, not breaking the pipeline, and surfacing status.
+
+Capability probe on this machine (`e2e/probe-hdr.mjs`): HEVC Main10 **HDR10
+hardware decode = supported/smooth/powerEfficient** (HEVC Video Extension
+2.4.13 installed); AV1 HDR10 = not supported (no AV1 extension); the display is
+currently in **SDR mode**, so HDR content tone-maps to SDR (true HDR output
+needs Windows HDR toggle + an HDR panel — could not be verified on this SDR
+display).
+
+Implementation:
+- **Detection** (`src/player/detectHdr.ts`): `new VideoFrame(video).colorSpace.transfer`
+  === `'pq'` (HDR10) / `'hlg'` (HLG) on the first `requestVideoFrameCallback`.
+  Chromium doesn't expose transfer on `<video>` directly; the VideoFrame does.
+  (The DOM lib's `VideoTransferCharacteristics` union predates the HDR values →
+  read `transfer` as a plain string.)
+- **Store**: session-only `isHdr` / `hdrTransfer`, `setHdr()`; reset on every
+  media switch (`setMedia` + `resetPlaybackForNewMedia`).
+- **HDR × Anime4K conflict** (the one real hazard): the upscale path renders
+  through an 8-bit sRGB WebGPU canvas, which clips/mangles PQ/BT.2020. So HDR
+  sources **suppress upscaling at runtime** — the user's `upscale.enabled`
+  setting is kept, but a dedicated decision effect in `PlayerHost` skips
+  applying it (keeps the native `<video>`, which WebView2 outputs/tone-maps
+  correctly) and shows a one-time OSD. Switching back to an SDR source resumes
+  upscaling automatically.
+- **UI**: gold `HDR10` / `HLG` chip in `TopBar` next to the filename.
+
+Verified: `e2e/verify-hdr.mjs` (5/5) using an ffmpeg-generated
+`e2e/fixtures/hdr10_test.mp4` (HEVC Main10, PQ, BT.2020) — SDR clip not flagged,
+HDR clip decodes + flagged `pq`, upscale suppressed on HDR (video stays
+visible), upscale resumes on SDR (1280×720 canvas). The 19-check acceptance and
+browser suite still pass. Screenshot: `test-results/exe-4-hdr-badge.png`.
+
 ### Verification harness notes
 - e2e drives the player through `window.__player` (store + commands) with a real
   ffmpeg-generated seekable `e2e/fixtures/test.mp4` loaded as a blob.

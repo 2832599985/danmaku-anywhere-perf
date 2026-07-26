@@ -18,6 +18,8 @@ export const TopBar = ({ visible }: TopBarProps) => {
   const commands = usePlayerCommands()
   const media = usePlayerStore((s) => s.media)
   const danmakuSource = usePlayerStore((s) => s.danmakuSource)
+  const isHdr = usePlayerStore((s) => s.isHdr)
+  const hdrTransfer = usePlayerStore((s) => s.hdrTransfer)
   const playlistOpen = usePlayerStore((s) => s.playlistOpen)
   const playlist = usePlayerStore((s) => s.playlist)
   const setDanmakuDialogOpen = usePlayerStore((s) => s.setDanmakuDialogOpen)
@@ -87,6 +89,21 @@ export const TopBar = ({ visible }: TopBarProps) => {
             >
               {media.name}
             </Typography>
+          )}
+          {isHdr && (
+            <Chip
+              size="small"
+              label={hdrTransfer === 'hlg' ? 'HLG' : 'HDR10'}
+              title="HDR 片源 · 需 Windows HDR 模式与 HDR 显示器方可完整呈现"
+              sx={{
+                flexShrink: 0,
+                fontWeight: 800,
+                letterSpacing: 0.4,
+                bgcolor: 'rgba(250,204,21,0.16)',
+                color: '#fde047',
+                border: '1px solid rgba(250,204,21,0.4)',
+              }}
+            />
           )}
           {danmakuSource && (
             <Chip
