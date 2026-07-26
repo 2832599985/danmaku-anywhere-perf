@@ -21,7 +21,7 @@
         "minHeight": 560,
         "resizable": true,
         "fullscreen": false,
-        "decorations": true,
+        "decorations": false,
         "theme": "Dark",
         "dragDropEnabled": true,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required"

@@ -54,4 +54,13 @@ export interface Platform {
    * is handled with the standard DataTransfer API on the drop target instead.
    */
   onFileDrop(cb: (paths: string[]) => void): () => void
+
+  /**
+   * Window chrome controls for the undecorated Tauri window (the native title
+   * bar is disabled; the top bar renders its own ─ □ ✕). No-ops in the browser,
+   * where the buttons are not rendered at all.
+   */
+  minimizeWindow(): void
+  toggleMaximizeWindow(): void
+  closeWindow(): void
 }

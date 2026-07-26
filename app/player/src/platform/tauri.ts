@@ -116,6 +116,24 @@ export const tauriPlatform: Platform = {
     return readTextFile(path)
   },
 
+  minimizeWindow(): void {
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+      getCurrentWindow().minimize()
+    )
+  },
+
+  toggleMaximizeWindow(): void {
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+      getCurrentWindow().toggleMaximize()
+    )
+  },
+
+  closeWindow(): void {
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+      getCurrentWindow().close()
+    )
+  },
+
   onFileDrop(cb: (paths: string[]) => void): () => void {
     let unlisten: (() => void) | null = null
     let cancelled = false

@@ -21,6 +21,19 @@ export const APP_BG = '#0b0b12'
 /** Violet -> fuchsia gradient used for accents, titles and prominent buttons. */
 export const ACCENT_GRADIENT = `linear-gradient(135deg, ${ACCENT.primary} 0%, ${ACCENT.secondary} 100%)`
 
+/**
+ * Deep multi-stop violet with a near-white specular stop — the "expensive"
+ * purple. A flat two-stop pastel reads like plastic; this one has shadow depth
+ * at both ends and a metallic highlight in the middle. Pair with a blurred
+ * bloom layer for neon depth on dark stages.
+ */
+export const RICH_GRADIENT =
+  'linear-gradient(105deg, #6d28d9 0%, #8b5cf6 20%, #c4b5fd 38%, #f3e8ff 50%, #e879f9 62%, #a855f7 80%, #7c3aed 100%)'
+
+/** Deep saturated fill for hero buttons (dark → bright → fuchsia). */
+export const RICH_BUTTON_GRADIENT =
+  'linear-gradient(135deg, #7c3aed 0%, #a855f7 48%, #d946ef 100%)'
+
 /** rgb triple for the translucent glass fills so alpha can vary per surface. */
 const GLASS_RGB = '20, 20, 32'
 

@@ -666,8 +666,9 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             )}
 
             <Osd />
-            <TopBar visible={overlaysVisible} />
-            <Controls visible={overlaysVisible} />
+            <TopBar visible={overlaysVisible} platform={platform} />
+            {/* No media -> nothing to control; the idle stage stands alone. */}
+            {media && <Controls visible={overlaysVisible} />}
           </div>
 
           <SettingsDrawer />

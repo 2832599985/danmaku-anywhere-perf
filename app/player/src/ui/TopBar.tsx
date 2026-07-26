@@ -1,20 +1,39 @@
 import {
+  CloseRounded,
+  CropSquareRounded,
   FolderOpenRounded,
+  HorizontalRuleRounded,
   PlaylistPlayRounded,
   SubtitlesRounded,
   TuneRounded,
 } from '@mui/icons-material'
-import { Box, Button, Chip, Stack, Tooltip, Typography } from '@mui/material'
+import {
+  Box,
+  Button,
+  Chip,
+  Divider,
+  IconButton,
+  Stack,
+  Tooltip,
+  Typography,
+} from '@mui/material'
+import type { Platform } from '@/platform'
 import { usePlayerCommands } from '@/player/commands'
 import { usePlayerStore } from '@/store/playerStore'
-import { ACCENT_GRADIENT, glassSx, gradientTextSx } from '@/theme/theme'
+import { glassSx, gradientTextSx } from '@/theme/theme'
+import { LogoMark } from './LogoMark'
 
 interface TopBarProps {
   /** When false, the bar fades and slides up out of view. */
   visible: boolean
+  /** Window chrome lives here now — the native title bar is disabled. */
+  platform: Platform
 }
 
-export const TopBar = ({ visible }: TopBarProps) => {
+/** Marks an element as a native-window drag handle (undecorated Tauri window). */
+const dragRegion = { 'data-tauri-drag-region': true }
+
+export const TopBar = ({ visible, platform }: TopBarProps) => {
   const commands = usePlayerCommands()
   const media = usePlayerStore((s) => s.media)
   const danmakuSource = usePlayerStore((s) => s.danmakuSource)
@@ -27,6 +46,7 @@ export const TopBar = ({ visible }: TopBarProps) => {
 
   return (
     <Box
+      {...dragRegion}
       sx={{
         position: 'absolute',
         top: 0,
@@ -45,6 +65,7 @@ export const TopBar = ({ visible }: TopBarProps) => {
       }}
     >
       <Box
+        {...dragRegion}
         sx={{
           ...glassSx(0.5),
           borderRadius: '999px',
@@ -55,16 +76,7 @@ export const TopBar = ({ visible }: TopBarProps) => {
           gap: 1,
         }}
       >
-        <Box
-          sx={{
-            width: 26,
-            height: 26,
-            borderRadius: '8px',
-            background: ACCENT_GRADIENT,
-            flexShrink: 0,
-            boxShadow: '0 0 16px rgba(167,139,250,0.5)',
-          }}
-        />
+        <LogoMark size={26} glow={0.45} />
         <Typography
           variant="subtitle1"
           sx={{ ...gradientTextSx, fontWeight: 800, flexShrink: 0 }}
@@ -74,6 +86,7 @@ export const TopBar = ({ visible }: TopBarProps) => {
 
         {/* current media + danmaku source */}
         <Stack
+          {...dragRegion}
           direction="row"
           spacing={1}
           alignItems="center"
@@ -159,6 +172,47 @@ export const TopBar = ({ visible }: TopBarProps) => {
               设置
             </Button>
           </Tooltip>
+
+          {/* window chrome — the OS title bar is disabled (undecorated) */}
+          {platform.isTauri && (
+            <>
+              <Divider
+                orientation="vertical"
+                flexItem
+                sx={{ mx: 0.5, my: 0.5, borderColor: 'rgba(255,255,255,0.10)' }}
+              />
+              <IconButton
+                size="small"
+                aria-label="最小化 / Minimize"
+                onClick={() => platform.minimizeWindow()}
+                sx={{ borderRadius: '10px' }}
+              >
+                <HorizontalRuleRounded sx={{ fontSize: 18 }} />
+              </IconButton>
+              <IconButton
+                size="small"
+                aria-label="最大化 / Maximize"
+                onClick={() => platform.toggleMaximizeWindow()}
+                sx={{ borderRadius: '10px' }}
+              >
+                <CropSquareRounded sx={{ fontSize: 15 }} />
+              </IconButton>
+              <IconButton
+                size="small"
+                aria-label="关闭 / Close"
+                onClick={() => platform.closeWindow()}
+                sx={{
+                  borderRadius: '10px',
+                  '&:hover': {
+                    backgroundColor: 'rgba(225,29,72,0.85)',
+                    color: '#fff',
+                  },
+                }}
+              >
+                <CloseRounded sx={{ fontSize: 18 }} />
+              </IconButton>
+            </>
+          )}
         </Stack>
       </Box>
     </Box>

@@ -559,3 +559,29 @@ longer leaks when the re-opened item is the oldest one.
 onto the 16-pixel grid independently, squashing 640x360 by 2.2% (-> 640x352) and
 1080p by 0.74%. It now picks the aligned width nearest the source aspect
 (640x360 -> 624x352, 1920x1080 -> 1904x1072).
+
+## 19. Main-window redesign: frameless chrome + idle stage (2026-07-26 — DONE)
+
+User feedback: the native Windows title bar ("大黑条") and the form-like empty
+state read as a wrapped web page, and the flat two-stop purple looked cheap.
+
+**Frameless window.** `decorations: false`; the top pill bar is the title bar
+now — `data-tauri-drag-region` on the bar/pill/middle-stack (children stay
+clickable), double-click maximizes, and ─ □ ✕ render at the pill's right end via
+new `Platform.minimizeWindow/toggleMaximizeWindow/closeWindow` (no-ops in the
+browser adapter, buttons gated on `isTauri`). Capabilities add
+`core:window:allow-{minimize,toggle-maximize,close,start-dragging}`.
+
+**Idle stage (EmptyState).** No more dashed drop-card. A scene: ambient violet
+pools + soft top glow + film grain, six ghost danmaku drifting on CSS tracks, a
+typography-led hero (blurred neon bloom under a RICH_GRADIENT metallic sweep —
+the "expensive purple": multi-stop with a near-white specular, animated
+background-position), an SVG stroke-dash button (`pathLength={100}`, a gradient
+comet orbiting the outline that draws closed on hover), anime sparkles (✦)
+twinkling out of phase, a line-art cat-ear TV mascot bottom-right (hidden
+<1080px), and a continue-watching strip fed from playlist+progress (top 3 by
+`updatedAt`, mini thumbnail glyphs, click = `openVideoFromPath`). The bottom
+Controls bar no longer renders with no media loaded.
+
+**Verify:** 30/30 in the packaged exe; the empty-state innerText check now sees
+the ghost danmaku, which is expected.

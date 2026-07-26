@@ -84,4 +84,15 @@ export const browserPlatform: Platform = {
     // Browser drag-drop is handled with the DataTransfer API on the drop zone.
     return () => undefined
   },
+
+  // The browser tab has its own chrome; the custom window buttons never render.
+  minimizeWindow(): void {
+    // no-op outside Tauri
+  },
+  toggleMaximizeWindow(): void {
+    // no-op outside Tauri
+  },
+  closeWindow(): void {
+    // no-op outside Tauri
+  },
 }
