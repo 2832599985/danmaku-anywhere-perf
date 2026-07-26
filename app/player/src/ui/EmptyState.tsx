@@ -1,8 +1,4 @@
-import {
-  FolderOpenRounded,
-  HistoryRounded,
-  PlayArrowRounded,
-} from '@mui/icons-material'
+import { HistoryRounded, PlayArrowRounded } from '@mui/icons-material'
 import { Box, LinearProgress, Stack, Typography } from '@mui/material'
 import { usePlayerCommands } from '@/player/commands'
 import type { PlaylistItem, ResumeEntry } from '@/store/playerStore'
@@ -103,6 +99,32 @@ const TvMascot = () => (
       <rect x="178" y="38" width="34" height="20" rx="10" strokeWidth="2.5" />
       <path d="M186 48 H204" strokeWidth="2.5" strokeLinecap="round" />
     </svg>
+  </Box>
+)
+
+/** Gradient folder-with-play glyph for the open button (replaces the stock MUI icon). */
+const OpenIcon = () => (
+  <Box
+    component="svg"
+    aria-hidden
+    viewBox="0 0 22 22"
+    sx={{ width: 20, height: 20, flexShrink: 0 }}
+  >
+    <defs>
+      <linearGradient id="da-open-grad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stopColor="#c4b5fd" />
+        <stop offset="1" stopColor="#e879f9" />
+      </linearGradient>
+    </defs>
+    <path
+      d="M2.5 6.5C2.5 5.4 3.4 4.5 4.5 4.5H8L10 6.5H17.5C18.6 6.5 19.5 7.4 19.5 8.5V15.5C19.5 16.6 18.6 17.5 17.5 17.5H4.5C3.4 17.5 2.5 16.6 2.5 15.5V6.5Z"
+      fill="none"
+      stroke="#fff"
+      strokeOpacity="0.9"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+    <path d="M9.4 9.3L14.4 12L9.4 14.7Z" fill="url(#da-open-grad)" />
   </Box>
 )
 
@@ -456,7 +478,7 @@ export const EmptyState = () => {
               style={{ width: 'calc(100% - 2px)', height: 'calc(100% - 2px)' }}
             />
           </Box>
-          <FolderOpenRounded sx={{ fontSize: 20 }} />
+          <OpenIcon />
           打开视频 / Open
         </Box>
 
