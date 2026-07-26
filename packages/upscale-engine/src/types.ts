@@ -11,6 +11,18 @@ interface FrameInterpolationOptions {
   resolution: FrameInterpolationResolution
   weightsBinUrl: string
   weightsManifestUrl: string
+  /**
+   * Explicit integer interpolation factor (2 = classic 2x, 3, 4, …). When set
+   * and >= 2 it wins over `targetFps`. Omitted → 2x (backwards compatible with
+   * the extension, which never sets it).
+   */
+  multiplier?: number
+  /**
+   * Desired output frame rate. When set (and `multiplier` is not), the engine
+   * derives the per-pair factor live from the measured source fps, so 24fps and
+   * 30fps sources both approach this target. Clamped to a safe factor ceiling.
+   */
+  targetFps?: number
 }
 
 // 定义视频增强器接口

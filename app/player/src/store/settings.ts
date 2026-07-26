@@ -27,6 +27,13 @@ export type TargetResolution =
 
 export type InterpolationResolution = '480p' | '720p'
 
+/** How the interpolation factor is chosen. */
+export type InterpolationMode = 'multiplier' | 'targetFps'
+/** Explicit integer factors offered in the UI. */
+export type InterpolationMultiplier = 2 | 3 | 4
+/** Target output frame rates offered in the UI (matches common refresh rates). */
+export type InterpolationTargetFps = 60 | 120 | 144 | 170
+
 export interface UpscaleSettings {
   enabled: boolean
   modeId: UpscaleModeId
@@ -35,7 +42,20 @@ export interface UpscaleSettings {
   frameInterpolation: {
     enabled: boolean
     resolution: InterpolationResolution
+    /** 'multiplier' = fixed N×; 'targetFps' = adapt N× to reach a target fps. */
+    mode: InterpolationMode
+    /** used when mode === 'multiplier'. */
+    multiplier: InterpolationMultiplier
+    /** used when mode === 'targetFps'. */
+    targetFps: InterpolationTargetFps
   }
+}
+
+/** A patch for UpscaleSettings that allows a partial nested frameInterpolation. */
+export type UpscaleSettingsPatch = Partial<
+  Omit<UpscaleSettings, 'frameInterpolation'>
+> & {
+  frameInterpolation?: Partial<UpscaleSettings['frameInterpolation']>
 }
 
 export interface DanmakuSettings {
@@ -80,6 +100,9 @@ export const DEFAULT_UPSCALE: UpscaleSettings = {
   frameInterpolation: {
     enabled: false,
     resolution: '720p',
+    mode: 'multiplier',
+    multiplier: 2,
+    targetFps: 60,
   },
 }
 

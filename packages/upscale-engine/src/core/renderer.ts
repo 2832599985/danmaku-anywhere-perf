@@ -473,7 +473,7 @@ export class Renderer {
         },
       })
       console.log(
-        `[DanmakuAnywhere][Framegen] 2x interpolation ready at ${this.frameInterpolator.dimensions.width}x${this.frameInterpolator.dimensions.height}.`
+        `[DanmakuAnywhere][Framegen] interpolation ready at ${this.frameInterpolator.dimensions.width}x${this.frameInterpolator.dimensions.height}.`
       )
       this.canvas.dataset.danmakuAnywhereFrameInterpolation = 'active'
     } catch (error) {

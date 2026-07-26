@@ -6,7 +6,10 @@ import type {
 
 const ALIGNMENT = 16
 const SOURCE_POOL_SIZE = 8
-const MID_POOL_SIZE = 4
+/** Hard ceiling on the interpolation factor (quality/GPU-cost guard). */
+const MAX_INTERPOLATION_FACTOR = 8
+/** Lowest source fps assumed when sizing pools for a target-fps request. */
+const MIN_ASSUMED_SOURCE_FPS = 20
 const DEDUP_SAMPLE_WIDTH = 48
 const DEDUP_SAMPLE_HEIGHT = 27
 const DEDUP_SAMPLE_COUNT = DEDUP_SAMPLE_WIDTH * DEDUP_SAMPLE_HEIGHT
@@ -159,6 +162,53 @@ export function classifyDifferenceStats(
   }
 }
 
+/** Options subset that selects the interpolation factor. */
+export interface InterpolationFactorOptions {
+  multiplier?: number
+  targetFps?: number
+}
+
+/**
+ * The largest factor the interpolator may ever use for a request, used to size
+ * GPU texture pools up front. An explicit multiplier is exact; a target fps is
+ * sized against the lowest source fps we expect so pools never run short.
+ */
+export function computeMaxInterpolationFactor(
+  options: InterpolationFactorOptions,
+  cap = MAX_INTERPOLATION_FACTOR
+): number {
+  if (options.multiplier && options.multiplier >= 2) {
+    return Math.max(2, Math.min(cap, Math.floor(options.multiplier)))
+  }
+  if (options.targetFps && options.targetFps > 0) {
+    return Math.max(
+      2,
+      Math.min(cap, Math.ceil(options.targetFps / MIN_ASSUMED_SOURCE_FPS))
+    )
+  }
+  return 2
+}
+
+/**
+ * The factor to apply to a specific source pair. Explicit multiplier wins;
+ * otherwise it is derived from the target fps and the live source fps, so 24fps
+ * and 30fps sources both approach the target. Always in [2, maxFactor].
+ */
+export function resolveInterpolationFactor(
+  options: InterpolationFactorOptions,
+  sourceFps: number,
+  maxFactor = MAX_INTERPOLATION_FACTOR
+): number {
+  const cap = Math.max(2, maxFactor)
+  if (options.multiplier && options.multiplier >= 2) {
+    return Math.max(2, Math.min(cap, Math.floor(options.multiplier)))
+  }
+  if (options.targetFps && sourceFps > 0) {
+    return Math.max(2, Math.min(cap, Math.round(options.targetFps / sourceFps)))
+  }
+  return 2
+}
+
 export function shouldInterpolateInterval(intervalMs: number): boolean {
   // The first release targets 24/25/30 fps video. At >=45 fps a 2x stream
   // cannot be displayed on the common 60 Hz path and only adds GPU pressure.
@@ -265,6 +315,11 @@ export class FrameInterpolator {
   private lastSourcePoolWarningAt = 0
   private generatedFrames = 0
 
+  /** Factor selection (explicit multiplier or derived from targetFps). */
+  private readonly factorOptions: InterpolationFactorOptions
+  /** Upper bound the mid-texture pool was sized for. */
+  private readonly maxFactor: number
+
   private readonly handleSeeking = () => this.resetTimeline()
 
   private constructor(
@@ -280,13 +335,22 @@ export class FrameInterpolator {
     this.onFrameGenerated = createOptions.onFrameGenerated
     this.video.addEventListener('seeking', this.handleSeeking)
 
+    this.factorOptions = {
+      multiplier: createOptions.options.multiplier,
+      targetFps: createOptions.options.targetFps,
+    }
+    this.maxFactor = computeMaxInterpolationFactor(this.factorOptions)
+
     this.sourceTextures = Array.from({ length: SOURCE_POOL_SIZE }, (_, index) =>
       this.createFrameTexture(
         `danmaku-anywhere-framegen-source-${index}`,
         false
       )
     )
-    this.midTextures = Array.from({ length: MID_POOL_SIZE }, (_, index) =>
+    // Each source pair may enqueue up to (maxFactor - 1) generated frames, and a
+    // couple of pairs can be in flight, so scale the pool with the factor.
+    const midPoolSize = Math.max(4, (this.maxFactor - 1) * 3 + 2)
+    this.midTextures = Array.from({ length: midPoolSize }, (_, index) =>
       this.createFrameTexture(`danmaku-anywhere-framegen-mid-${index}`, true)
     )
 
@@ -618,26 +682,51 @@ export class FrameInterpolator {
       return
     }
 
-    if (displayAt <= performance.now() + 4) return
-    const outputTexture = this.acquireTexture(this.midTextures, 'midIndex')
-    if (!outputTexture) return
+    // Choose how many frames to synthesize for this pair. Explicit multiplier is
+    // constant; a target-fps request adapts to the live source cadence.
+    const sourceFps = this.intervalMs > 0 ? 1000 / this.intervalMs : 0
+    const factor = resolveInterpolationFactor(
+      this.factorOptions,
+      sourceFps,
+      this.maxFactor
+    )
+
+    // Acquire a mid texture and compute the display time for each sub-frame at
+    // t = k/factor. Skip sub-frames that are already stale.
+    const now = performance.now()
+    const generated: { texture: GPUTexture; t: number; displayAt: number }[] =
+      []
+    for (let k = 1; k < factor; k++) {
+      const t = k / factor
+      const subDisplayAt =
+        previousDisplayAt + (currentDisplayAt - previousDisplayAt) * t
+      if (subDisplayAt <= now + 4) continue
+      const texture = this.acquireTexture(this.midTextures, 'midIndex')
+      if (!texture) break // pool exhausted — present what we have
+      generated.push({ texture, t, displayAt: subDisplayAt })
+    }
+    if (generated.length === 0) return
 
     const startedAt = performance.now()
     this.runtime.prepPair(previousTexture, currentTexture)
-    this.runtime.runT(0.5, outputTexture)
-    this.enqueue(outputTexture, displayAt)
+    for (const frame of generated) {
+      this.runtime.runT(frame.t, frame.texture)
+      this.enqueue(frame.texture, frame.displayAt)
+    }
 
     void this.device.queue
       .onSubmittedWorkDone()
       .then(() => {
         if (this.destroyed) return
-        this.generatedFrames++
+        this.generatedFrames += generated.length
         this.onFrameGenerated?.(this.generatedFrames)
         const elapsed = performance.now() - startedAt
         this.interpolationCostMs = this.interpolationCostMs
           ? this.interpolationCostMs * 0.8 + elapsed * 0.2
           : elapsed
-        if (this.interpolationCostMs > this.intervalMs * 0.65) {
+        // All sub-frames must fit inside the source interval; use the whole
+        // budget (higher factors legitimately cost more per pair).
+        if (this.interpolationCostMs > this.intervalMs * 0.85) {
           this.overloadSamples++
           if (this.overloadSamples >= 3) {
             this.skipInterpolationUntil = performance.now() + 2000

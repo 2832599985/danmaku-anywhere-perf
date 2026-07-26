@@ -76,12 +76,20 @@ const buildEffects = (settings: UpscaleSettings): EnhancementEffect[] =>
 
 const buildFrameInterpolation = (
   settings: UpscaleSettings
-): FrameInterpolationOptions => ({
-  enabled: settings.frameInterpolation.enabled,
-  resolution: settings.frameInterpolation.resolution,
-  weightsBinUrl: FRAMEGEN_BIN_URL,
-  weightsManifestUrl: FRAMEGEN_MANIFEST_URL,
-})
+): FrameInterpolationOptions => {
+  const fi = settings.frameInterpolation
+  return {
+    enabled: fi.enabled,
+    resolution: fi.resolution,
+    weightsBinUrl: FRAMEGEN_BIN_URL,
+    weightsManifestUrl: FRAMEGEN_MANIFEST_URL,
+    // Send only the field the chosen mode uses; the engine prefers `multiplier`
+    // when both are present.
+    ...(fi.mode === 'targetFps'
+      ? { targetFps: fi.targetFps }
+      : { multiplier: fi.multiplier }),
+  }
+}
 
 /**
  * Owns the overlay <canvas> and the upscale-engine Renderer (Anime4K super

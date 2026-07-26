@@ -3,7 +3,9 @@ import {
   calculateFrameProcessingDelay,
   calculateInterpolationDimensions,
   classifyDifferenceStats,
+  computeMaxInterpolationFactor,
   isMediaTimelineDiscontinuity,
+  resolveInterpolationFactor,
   shouldInterpolateInterval,
 } from './frame-interpolator'
 
@@ -95,5 +97,41 @@ describe('frame interpolation helpers', () => {
         playbackRate: 0.5,
       })
     ).toBe(false)
+  })
+})
+
+describe('interpolation factor selection', () => {
+  it('defaults to 2x when neither multiplier nor targetFps is set', () => {
+    expect(resolveInterpolationFactor({}, 24)).toBe(2)
+    expect(computeMaxInterpolationFactor({})).toBe(2)
+  })
+
+  it('uses an explicit multiplier verbatim, clamped to [2, cap]', () => {
+    expect(resolveInterpolationFactor({ multiplier: 3 }, 24)).toBe(3)
+    expect(resolveInterpolationFactor({ multiplier: 4 }, 30)).toBe(4)
+    expect(resolveInterpolationFactor({ multiplier: 1 }, 24)).toBe(2)
+    expect(resolveInterpolationFactor({ multiplier: 99 }, 24, 4)).toBe(4)
+  })
+
+  it('derives the factor from targetFps and the live source fps', () => {
+    // 24fps source -> 60fps ~ 2.5 -> rounds to 3; -> 120 -> 5
+    expect(resolveInterpolationFactor({ targetFps: 60 }, 24)).toBe(3)
+    expect(resolveInterpolationFactor({ targetFps: 120 }, 24)).toBe(5)
+    // 30fps source -> 60 -> exactly 2
+    expect(resolveInterpolationFactor({ targetFps: 60 }, 30)).toBe(2)
+    // 170Hz target on a 24fps source approaches 7x
+    expect(resolveInterpolationFactor({ targetFps: 170 }, 24)).toBe(7)
+  })
+
+  it('never returns less than 2 and respects the cap for targetFps', () => {
+    expect(resolveInterpolationFactor({ targetFps: 60 }, 120)).toBe(2)
+    expect(resolveInterpolationFactor({ targetFps: 170 }, 24, 4)).toBe(4)
+  })
+
+  it('sizes the max factor against the lowest expected source fps', () => {
+    // targetFps sizing assumes a 20fps floor -> 170/20 = 8.5 -> ceil 9 -> cap 8
+    expect(computeMaxInterpolationFactor({ targetFps: 170 })).toBe(8)
+    expect(computeMaxInterpolationFactor({ targetFps: 60 })).toBe(3)
+    expect(computeMaxInterpolationFactor({ multiplier: 4 })).toBe(4)
   })
 })

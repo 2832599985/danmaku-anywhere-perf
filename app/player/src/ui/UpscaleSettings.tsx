@@ -12,7 +12,10 @@ import {
 } from '@mui/material'
 import { usePlayerStore } from '@/store/playerStore'
 import type {
+  InterpolationMode,
+  InterpolationMultiplier,
   InterpolationResolution,
+  InterpolationTargetFps,
   PerformanceTier,
   TargetResolution,
   UpscaleModeId,
@@ -50,6 +53,25 @@ const SCALES: { value: TargetResolution; label: string }[] = [
   { value: '2k', label: '2K' },
   { value: '4k', label: '4K' },
   { value: 'native', label: '原生' },
+]
+
+const INTERP_MODES: { value: InterpolationMode; label: string }[] = [
+  { value: 'multiplier', label: '倍率 Factor' },
+  { value: 'targetFps', label: '目标帧率 Target' },
+]
+
+const INTERP_MULTIPLIERS: { value: InterpolationMultiplier; label: string }[] =
+  [
+    { value: 2, label: '2×' },
+    { value: 3, label: '3×' },
+    { value: 4, label: '4×' },
+  ]
+
+const INTERP_TARGET_FPS: { value: InterpolationTargetFps; label: string }[] = [
+  { value: 60, label: '60' },
+  { value: 120, label: '120' },
+  { value: 144, label: '144' },
+  { value: 170, label: '170' },
 ]
 
 export const UpscaleSettings = () => {
@@ -185,7 +207,7 @@ export const UpscaleSettings = () => {
       <Divider />
 
       {/* frame interpolation */}
-      <Stack spacing={1}>
+      <Stack spacing={1.25}>
         <Stack
           direction="row"
           alignItems="center"
@@ -193,7 +215,7 @@ export const UpscaleSettings = () => {
           spacing={1}
         >
           <Box>
-            <Typography sx={{ fontWeight: 700 }}>2× 补帧</Typography>
+            <Typography sx={{ fontWeight: 700 }}>补帧</Typography>
             <Typography variant="caption" color="text.secondary">
               Frame interpolation · 过载时自动跳过
             </Typography>
@@ -201,37 +223,98 @@ export const UpscaleSettings = () => {
           <Switch
             checked={fi.enabled}
             onChange={(_, enabled) =>
-              updateUpscale({
-                frameInterpolation: {
-                  ...usePlayerStore.getState().upscale.frameInterpolation,
-                  enabled,
-                },
-              })
+              updateUpscale({ frameInterpolation: { enabled } })
             }
             inputProps={{ 'aria-label': '补帧 Frame interpolation' }}
           />
         </Stack>
 
         {fi.enabled && (
-          <ToggleButtonGroup
-            exclusive
-            size="small"
-            value={fi.resolution}
-            sx={toggleGridSx(2)}
-            onChange={(_, v: InterpolationResolution | null) => {
-              if (v) {
-                updateUpscale({
-                  frameInterpolation: {
-                    ...usePlayerStore.getState().upscale.frameInterpolation,
-                    resolution: v,
-                  },
-                })
-              }
-            }}
-          >
-            <ToggleButton value="480p">480p</ToggleButton>
-            <ToggleButton value="720p">720p</ToggleButton>
-          </ToggleButtonGroup>
+          <>
+            <PanelSection label="补帧分辨率 Resolution">
+              <ToggleButtonGroup
+                exclusive
+                size="small"
+                value={fi.resolution}
+                sx={toggleGridSx(2)}
+                onChange={(_, v: InterpolationResolution | null) => {
+                  if (v)
+                    updateUpscale({ frameInterpolation: { resolution: v } })
+                }}
+              >
+                <ToggleButton value="480p">480p</ToggleButton>
+                <ToggleButton value="720p">720p</ToggleButton>
+              </ToggleButtonGroup>
+            </PanelSection>
+
+            <PanelSection label="模式 Mode">
+              <ToggleButtonGroup
+                exclusive
+                size="small"
+                value={fi.mode}
+                sx={toggleGridSx(2)}
+                onChange={(_, v: InterpolationMode | null) => {
+                  if (v) updateUpscale({ frameInterpolation: { mode: v } })
+                }}
+              >
+                {INTERP_MODES.map((m) => (
+                  <ToggleButton key={m.value} value={m.value}>
+                    {m.label}
+                  </ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+            </PanelSection>
+
+            {fi.mode === 'multiplier' ? (
+              <PanelSection label="倍率 Factor">
+                <ToggleButtonGroup
+                  exclusive
+                  size="small"
+                  value={fi.multiplier}
+                  sx={toggleGridSx(3)}
+                  onChange={(_, v: InterpolationMultiplier | null) => {
+                    if (v)
+                      updateUpscale({ frameInterpolation: { multiplier: v } })
+                  }}
+                >
+                  {INTERP_MULTIPLIERS.map((m) => (
+                    <ToggleButton key={m.value} value={m.value}>
+                      {m.label}
+                    </ToggleButton>
+                  ))}
+                </ToggleButtonGroup>
+              </PanelSection>
+            ) : (
+              <PanelSection label="目标帧率 Target fps">
+                <ToggleButtonGroup
+                  exclusive
+                  size="small"
+                  value={fi.targetFps}
+                  sx={toggleGridSx(4)}
+                  onChange={(_, v: InterpolationTargetFps | null) => {
+                    if (v)
+                      updateUpscale({ frameInterpolation: { targetFps: v } })
+                  }}
+                >
+                  {INTERP_TARGET_FPS.map((t) => (
+                    <ToggleButton key={t.value} value={t.value}>
+                      {t.label}
+                    </ToggleButton>
+                  ))}
+                </ToggleButtonGroup>
+              </PanelSection>
+            )}
+
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ opacity: 0.75 }}
+            >
+              {fi.mode === 'targetFps'
+                ? '实际倍率随片源帧率自动调整；输出帧率不会超过显示器刷新率。'
+                : '输出帧率 = 片源帧率 × 倍率，且不会超过显示器刷新率。'}
+            </Typography>
+          </>
         )}
 
         {interpolationCaption && (
