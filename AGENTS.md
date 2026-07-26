@@ -34,8 +34,10 @@ corepack pnpm -r --filter @mr-quin/danmaku-anywhere... build
 ## 测试（packages/danmaku-anywhere）
 
 ```powershell
-corepack pnpm -C packages/danmaku-anywhere test
+corepack pnpm -C packages/danmaku-anywhere test run
 ```
+
+必须带 `run`：该包的 `test` 脚本是裸 `vitest`，省略会进入 watch 模式并挂住非交互会话。
 
 ## 打包扩展（Chrome/Edge）
 
