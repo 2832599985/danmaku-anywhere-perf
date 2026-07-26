@@ -158,7 +158,14 @@ export class Renderer {
   private video: HTMLVideoElement
   private canvas: HTMLCanvasElement
   private effects: EnhancementEffect[]
+  /** 钳制到 GPU 纹理上限之后的实际渲染尺寸 */
   private targetDimensions: Dimensions
+  /**
+   * 上层请求的目标尺寸（未钳制）。变更检测必须与它比较：buildPipelines 会把
+   * 钳制后的值写回 targetDimensions，若拿钳制值去比，重复下发同一套设置会
+   * 每次都被判定为"尺寸变了"，白白整链重建并清空管线缓存。
+   */
+  private requestedTargetDimensions: Dimensions
   private frameInterpolation?: FrameInterpolationOptions
   private sourceDimensions: Dimensions = { width: 0, height: 0 }
   private onError?: (error: Error) => void
@@ -204,6 +211,15 @@ export class Renderer {
   // --- 状态标志 ---
   private destroyed = false
   private animationFrameId: number | null = null
+  /**
+   * rVFC 循环代号。设备恢复、视频源切换会自增；挂起中的旧回调恢复执行时
+   * 发现代号已变即自行退出并放弃续订。单靠 cancelVideoFrameCallback 不够：
+   * 回调一旦触发，其句柄就已失效，取消它是空操作，而正卡在
+   * `await processFrame` 里的那次循环仍会在末尾续订出第二条链。
+   */
+  private renderLoopGeneration = 0
+  /** 当前 rVFC 回调注册在哪个 video 上——切源后可能不是 this.video */
+  private renderLoopVideo: HTMLVideoElement | null = null
   private presentationAnimationFrameId: number | null = null
   /** 是否使用 ImageBitmap 作为回退方案来复制视频帧 */
   private useImageBitmapFallback = false
@@ -229,6 +245,11 @@ export class Renderer {
   private videoFrameTexture!: GPUTexture
   /** 效果处理管线链 */
   private pipelines: Anime4KPipeline[] = []
+  /**
+   * 已被新管线取代、但仍被当前 renderBindGroup 引用的上一代管线。
+   * 必须等新绑定组建立后才销毁，否则绑定组会短暂悬挂在已销毁的纹理上。
+   */
+  private supersededPipelines: Anime4KPipeline[] = []
   /**
    * 按源分辨率缓存的整套管线。自适应码率在固定几档清晰度间来回切换
    * （如 1080p→720p→1080p），每次切换原本都要完整重建：逐效果编译着色器
@@ -276,6 +297,7 @@ export class Renderer {
         ? []
         : options.effects
     this.targetDimensions = options.targetDimensions
+    this.requestedTargetDimensions = options.targetDimensions
     this.frameInterpolation = options.frameInterpolation
     this.onError = options.onError
     this.onFrameInterpolationFallback = options.onFrameInterpolationFallback
@@ -341,22 +363,7 @@ export class Renderer {
       this.device = await this.requestDeviceWithLimits(adapter)
 
       // 监听设备丢失事件并尝试自动恢复
-      this.device.lost.then((info) => {
-        // 如果渲染器已销毁，不需要处理
-        if (this.destroyed) return
-
-        console.warn(
-          `[Anime4KWebExt] GPU device lost: ${info.reason} - ${info.message}`
-        )
-
-        // 尝试自动恢复（仅在非主动销毁的情况下）
-        if (info.reason !== 'destroyed' && !this.isRecovering) {
-          console.log(
-            '[Anime4KWebExt] Attempting to recover from device loss...'
-          )
-          this.recoverFromDeviceLoss()
-        }
-      })
+      this.watchDeviceLoss()
 
       // 检查是否需要使用 ImageBitmap 回退方案
       const supportsVideoTexture = await Renderer.detectWebGPUFeatures()
@@ -433,6 +440,24 @@ export class Renderer {
   /** 返回设备支持的最大 2D 纹理边长（供上层钳制目标分辨率） */
   public getMaxTextureDimension(): number {
     return this.maxTextureDimension
+  }
+
+  /** 监听当前设备的丢失事件，非主动销毁时触发自动恢复 */
+  private watchDeviceLoss(): void {
+    const device = this.device
+    void device.lost.then((info) => {
+      // 已销毁，或该 Promise 属于恢复前的旧设备，都无需处理
+      if (this.destroyed || this.device !== device) return
+
+      console.warn(
+        `[Anime4KWebExt] GPU device lost: ${info.reason} - ${info.message}`
+      )
+
+      if (info.reason !== 'destroyed' && !this.isRecovering) {
+        console.log('[Anime4KWebExt] Attempting to recover from device loss...')
+        void this.recoverFromDeviceLoss()
+      }
+    })
   }
 
   private async initializeFrameInterpolator(): Promise<void> {
@@ -542,50 +567,112 @@ export class Renderer {
     })
   }
 
-  /** 销毁一套管线资源（效果链 + 输入纹理；绑定组无需显式销毁） */
-  private destroyPipelineSet(set: PipelineSet): void {
-    for (const p of set.pipelines) {
+  /** 逐个安全销毁一组管线，单个失败不影响其余 */
+  private destroyPipelines(pipelines: Anime4KPipeline[]): void {
+    for (const p of pipelines) {
       try {
         ;(p as DestroyablePipeline).destroy?.()
       } catch {
         // 忽略单个管道销毁错误
       }
     }
+  }
+
+  /** 销毁一套管线资源（效果链 + 输入纹理；绑定组无需显式销毁） */
+  private destroyPipelineSet(set: PipelineSet): void {
+    this.destroyPipelines(set.pipelines)
     set.videoFrameTexture.destroy()
   }
 
   /**
-   * 把当前整套管线按其源分辨率存入缓存并移交所有权（清空 this.pipelines，
-   * 防止后续 buildPipelines 把缓存中的管线当旧管线销毁）。超容量时按
-   * 插入序淘汰最旧的一套（命中时取出、再次换出时重新插入，即为 LRU）。
+   * 快照当前整套输入图。重建成功后整体存入缓存，失败则原样还原——
+   * 二者都要求三者作为一个整体转移，绝不能只换其中之一。
    */
-  private stashCurrentPipelineSet(): void {
+  private snapshotCurrentPipelineSet(): PipelineSet | null {
     if (
       !this.videoFrameTexture ||
       !this.renderBindGroup ||
       this.pipelines.length === 0
     ) {
-      return
+      return null
     }
-    const key = `${this.videoFrameTexture.width}x${this.videoFrameTexture.height}`
+    return {
+      videoFrameTexture: this.videoFrameTexture,
+      pipelines: this.pipelines,
+      renderBindGroup: this.renderBindGroup,
+    }
+  }
+
+  /**
+   * 把一套管线按其源分辨率存入缓存并移交所有权。超容量时按插入序淘汰
+   * 最旧的一套（命中时取出、再次换出时重新插入，即为 LRU）。
+   */
+  private stashPipelineSet(set: PipelineSet): void {
+    const key = `${set.videoFrameTexture.width}x${set.videoFrameTexture.height}`
     const existing = this.pipelineCache.get(key)
-    if (existing) {
+    if (existing && existing !== set) {
       // 防御：同尺寸旧条目不应存在，若有则先销毁避免泄漏
       this.pipelineCache.delete(key)
       this.destroyPipelineSet(existing)
     }
-    this.pipelineCache.set(key, {
-      videoFrameTexture: this.videoFrameTexture,
-      pipelines: this.pipelines,
-      renderBindGroup: this.renderBindGroup,
-    })
-    this.pipelines = []
+    this.pipelineCache.set(key, set)
     while (this.pipelineCache.size > Renderer.MAX_CACHED_PIPELINE_SETS) {
       const oldestKey = this.pipelineCache.keys().next().value
       if (oldestKey === undefined) break
       const oldest = this.pipelineCache.get(oldestKey)
       this.pipelineCache.delete(oldestKey)
       if (oldest) this.destroyPipelineSet(oldest)
+    }
+  }
+
+  /**
+   * 重建失败：销毁本次新建的半成品输入纹理，把输入图整体还原到重建前。
+   * 还原后渲染循环可以继续用旧管线出画，而不是拿着悬挂的绑定组
+   * 每帧静默提交无效指令（那会黑屏且熔断器看不见）。
+   */
+  private restorePipelineSet(
+    set: PipelineSet | null,
+    sourceDimensions: Dimensions,
+    hasProcessedFrame: boolean
+  ): void {
+    // 待销毁队列里可能正排着我们要还原的那条旧链（新链已发布、但绑定组
+    // 切换失败的情形）。必须先摘出来，否则下一次成功重建会把刚还原的链销毁。
+    const superseded = this.supersededPipelines
+    this.supersededPipelines = []
+    if (set) {
+      // 本次重建新建的链与输入纹理已无人引用，就地销毁
+      if (this.pipelines !== set.pipelines) {
+        this.destroyPipelines(this.pipelines)
+      }
+      if (this.videoFrameTexture !== set.videoFrameTexture) {
+        try {
+          this.videoFrameTexture?.destroy()
+        } catch {
+          // 半成品纹理销毁失败无关紧要
+        }
+      }
+      this.videoFrameTexture = set.videoFrameTexture
+      this.pipelines = set.pipelines
+      this.renderBindGroup = set.renderBindGroup
+    } else {
+      this.destroyPipelines(superseded)
+    }
+    this.sourceDimensions = sourceDimensions
+    this.hasProcessedFrame = hasProcessedFrame
+    this.createInterpolationInputPipeline()
+  }
+
+  /** 新绑定组已生效，上一代管线再无引用，可以安全销毁 */
+  private disposeSupersededPipelines(): void {
+    if (this.supersededPipelines.length === 0) return
+    const superseded = this.supersededPipelines
+    this.supersededPipelines = []
+    for (const p of superseded) {
+      try {
+        ;(p as DestroyablePipeline).destroy?.()
+      } catch {
+        // 忽略单个管道销毁错误
+      }
     }
   }
 
@@ -622,23 +709,49 @@ export class Renderer {
       this.canvas.height = this.targetDimensions.height
     }
 
-    // 等待 GPU 队列完成后再销毁旧管道，避免资源竞争
+    // 等待 GPU 队列排空，确保旧链的在途工作已结束再考虑替换
     try {
       await this.device.queue.onSubmittedWorkDone()
     } catch {
       // 忽略错误，设备可能已丢失
     }
+    if (this.destroyed) return
 
-    // 安全销毁旧管道
-    for (const p of this.pipelines) {
-      try {
-        ;(p as DestroyablePipeline).destroy?.()
-      } catch {
-        // 忽略单个管道销毁错误
-      }
-    }
-
+    // 关键：旧链在新链整条建成之前绝不能销毁。动态 import 失败、效果构造
+    // 抛错（显存不足等）都会中断构建，若已经把旧链销毁掉，就会留下一组
+    // 已销毁的管线 + 仍指向已销毁纹理的 renderBindGroup——重建锁一解除，
+    // 渲染循环每帧提交无效指令，WebGPU 只报异步校验错误不抛异常，
+    // processFrame 照旧返回 true，熔断器永远不触发，用户只看到黑屏。
+    const previousPipelines = this.pipelines
     const pipelines: Anime4KPipeline[] = []
+    let completed = false
+    try {
+      completed = await this.buildEffectChain(pipelines)
+    } finally {
+      // 失败或中途销毁：半成品整体丢弃，旧链原封不动继续可用
+      if (!completed) this.destroyPipelines(pipelines)
+    }
+    if (!completed) return
+
+    this.pipelines = pipelines
+    // 旧链此刻仍被现役 renderBindGroup 引用，等新绑定组建立后再销毁
+    this.supersededPipelines = previousPipelines
+
+    // 通知预热完成
+    this.onProgress?.(null)
+
+    console.log(
+      `[Anime4KWebExt] Built ${pipelines.length} pipelines with warmup complete.`
+    )
+  }
+
+  /**
+   * 按当前效果链构建管线，写入传入的数组（便于失败时由调用方整体销毁）。
+   * @returns 是否完整构建完成；false 表示中途渲染器已销毁，需丢弃半成品。
+   */
+  private async buildEffectChain(
+    pipelines: Anime4KPipeline[]
+  ): Promise<boolean> {
     let currentTexture = this.videoFrameTexture
     let curWidth = this.videoFrameTexture.width
     let curHeight = this.videoFrameTexture.height
@@ -669,6 +782,9 @@ export class Renderer {
 
       // 让出主线程，避免界面冻结
       await new Promise((resolve) => setTimeout(resolve, 0))
+      // destroy() 会立刻销毁设备。让出期间若已销毁，继续构建只会对着
+      // 死设备刷一串校验错误，并持续回调 onProgress。
+      if (this.destroyed) return false
 
       const effect = this.effects[i]
       // 从缓存的模块获取效果类
@@ -704,6 +820,7 @@ export class Renderer {
             if (curWidth > idealIntermediateWidth * 1.1) {
               // 再次让出主线程
               await new Promise((resolve) => setTimeout(resolve, 0))
+              if (this.destroyed) return false
 
               const intermediateDownscale = new DownscaleClass({
                 device: this.device,
@@ -757,14 +874,7 @@ export class Renderer {
         },
       } as unknown as Anime4KPipeline)
     }
-    this.pipelines = pipelines
-
-    // 通知预热完成
-    this.onProgress?.(null)
-
-    console.log(
-      `[Anime4KWebExt] Built ${pipelines.length} pipelines with warmup complete.`
-    )
+    return true
   }
 
   /**
@@ -991,6 +1101,8 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
         },
       ],
     })
+    // 新绑定组已接管，上一代管线到此才真正无人引用
+    this.disposeSupersededPipelines()
   }
 
   /** Encode only the final textured-quad pass targeting the WebGPU canvas. */
@@ -1021,10 +1133,10 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   ): Promise<boolean> {
     if (this.destroyed) return false
 
-    // 管线重建期间必须跳帧：旧管线/绑定组可能引用已销毁的纹理，
-    // 继续渲染会触发 WebGPU validation error。
+    // 管线重建、设备恢复期间必须跳帧：旧管线/绑定组可能引用已销毁的纹理，
+    // 或分属恢复前后两个设备，继续渲染会触发 WebGPU validation error。
     // 同时重置失败计数，避免较慢的重建（>60 帧）误触熔断。
-    if (this.resourceRebuildPromise) {
+    if (this.resourceRebuildPromise || this.isRecovering) {
       this.consecutiveFailures = 0
       return false
     }
@@ -1047,16 +1159,16 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       }
 
       if (this.frameInterpolator) {
-        // Pool saturation is an intentional overload drop. The rAF loop keeps
-        // presenting the latest processed frame, so it must not count toward
-        // the renderer circuit breaker.
-        this.frameInterpolator.captureFrame({
+        // 插帧模式下，插帧队列是渲染链的唯一输入。captureFrame 失败（源纹理
+        // 池饱和）意味着本帧既没入插帧队列也没入直通队列，画面会停在上一帧
+        // ——如实返回失败，让熔断器能看见。插帧器在饱和时已丢弃积压的帧对
+        // 并短暂旁路，池通常在下一帧就恢复，所以不会误触熔断。
+        return this.frameInterpolator.captureFrame({
           arrival: now,
           expectedDisplayTime: metadata?.expectedDisplayTime,
           mediaTime: metadata?.mediaTime,
           presentedFrames: metadata?.presentedFrames,
         })
-        return true
       }
 
       const frameStartedAt = this.diagnosticsEnabled ? performance.now() : 0
@@ -1177,8 +1289,9 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       })
       .catch(() => undefined)
       .finally(() => {
+        // 只清自己的标志。frameInFlight 属于 earlyResubscribe 的忙帧丢弃逻辑，
+        // 探针每 30 帧才结算一次，在这里清会把真正在途的帧标记成空闲。
         this.diagnosticsQueueProbePending = false
-        this.frameInFlight = false
       })
   }
 
@@ -1392,14 +1505,52 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   }
 
   /**
+   * 订阅一次 rVFC。回调携带订阅时的循环代号，恢复执行时若代号已变
+   * （设备恢复、切换视频源）就直接退出，不会再续订出第二条链。
+   */
+  private scheduleRenderLoop(
+    callback: 'first' | 'loop',
+    generation = this.renderLoopGeneration
+  ): void {
+    if (this.destroyed || generation !== this.renderLoopGeneration) return
+    const video = this.video
+    this.renderLoopVideo = video
+    this.animationFrameId = video.requestVideoFrameCallback((now, metadata) => {
+      if (this.destroyed || generation !== this.renderLoopGeneration) return
+      if (callback === 'first') {
+        void this.renderFirstFrameAndStartLoop(generation, now, metadata)
+      } else {
+        void this.renderLoop(generation, now, metadata)
+      }
+    })
+  }
+
+  /**
+   * 停掉当前的 rVFC 循环。抬升代号是关键：回调一旦触发其句柄即失效，
+   * cancelVideoFrameCallback 对它是空操作，只有代号能让正卡在
+   * `await processFrame` 中的那次循环在恢复后自行放弃续订。
+   */
+  private cancelRenderLoop(): void {
+    this.renderLoopGeneration++
+    if (this.animationFrameId !== null) {
+      // 必须在真正注册回调的那个元素上取消——切换视频源后它可能已不是
+      // this.video
+      this.renderLoopVideo?.cancelVideoFrameCallback(this.animationFrameId)
+      this.animationFrameId = null
+    }
+    this.renderLoopVideo = null
+  }
+
+  /**
    * 尝试渲染第一帧。成功后，调用回调并切换到常规渲染循环。
    * 如果不成功（例如视频暂停），则重新调度自身。
    */
   private renderFirstFrameAndStartLoop = async (
+    generation = this.renderLoopGeneration,
     now = performance.now(),
     metadata?: VideoFrameCallbackMetadata
   ): Promise<void> => {
-    if (this.destroyed) return
+    if (this.destroyed || generation !== this.renderLoopGeneration) return
 
     if (await this.processFrame(now, metadata)) {
       // 第一帧成功处理。rAF 模式要等到它真正提交到 canvas 后再通知上层。
@@ -1412,9 +1563,7 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       this.lastError = null
       this.consecutiveFailures = 0
       // 切换到常规渲染循环
-      this.animationFrameId = this.video.requestVideoFrameCallback(
-        this.renderLoop
-      )
+      this.scheduleRenderLoop('loop', generation)
     } else {
       // 第一帧渲染失败或被跳过
       const error = this.lastError
@@ -1444,25 +1593,23 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
         )
       }
 
-      if (!this.destroyed) {
-        this.animationFrameId = this.video.requestVideoFrameCallback(
-          this.renderFirstFrameAndStartLoop
-        )
-      }
+      this.scheduleRenderLoop('first', generation)
     }
   }
 
   /**
    * 常规渲染循环，处理第一帧之后的所有帧。
    */
-  private renderLoop: VideoFrameRequestCallback = async (now, metadata) => {
-    if (this.destroyed) return
+  private renderLoop = async (
+    generation: number,
+    now: number,
+    metadata: VideoFrameCallbackMetadata
+  ): Promise<void> => {
+    if (this.destroyed || generation !== this.renderLoopGeneration) return
 
     if (this.diagnosticsEnabled) this.recordFrameCallback(now, metadata)
     if (this.diagnostics.earlyResubscribe) {
-      this.animationFrameId = this.video.requestVideoFrameCallback(
-        this.renderLoop
-      )
+      this.scheduleRenderLoop('loop', generation)
       if (this.frameInFlight) {
         this.diagnosticsBusyDrops++
         return
@@ -1520,11 +1667,9 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       // 未达熔断阈值的良性跳帧：什么都不做，等待下一帧
     }
 
-    // 持续调度自身
-    if (!this.destroyed && !this.diagnostics.earlyResubscribe) {
-      this.animationFrameId = this.video.requestVideoFrameCallback(
-        this.renderLoop
-      )
+    // 持续调度自身（代号已变则 scheduleRenderLoop 自行放弃）
+    if (!this.diagnostics.earlyResubscribe) {
+      this.scheduleRenderLoop('loop', generation)
     }
     if (this.diagnostics.earlyResubscribe) this.frameInFlight = false
   }
@@ -1564,46 +1709,67 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
     // 重入安全：渲染循环与外部调用（如视频节点变化）并发触发时共享同一次重建
     if (this.resizePromise) return this.resizePromise
     const rebuildPromise = this.enqueueResourceRebuild(async () => {
-      this.hasProcessedFrame = false
       console.log(
         '[Anime4KWebExt] Resizing renderer due to video source dimension change...'
       )
-      this.frameInterpolator?.destroy()
-      this.frameInterpolator = undefined
-      // 当前整套管线移入缓存而非销毁——自适应码率大概率很快切回这一档
-      this.stashCurrentPipelineSet()
-      await this.initializeFrameInterpolator()
-      if (this.destroyed) return
-      this.sourceDimensions = {
-        width: this.video.videoWidth,
-        height: this.video.videoHeight,
-      }
-      const activeInterpolator = this.frameInterpolator as
-        | FrameInterpolator
-        | undefined
-      const processingDimensions = activeInterpolator?.dimensions ?? {
-        width: this.video.videoWidth,
-        height: this.video.videoHeight,
-      }
-      const key = `${processingDimensions.width}x${processingDimensions.height}`
-      const cached = this.pipelineCache.get(key)
-      if (cached) {
-        // 命中：整套换回，零着色器编译、零预热，下一帧即恢复渲染
-        this.pipelineCache.delete(key)
-        this.videoFrameTexture = cached.videoFrameTexture
-        this.pipelines = cached.pipelines
-        this.renderBindGroup = cached.renderBindGroup
+      // 先快照，成功才移交缓存、失败则原样还原。旧链在整条新链就绪前
+      // 始终保持可用，避免半成品状态下静默黑屏。
+      const previousSet = this.snapshotCurrentPipelineSet()
+      const previousDimensions = this.sourceDimensions
+      const previousHasProcessedFrame = this.hasProcessedFrame
+      // 清空引用，buildPipelines 才不会把快照里的管线当作"上一代"销毁
+      if (previousSet) this.pipelines = []
+
+      try {
+        this.frameInterpolator?.destroy()
+        this.frameInterpolator = undefined
+        await this.initializeFrameInterpolator()
+        if (this.destroyed) return
         this.hasProcessedFrame = false
+        this.sourceDimensions = {
+          width: this.video.videoWidth,
+          height: this.video.videoHeight,
+        }
+        // 显式重新加宽：TS 会把上面的 `= undefined` 一路窄化下来，看不见
+        // initializeFrameInterpolator() 内部对该字段的重新赋值。
+        const activeInterpolator = this.frameInterpolator as
+          | FrameInterpolator
+          | undefined
+        const processingDimensions = activeInterpolator?.dimensions ?? {
+          width: this.video.videoWidth,
+          height: this.video.videoHeight,
+        }
+        const key = `${processingDimensions.width}x${processingDimensions.height}`
+        const cached = this.pipelineCache.get(key)
+        if (cached) {
+          // 命中：整套换回，零着色器编译、零预热，下一帧即恢复渲染
+          this.pipelineCache.delete(key)
+          this.videoFrameTexture = cached.videoFrameTexture
+          this.pipelines = cached.pipelines
+          this.renderBindGroup = cached.renderBindGroup
+          this.createInterpolationInputPipeline()
+          // 换下来的旧链进缓存——自适应码率大概率很快切回这一档
+          if (previousSet) this.stashPipelineSet(previousSet)
+          console.log(
+            '[Anime4KWebExt] Renderer resized for source (cache hit).'
+          )
+          return
+        }
+        this.createResources()
+        await this.buildPipelines()
+        if (this.destroyed) return
         this.createInterpolationInputPipeline()
-        console.log('[Anime4KWebExt] Renderer resized for source (cache hit).')
-        return
+        this.createRenderBindGroup()
+        if (previousSet) this.stashPipelineSet(previousSet)
+        console.log('[Anime4KWebExt] Renderer resized for source.')
+      } catch (error) {
+        this.restorePipelineSet(
+          previousSet,
+          previousDimensions,
+          previousHasProcessedFrame
+        )
+        throw error
       }
-      this.createResources()
-      await this.buildPipelines()
-      if (this.destroyed) return
-      this.createInterpolationInputPipeline()
-      this.createRenderBindGroup()
-      console.log('[Anime4KWebExt] Renderer resized for source.')
     })
     // 存储的 promise 永不 reject：错误写入 lastError 走渲染循环的
     // 既有错误路径（onError/熔断），避免调用方产生未处理的 rejection。
@@ -1640,9 +1806,11 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       // 在互斥区内比较并提交配置，避免排队中的新配置改写正在构建的管线。
       const effectsChanged =
         JSON.stringify(this.effects) !== JSON.stringify(effects)
+      // 与"请求值"比较，而不是 buildPipelines 钳制后写回的实际渲染尺寸，
+      // 否则一旦发生钳制，重复下发同一套设置会每次都触发整链重建。
       const dimensionsChanged =
-        this.targetDimensions.width !== targetDimensions.width ||
-        this.targetDimensions.height !== targetDimensions.height
+        this.requestedTargetDimensions.width !== targetDimensions.width ||
+        this.requestedTargetDimensions.height !== targetDimensions.height
       const interpolationChanged =
         JSON.stringify(this.frameInterpolation) !==
         JSON.stringify(frameInterpolation)
@@ -1658,6 +1826,7 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
         console.log(
           `[Anime4KWebExt] Updating target dimensions to ${targetDimensions.width}x${targetDimensions.height}.`
         )
+        this.requestedTargetDimensions = targetDimensions
         this.targetDimensions = targetDimensions
       }
 
@@ -1666,50 +1835,61 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
         this.effects = effects
       }
 
-      if (interpolationChanged) {
-        this.hasProcessedFrame = false
-        this.frameInterpolation = frameInterpolation
-        this.frameInterpolator?.destroy()
-        this.frameInterpolator = undefined
-        this.clearPipelineCache()
-        try {
-          await this.device.queue.onSubmittedWorkDone()
-        } catch {
-          // Device loss is handled by the existing recovery path.
-        }
-        if (this.destroyed) return
-        for (const pipeline of this.pipelines) {
+      // 快照当前输入图：任一步骤失败都整体回滚，绝不留下"管线已销毁、
+      // 绑定组仍指向它"的半成品状态。
+      const previousSet = this.snapshotCurrentPipelineSet()
+      const previousDimensions = this.sourceDimensions
+      const previousHasProcessedFrame = this.hasProcessedFrame
+
+      try {
+        if (interpolationChanged) {
+          this.frameInterpolation = frameInterpolation
+          this.frameInterpolator?.destroy()
+          this.frameInterpolator = undefined
+          this.clearPipelineCache()
           try {
-            ;(pipeline as DestroyablePipeline).destroy?.()
+            await this.device.queue.onSubmittedWorkDone()
           } catch {
-            // Best-effort cleanup before rebuilding the input graph.
+            // Device loss is handled by the existing recovery path.
           }
+          if (this.destroyed) return
+          this.hasProcessedFrame = false
+          // 旧链留到新链就绪后再销毁（见 catch 分支的回滚）
+          if (previousSet) this.pipelines = []
+          await this.initializeFrameInterpolator()
+          if (this.destroyed) return
+          this.createResources()
+          await this.buildPipelines()
+          if (this.destroyed) return
+          this.createInterpolationInputPipeline()
+          this.createRenderBindGroup()
+          if (previousSet) this.destroyPipelineSet(previousSet)
+          console.log(
+            '[Anime4KWebExt] Frame interpolation configuration updated.'
+          )
+          return
         }
-        this.pipelines = []
-        this.videoFrameTexture.destroy()
-        await this.initializeFrameInterpolator()
-        if (this.destroyed) return
-        this.createResources()
+
+        console.log(
+          '[Anime4KWebExt] Rebuilding pipeline due to configuration update.'
+        )
+        this.hasProcessedFrame = false
+        // 缓存中的管线组都绑定旧效果链/旧目标分辨率，整体失效
+        this.clearPipelineCache()
+        // 输入纹理不变，只换效果链：buildPipelines 会把旧链登记为
+        // supersededPipelines，由 createRenderBindGroup 在切换后销毁。
         await this.buildPipelines()
         if (this.destroyed) return
-        this.createInterpolationInputPipeline()
         this.createRenderBindGroup()
-        console.log(
-          '[Anime4KWebExt] Frame interpolation configuration updated.'
+        console.log('[Anime4KWebExt] Renderer configuration updated.')
+      } catch (error) {
+        this.restorePipelineSet(
+          previousSet,
+          previousDimensions,
+          previousHasProcessedFrame
         )
-        return
+        throw error
       }
-
-      console.log(
-        '[Anime4KWebExt] Rebuilding pipeline due to configuration update.'
-      )
-      this.hasProcessedFrame = false
-      // 缓存中的管线组都绑定旧效果链/旧目标分辨率，整体失效
-      this.clearPipelineCache()
-      await this.buildPipelines()
-      if (this.destroyed) return
-      this.createRenderBindGroup()
-      console.log('[Anime4KWebExt] Renderer configuration updated.')
     })
   }
 
@@ -1718,10 +1898,14 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
    * @param newVideo - 新的 HTMLVideoElement
    */
   public async updateVideoSource(newVideo: HTMLVideoElement): Promise<void> {
+    if (this.destroyed || newVideo === this.video) return
     console.log('[Anime4KWebExt] Renderer video source updated.')
     const dimensionsChanged =
       newVideo.videoWidth !== this.sourceDimensions.width ||
       newVideo.videoHeight !== this.sourceDimensions.height
+    // rVFC 订阅挂在旧元素上，不迁移的话循环会停在一个可能已经暂停或
+    // 脱离文档的元素上——那样它永远不再触发，画面直接冻死。
+    this.cancelRenderLoop()
     this.video = newVideo
     if (dimensionsChanged || this.frameInterpolator) {
       console.log(
@@ -1729,6 +1913,8 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       )
       await this.handleSourceResize()
     }
+    if (this.destroyed) return
+    this.renderFirstFrameAndStartLoop()
   }
 
   /**
@@ -1741,52 +1927,53 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
     this.isRecovering = true
     console.log('[Anime4KWebExt] Starting device recovery...')
 
+    // 停止当前渲染循环。抬升代号后，正卡在 await 里的那次循环恢复执行时
+    // 会自行退出而不再续订，因此恢复结束时只会存在下面这一条新链。
+    this.cancelRenderLoop()
+    this.stopPresentationLoop()
+    this.hasProcessedFrame = false
+    this.frameInFlight = false
+    this.frameInterpolator?.destroy()
+    this.frameInterpolator = undefined
+
     try {
-      // 停止当前渲染循环
-      if (this.animationFrameId !== null) {
-        this.video.cancelVideoFrameCallback(this.animationFrameId)
-        this.animationFrameId = null
-      }
-      this.stopPresentationLoop()
-      this.hasProcessedFrame = false
-      this.frameInFlight = false
-      this.frameInterpolator?.destroy()
-      this.frameInterpolator = undefined
-
-      // 重新请求 GPU 适配器和设备
-      const adapter = await navigator.gpu.requestAdapter()
-      if (!adapter) {
-        throw new Error('Failed to get GPU adapter during recovery')
-      }
-
-      this.device = await this.requestDeviceWithLimits(adapter)
-
-      // 设置新设备的丢失监听
-      this.device.lost.then((info) => {
-        if (this.destroyed) return
-        console.warn(
-          `[Anime4KWebExt] GPU device lost: ${info.reason} - ${info.message}`
-        )
-        if (info.reason !== 'destroyed' && !this.isRecovering) {
-          this.recoverFromDeviceLoss()
+      // 走统一的重建队列：否则并发的 updateConfiguration/handleSourceResize
+      // 会与恢复交错，把新旧两个设备的纹理和绑定组混在一起。
+      await this.enqueueResourceRebuild(async () => {
+        // 重新请求 GPU 适配器和设备
+        const adapter = await navigator.gpu.requestAdapter()
+        if (!adapter) {
+          throw new Error('Failed to get GPU adapter during recovery')
         }
-      })
 
-      // 重新配置上下文
-      this.context.configure({
-        device: this.device,
-        format: this.presentationFormat,
-        alphaMode: 'opaque',
-      })
+        this.device = await this.requestDeviceWithLimits(adapter)
+        if (this.destroyed) return
 
-      // 重建资源和管道（缓存中的管线组属于已丢失的旧设备，整体失效）
-      this.clearPipelineCache()
-      await this.initializeFrameInterpolator()
-      this.createResources()
-      await this.buildPipelines()
-      await this.createRenderPipeline()
-      this.createInterpolationInputPipeline()
-      this.createRenderBindGroup()
+        // 设置新设备的丢失监听
+        this.watchDeviceLoss()
+
+        // 重新配置上下文
+        this.context.configure({
+          device: this.device,
+          format: this.presentationFormat,
+          alphaMode: 'opaque',
+        })
+
+        // 重建资源和管道（旧设备的管线、纹理、绑定组全部失效，
+        // 不能走回滚路径——没有任何一件还能用）
+        this.clearPipelineCache()
+        this.pipelines = []
+        this.supersededPipelines = []
+        await this.initializeFrameInterpolator()
+        if (this.destroyed) return
+        this.createResources()
+        await this.buildPipelines()
+        if (this.destroyed) return
+        await this.createRenderPipeline()
+        this.createInterpolationInputPipeline()
+        this.createRenderBindGroup()
+      })
+      if (this.destroyed) return
 
       // 重启渲染循环
       this.isRecovering = false
@@ -1815,11 +2002,8 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
     // 立即设置销毁标志，以防止任何异步操作（如 device.lost）在销毁过程中执行不必要的操作
     this.destroyed = true
 
-    // 停止渲染循环
-    if (this.animationFrameId !== null) {
-      this.video.cancelVideoFrameCallback(this.animationFrameId)
-      this.animationFrameId = null
-    }
+    // 停止渲染循环（在真正注册回调的那个元素上取消）
+    this.cancelRenderLoop()
     this.stopPresentationLoop()
 
     // 安全地销毁所有 GPU 资源
@@ -1827,9 +2011,9 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       this.frameInterpolator?.destroy()
       this.frameInterpolator = undefined
       this.clearPipelineCache()
-      this.pipelines.forEach((pipeline) => {
-        ;(pipeline as DestroyablePipeline).destroy?.()
-      })
+      this.destroyPipelines(this.supersededPipelines)
+      this.supersededPipelines = []
+      this.destroyPipelines(this.pipelines)
       this.videoFrameTexture?.destroy()
       // 解除画布与GPU设备的关联，这对于后续重新初始化至关重要
       this.context?.unconfigure()

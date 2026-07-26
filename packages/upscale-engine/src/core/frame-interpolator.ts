@@ -6,10 +6,23 @@ import type {
 
 const ALIGNMENT = 16
 const SOURCE_POOL_SIZE = 8
+/**
+ * Ceiling on the generated-frame pool. Every entry is a full-size rgba8unorm
+ * texture and the pool is allocated up front, so 8x at 720p would reserve 23 of
+ * them (~85 MB) purely to let several pairs overlap. A single pair never needs
+ * more than `maxFactor - 1` (<= 7), so the cap only bounds that overlap.
+ */
+const MAX_MID_POOL_SIZE = 12
 /** Hard ceiling on the interpolation factor (quality/GPU-cost guard). */
 const MAX_INTERPOLATION_FACTOR = 8
 /** Lowest source fps assumed when sizing pools for a target-fps request. */
 const MIN_ASSUMED_SOURCE_FPS = 20
+/** Consecutive pairs that produced nothing in time before bypassing. */
+const LATE_PAIRS_BEFORE_BYPASS = 3
+/** How long interpolation stays bypassed after the overload guard arms. */
+const OVERLOAD_BYPASS_MS = 2000
+/** Short bypass used to let a saturated source pool drain. */
+const POOL_RECOVERY_BYPASS_MS = 500
 /**
  * Megapixels of generated output a single source pair may cost. Interpolation
  * work scales with (factor - 1) x processing pixels, so without this the same
@@ -248,6 +261,48 @@ export function resolveInterpolationFactor(
   return 2
 }
 
+/** Outcome of one source pair, as seen by the overload guard. */
+export type InterpolationPairOutcome = 'late' | 'timely'
+
+/** Overload-guard state: consecutive late pairs and the active bypass window. */
+export interface InterpolationOverloadState {
+  lateSamples: number
+  bypassUntil: number
+}
+
+/**
+ * Fold one pair outcome into the overload state. A pair is "late" when it
+ * produced nothing that could still be displayed — a signal attributable to
+ * interpolation alone, unlike a queue-drain timing, which also measures the
+ * Anime4K passes sharing the same GPU queue.
+ *
+ * Arming the bypass resets the counter, so the window that follows is judged
+ * only on fresh evidence. A decaying cost average would instead still sit above
+ * the threshold when the bypass expires and re-arm within a few pairs, latching
+ * interpolation off for the rest of the session after a single hitch.
+ */
+export function updateInterpolationOverload(
+  state: InterpolationOverloadState,
+  outcome: InterpolationPairOutcome,
+  now: number,
+  options: { threshold?: number; bypassMs?: number } = {}
+): InterpolationOverloadState {
+  if (outcome === 'timely') {
+    return {
+      lateSamples: Math.max(0, state.lateSamples - 1),
+      bypassUntil: state.bypassUntil,
+    }
+  }
+  const lateSamples = state.lateSamples + 1
+  if (lateSamples < (options.threshold ?? LATE_PAIRS_BEFORE_BYPASS)) {
+    return { lateSamples, bypassUntil: state.bypassUntil }
+  }
+  return {
+    lateSamples: 0,
+    bypassUntil: now + (options.bypassMs ?? OVERLOAD_BYPASS_MS),
+  }
+}
+
 export function shouldInterpolateInterval(intervalMs: number): boolean {
   // The first release targets 24/25/30 fps video. At >=45 fps a 2x stream
   // cannot be displayed on the common 60 Hz path and only adds GPU pressure.
@@ -348,9 +403,10 @@ export class FrameInterpolator {
   private pairTail: Promise<void> = Promise.resolve()
   private generation = 0
   private destroyed = false
-  private interpolationCostMs = 0
-  private overloadSamples = 0
-  private skipInterpolationUntil = 0
+  private overload: InterpolationOverloadState = {
+    lateSamples: 0,
+    bypassUntil: 0,
+  }
   private lastSourcePoolWarningAt = 0
   private generatedFrames = 0
 
@@ -393,8 +449,12 @@ export class FrameInterpolator {
       )
     )
     // Each source pair may enqueue up to (maxFactor - 1) generated frames, and a
-    // couple of pairs can be in flight, so scale the pool with the factor.
-    const midPoolSize = Math.max(4, (this.maxFactor - 1) * 3 + 2)
+    // couple of pairs can be in flight, so scale the pool with the factor —
+    // bounded, because the whole pool is allocated eagerly.
+    const midPoolSize = Math.min(
+      MAX_MID_POOL_SIZE,
+      Math.max(4, (this.maxFactor - 1) * 3 + 2)
+    )
     this.midTextures = Array.from({ length: midPoolSize }, (_, index) =>
       this.createFrameTexture(`danmaku-anywhere-framegen-mid-${index}`, true)
     )
@@ -463,14 +523,31 @@ export class FrameInterpolator {
       throw new Error('Frame interpolation requires WebGPU shader-f16 support')
     }
 
+    // Validate the source rather than the aligned result: alignDown() floors at
+    // ALIGNMENT, so a check on the returned dimensions can never fail. A video
+    // whose metadata has not arrived yet reports 0x0, which would otherwise
+    // build a zero-sized capture texture and emit validation errors for every
+    // frame while still reporting interpolation as active.
+    const source = {
+      width: options.video.videoWidth,
+      height: options.video.videoHeight,
+    }
+    if (
+      !Number.isFinite(source.width) ||
+      !Number.isFinite(source.height) ||
+      source.width < ALIGNMENT ||
+      source.height < ALIGNMENT
+    ) {
+      throw new Error(
+        `Video dimensions are unavailable or too small for frame interpolation (${source.width}x${source.height})`
+      )
+    }
+
     const dimensions = calculateInterpolationDimensions(
-      { width: options.video.videoWidth, height: options.video.videoHeight },
+      source,
       options.options.resolution,
       options.maxTextureDimension
     )
-    if (dimensions.width < ALIGNMENT || dimensions.height < ALIGNMENT) {
-      throw new Error('Video dimensions are too small for frame interpolation')
-    }
 
     const [runtimeModule, weights] = await Promise.all([
       (FrameInterpolator.runtimeModulePromise ??= import(
@@ -488,7 +565,26 @@ export class FrameInterpolator {
       staticGuard: true,
       sparseRefine: true,
     })
-    return new FrameInterpolator(options, runtime, dimensions)
+    // The texture pools are the largest allocation the engine makes. Without an
+    // error scope an exhausted GPU reports out-of-memory asynchronously, so
+    // create() would resolve and the renderer would mark interpolation active
+    // over a broken pool instead of falling back to Anime4K only.
+    options.device.pushErrorScope('out-of-memory')
+    let interpolator: FrameInterpolator
+    try {
+      interpolator = new FrameInterpolator(options, runtime, dimensions)
+    } catch (error) {
+      await options.device.popErrorScope()
+      throw error
+    }
+    const outOfMemory = await options.device.popErrorScope()
+    if (outOfMemory) {
+      interpolator.destroy()
+      throw new Error(
+        `Frame interpolation ran out of GPU memory: ${outOfMemory.message}`
+      )
+    }
+    return interpolator
   }
 
   private static loadWeights(options: FrameInterpolationOptions) {
@@ -562,6 +658,15 @@ export class FrameInterpolator {
   private enqueue(texture: GPUTexture, displayAt: number): void {
     this.retain(texture)
     this.queue.push({ texture, displayAt })
+  }
+
+  /**
+   * Invalidate every queued frame pair without disturbing the display queue.
+   * Pending pairs fail their generation check and release their source textures
+   * in their own `finally`, so a saturated pool recovers within a microtask.
+   */
+  private dropPendingPairWork(): void {
+    this.generation++
   }
 
   private resetTimeline(): void {
@@ -639,6 +744,20 @@ export class FrameInterpolator {
       'sourceIndex'
     )
     if (!currentTexture) {
+      // Saturation pins the real frames too, and in this mode the interpolator
+      // queue is the renderer's only input — doing nothing here freezes the
+      // canvas on the last processed frame while playback continues. Invalidate
+      // the queued pair work (each pair releases its sources as soon as it
+      // short-circuits) and bypass interpolation briefly, so the pool is free
+      // again by the next frame instead of staying pinned.
+      this.dropPendingPairWork()
+      this.overload = {
+        lateSamples: 0,
+        bypassUntil: Math.max(
+          this.overload.bypassUntil,
+          arrival + POOL_RECOVERY_BYPASS_MS
+        ),
+      }
       if (arrival - this.lastSourcePoolWarningAt >= 2000) {
         this.lastSourcePoolWarningAt = arrival
         this.onWarning?.('Frame interpolation source pool is saturated')
@@ -702,7 +821,7 @@ export class FrameInterpolator {
     if (
       this.destroyed ||
       generation !== this.generation ||
-      performance.now() < this.skipInterpolationUntil
+      performance.now() < this.overload.bypassUntil
     ) {
       return
     }
@@ -711,7 +830,10 @@ export class FrameInterpolator {
     // Drop stale work before the GPU readback. Otherwise a brief classification
     // slowdown creates an unbounded pair backlog where every result arrives too
     // late, so interpolation can never catch up to live playback.
-    if (displayAt <= performance.now() + 4) return
+    if (displayAt <= performance.now() + 4) {
+      this.recordPairOutcome('late')
+      return
+    }
 
     const classification = await this.classifyPair(
       previousTexture,
@@ -750,9 +872,14 @@ export class FrameInterpolator {
       if (!texture) break // pool exhausted — present what we have
       generated.push({ texture, t, displayAt: subDisplayAt })
     }
-    if (generated.length === 0) return
+    if (generated.length === 0) {
+      // Every sub-frame missed its slot, or the mid pool was empty: this pair
+      // cost GPU time and produced nothing displayable.
+      this.recordPairOutcome('late')
+      return
+    }
+    this.recordPairOutcome('timely')
 
-    const startedAt = performance.now()
     this.runtime.prepPair(previousTexture, currentTexture)
     for (const frame of generated) {
       this.runtime.runT(frame.t, frame.texture)
@@ -765,26 +892,27 @@ export class FrameInterpolator {
         if (this.destroyed) return
         this.generatedFrames += generated.length
         this.onFrameGenerated?.(this.generatedFrames)
-        const elapsed = performance.now() - startedAt
-        this.interpolationCostMs = this.interpolationCostMs
-          ? this.interpolationCostMs * 0.8 + elapsed * 0.2
-          : elapsed
-        // All sub-frames must fit inside the source interval; use the whole
-        // budget (higher factors legitimately cost more per pair).
-        if (this.interpolationCostMs > this.intervalMs * 0.85) {
-          this.overloadSamples++
-          if (this.overloadSamples >= 3) {
-            this.skipInterpolationUntil = performance.now() + 2000
-            this.overloadSamples = 0
-            this.onWarning?.(
-              'Frame interpolation is temporarily bypassed because the GPU is saturated'
-            )
-          }
-        } else {
-          this.overloadSamples = Math.max(0, this.overloadSamples - 1)
-        }
       })
       .catch(() => undefined)
+  }
+
+  /**
+   * Fold one pair outcome into the overload guard and surface the transition.
+   * Timing the queue drain instead would attribute the Anime4K passes that
+   * share this GPU queue to interpolation and bypass it on every loaded GPU.
+   */
+  private recordPairOutcome(outcome: InterpolationPairOutcome): void {
+    const previous = this.overload
+    this.overload = updateInterpolationOverload(
+      previous,
+      outcome,
+      performance.now()
+    )
+    if (this.overload.bypassUntil > previous.bypassUntil) {
+      this.onWarning?.(
+        'Frame interpolation is temporarily bypassed because the GPU is saturated'
+      )
+    }
   }
 
   private async classifyPair(
@@ -822,10 +950,21 @@ export class FrameInterpolator {
     )
     this.device.queue.submit([encoder.finish()])
     await this.differenceReadback.mapAsync(GPUMapMode.READ)
-    const values = new Uint32Array(
-      this.differenceReadback.getMappedRange().slice(0)
-    )
-    this.differenceReadback.unmap()
+    // The readback buffer is shared by every pair, so it must be unmapped even
+    // if reading the range throws — otherwise every later mapAsync() rejects
+    // with "already mapped" and interpolation silently stops for good.
+    let values: Uint32Array
+    try {
+      values = new Uint32Array(
+        this.differenceReadback.getMappedRange().slice(0)
+      )
+    } finally {
+      try {
+        this.differenceReadback.unmap()
+      } catch {
+        // The buffer may already be destroyed by a concurrent teardown.
+      }
+    }
     return classifyDifferenceStats(values[0], values[1])
   }
 

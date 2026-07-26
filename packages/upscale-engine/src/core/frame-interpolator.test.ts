@@ -5,9 +5,11 @@ import {
   classifyDifferenceStats,
   computeMaxInterpolationFactor,
   computeResolutionFactorCap,
+  type InterpolationOverloadState,
   isMediaTimelineDiscontinuity,
   resolveInterpolationFactor,
   shouldInterpolateInterval,
+  updateInterpolationOverload,
 } from './frame-interpolator'
 
 describe('frame interpolation helpers', () => {
@@ -166,5 +168,78 @@ describe('interpolation factor selection', () => {
     expect(computeMaxInterpolationFactor({ targetFps: 170 })).toBe(8)
     expect(computeMaxInterpolationFactor({ targetFps: 60 })).toBe(3)
     expect(computeMaxInterpolationFactor({ multiplier: 4 })).toBe(4)
+  })
+})
+
+describe('interpolation overload guard', () => {
+  const idle: InterpolationOverloadState = { lateSamples: 0, bypassUntil: 0 }
+  const runLate = (
+    state: InterpolationOverloadState,
+    times: number,
+    startAt = 0
+  ) => {
+    let next = state
+    for (let i = 0; i < times; i++) {
+      next = updateInterpolationOverload(next, 'late', startAt + i * 10)
+    }
+    return next
+  }
+
+  it('bypasses interpolation only after three consecutive late pairs', () => {
+    let state = updateInterpolationOverload(idle, 'late', 1_000)
+    expect(state).toEqual({ lateSamples: 1, bypassUntil: 0 })
+    state = updateInterpolationOverload(state, 'late', 1_010)
+    expect(state).toEqual({ lateSamples: 2, bypassUntil: 0 })
+    state = updateInterpolationOverload(state, 'late', 1_020)
+    expect(state).toEqual({ lateSamples: 0, bypassUntil: 3_020 })
+  })
+
+  it('lets a timely pair decay the accumulated evidence', () => {
+    let state = runLate(idle, 2)
+    state = updateInterpolationOverload(state, 'timely', 30)
+    expect(state.lateSamples).toBe(1)
+    // one more late pair is not enough — the decay really counted
+    state = updateInterpolationOverload(state, 'late', 40)
+    expect(state.bypassUntil).toBe(0)
+    state = updateInterpolationOverload(state, 'late', 50)
+    expect(state.bypassUntil).toBe(2_050)
+  })
+
+  it('never drops the late counter below zero', () => {
+    let state = idle
+    for (let i = 0; i < 5; i++) {
+      state = updateInterpolationOverload(state, 'timely', i)
+    }
+    expect(state.lateSamples).toBe(0)
+  })
+
+  it('does not latch: one hitch cannot keep interpolation bypassed', () => {
+    // Regression for the decaying cost average, which was still above the
+    // threshold when the bypass expired and so re-armed after ~3 pairs,
+    // leaving interpolation effectively off for the rest of the session.
+    let state = runLate(idle, 3)
+    const firstBypass = state.bypassUntil
+    expect(firstBypass).toBe(2_020)
+    // arming must clear the evidence, not carry it into the next window
+    expect(state.lateSamples).toBe(0)
+
+    // after the window, a single late pair must not re-arm the bypass
+    state = updateInterpolationOverload(state, 'late', 3_000)
+    expect(state.bypassUntil).toBe(firstBypass)
+
+    // and a healthy stream keeps it off for good
+    for (let i = 0; i < 10; i++) {
+      state = updateInterpolationOverload(state, 'timely', 3_100 + i)
+    }
+    expect(state).toEqual({ lateSamples: 0, bypassUntil: firstBypass })
+  })
+
+  it('honours a custom threshold and bypass window', () => {
+    expect(
+      updateInterpolationOverload(idle, 'late', 500, {
+        threshold: 1,
+        bypassMs: 50,
+      })
+    ).toEqual({ lateSamples: 0, bypassUntil: 550 })
   })
 })
