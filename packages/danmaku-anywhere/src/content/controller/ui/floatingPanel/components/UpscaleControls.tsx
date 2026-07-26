@@ -281,6 +281,7 @@ export const UpscaleControls = () => {
                   >
                     <ToggleButton value="480p">480p</ToggleButton>
                     <ToggleButton value="720p">720p</ToggleButton>
+                    <ToggleButton value="1080p">1080p</ToggleButton>
                   </ToggleButtonGroup>
                 )}
               </Stack>

@@ -53,7 +53,7 @@ type StoredUpscaleOptions = {
   enableCrossOriginFix: boolean
   frameInterpolation: {
     enabled: boolean
-    resolution: '480p' | '720p'
+    resolution: '480p' | '720p' | '1080p'
   }
 }
 
