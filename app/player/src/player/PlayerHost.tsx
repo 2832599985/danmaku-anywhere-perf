@@ -1,5 +1,8 @@
 import { Alert, Box, createTheme, ThemeProvider, useTheme } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { aiExtractTitle } from '@/danmaku/ai'
+import { pickEpisode, pickSeason } from '@/danmaku/autoMatch'
+import { fetchEpisodeComments, searchDanmaku } from '@/danmaku/ddp'
 import { filterComments } from '@/danmaku/filter'
 import { parseDanmakuText } from '@/danmaku/parse'
 import type { Platform } from '@/platform'
@@ -336,6 +339,53 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
           // unparsable sibling — try the next extension
         }
       }
+
+      // --- AI auto-match fallback (no sibling file was mounted) ---
+      // Parse the filename with the free built-in AI, search DanDanPlay, pick
+      // the best season + episode, and mount. Runs ONLY inside this IIFE so it
+      // inherits the sibling effect's `stale` guard and ordering (sibling wins;
+      // this fires only when the loop above mounted nothing). Every await
+      // boundary re-reads the store and re-checks identity so a media switch or
+      // an explicit load mid-flight can't be clobbered. All failures are
+      // silent — a miss just leaves the player without danmaku.
+      let s = usePlayerStore.getState()
+      if (
+        stale ||
+        s.media?.path !== videoPath ||
+        s.danmakuSource ||
+        !s.danmakuSettings.autoOnlineMatch
+      ) {
+        return
+      }
+      const info = await aiExtractTitle(basename(videoPath))
+      if (!info) return
+      s = usePlayerStore.getState()
+      if (stale || s.media?.path !== videoPath || s.danmakuSource) return
+      let animes
+      try {
+        animes = await searchDanmaku(info.title)
+      } catch {
+        return
+      }
+      const season = pickSeason(animes, info.title)
+      const ep = season ? pickEpisode(season.episodes, info.episode) : null
+      if (!season || !ep) return
+      s = usePlayerStore.getState()
+      if (stale || s.media?.path !== videoPath || s.danmakuSource) return
+      let comments
+      try {
+        comments = await fetchEpisodeComments(ep.episodeId)
+      } catch {
+        return
+      }
+      if (!comments.length) return
+      s = usePlayerStore.getState()
+      if (stale || s.media?.path !== videoPath || s.danmakuSource) return
+      s.setComments(comments, {
+        label: `${season.animeTitle} · ${ep.episodeTitle}`,
+        count: comments.length,
+      })
+      s.showOsd(`AI 匹配弹幕 · ${comments.length} 条`, '🤖')
     })()
     return () => {
       stale = true

@@ -165,6 +165,35 @@ export const DanmakuSettings = () => {
         )}
       </Box>
 
+      {/* Online AI auto-match toggle (Tauri; free built-in AI -> DanDanPlay) */}
+      <Box sx={{ border: LINE_STRONG, padding: '12px' }}>
+        <Stack
+          direction="row"
+          alignItems="center"
+          justifyContent="space-between"
+        >
+          <InkLabel zh="在线匹配" en="AUTO · AI + DANDANPLAY" size={13} />
+          <InkSwitch
+            checked={danmaku.autoOnlineMatch}
+            onChange={(v) => updateDanmakuSettings({ autoOnlineMatch: v })}
+            label="在线匹配"
+          />
+        </Stack>
+        <Typography
+          sx={{
+            fontFamily: MONO,
+            fontSize: 10,
+            fontWeight: 700,
+            color: alpha(PAPER, 0.5),
+            marginTop: '8px',
+            letterSpacing: '0.04em',
+            lineHeight: 1.5,
+          }}
+        >
+          无同名弹幕文件时,用文件名经 AI 解析番名/集数并自动挂载
+        </Typography>
+      </Box>
+
       {/* Four main sliders */}
       <InkLabeledSlider
         zh="不透明度"

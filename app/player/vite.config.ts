@@ -46,6 +46,10 @@ export default defineConfig({
         replacement: pkg('danmaku-provider/src/providers/ddp/index.ts'),
       },
       {
+        find: '@danmaku-anywhere/danmaku-provider/genAi',
+        replacement: pkg('danmaku-provider/src/providers/genAi/index.ts'),
+      },
+      {
         find: '@danmaku-anywhere/danmaku-provider',
         replacement: pkg('danmaku-provider/src/index.ts'),
       },

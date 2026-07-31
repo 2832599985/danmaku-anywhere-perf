@@ -85,6 +85,12 @@ export interface DanmakuSettings {
   mergeDuplicates: boolean
   /** blocked words applied before comments reach the renderer. */
   filters: DanmakuFilter[]
+  /**
+   * When no sibling danmaku file exists, parse the filename with the free
+   * built-in AI (proxy-hosted Gemini) and auto search+mount DanDanPlay
+   * danmaku. Tauri only; silent no-op on network/parse failure.
+   */
+  autoOnlineMatch: boolean
 }
 
 /** How the player handles detected OP/ED segments. */
@@ -132,6 +138,7 @@ export const DEFAULT_DANMAKU: DanmakuSettings = {
   overlap: 0,
   mergeDuplicates: false,
   filters: [],
+  autoOnlineMatch: true,
 }
 
 export const DEFAULT_PLAYBACK: PlaybackSettings = {

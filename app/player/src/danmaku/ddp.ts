@@ -17,7 +17,9 @@ const DA_ID_KEY = 'danmaku-player-da-id'
 
 let configured = false
 
-const ensureConfigured = () => {
+/** Configure the provider store once (stable daId + version). Exported so the
+ *  AI auto-match path shares the same config without re-implementing it. */
+export const ensureConfigured = () => {
   if (configured) return
   let daId = ''
   try {
