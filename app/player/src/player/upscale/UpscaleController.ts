@@ -21,10 +21,22 @@ const FRAMEGEN_MANIFEST_URL = `${import.meta.env.BASE_URL}assets/framegen/rt_v7s
 export type UpscaleStatus = 'idle' | 'initializing' | 'active' | 'error'
 export type InterpolationStatus = 'off' | 'active' | 'fallback'
 
+/** Per-report HUD numbers derived from the engine's diagnostics summary. */
+export interface UpscaleStatsReport {
+  fps: number
+  cpuFrameMs: number
+  generatedFps: number
+}
+
 export interface UpscaleControllerCallbacks {
   onStatus?: (status: UpscaleStatus, error?: string | null) => void
   onInterpolationStatus?: (status: InterpolationStatus) => void
+  /** ~1s cadence while rendering; called with null when the renderer stops. */
+  onStats?: (stats: UpscaleStatsReport | null) => void
 }
+
+/** diagnostics report interval — 1 report/second is plenty for a HUD. */
+const DIAGNOSTICS_INTERVAL_MS = 1000
 
 const computeTargetDimensions = (
   video: HTMLVideoElement,
@@ -108,6 +120,10 @@ export class UpscaleController {
   /** monotonic guard so stale async enable/update calls abort */
   private epoch = 0
   private destroyed = false
+  /** cumulative generated-frame count at the last diagnostics report. */
+  private lastGeneratedCount = 0
+  /** current A/B split ratio, null = compare off. */
+  private compareRatio: number | null = null
 
   constructor(
     video: HTMLVideoElement,
@@ -147,6 +163,47 @@ export class UpscaleController {
     this.canvas.style.visibility = 'visible'
     this.originalVideoOpacity = this.video.style.opacity
     this.video.style.opacity = '0'
+    this.applyCompareSplit()
+  }
+
+  /**
+   * A/B split: clip the enhanced canvas to the left `ratio` of the frame and
+   * let the untouched <video> underneath show through on the right. Purely
+   * cosmetic — the renderer keeps running full-frame.
+   */
+  setCompareRatio(ratio: number | null): void {
+    this.compareRatio = ratio
+    this.applyCompareSplit()
+  }
+
+  private applyCompareSplit(): void {
+    if (!this.canvas || this.canvas.style.visibility !== 'visible') return
+    if (this.compareRatio === null) {
+      this.canvas.style.clipPath = ''
+      this.video.style.opacity = '0'
+    } else {
+      const pct = Math.min(100, Math.max(0, this.compareRatio * 100))
+      this.canvas.style.clipPath = `inset(0 ${100 - pct}% 0 0)`
+      this.video.style.opacity = this.originalVideoOpacity || '1'
+    }
+  }
+
+  /** Translate the engine's diagnostics summary into HUD numbers. */
+  private reportStats(summary: {
+    frames: number
+    averageCpuFrameMs: number
+  }): void {
+    const seconds = DIAGNOSTICS_INTERVAL_MS / 1000
+    const generatedAttr =
+      this.canvas?.dataset.danmakuAnywhereFrameInterpolationGenerated
+    const generatedTotal = generatedAttr ? Number(generatedAttr) || 0 : 0
+    const generatedDelta = Math.max(0, generatedTotal - this.lastGeneratedCount)
+    this.lastGeneratedCount = generatedTotal
+    this.callbacks.onStats?.({
+      fps: Math.round(summary.frames / seconds),
+      cpuFrameMs: summary.averageCpuFrameMs,
+      generatedFps: Math.round(generatedDelta / seconds),
+    })
   }
 
   private reportInterpolation(settings: UpscaleSettings): void {
@@ -201,6 +258,10 @@ export class UpscaleController {
         targetDimensions,
         frameInterpolation: buildFrameInterpolation(settings),
         presentationMode: 'raf',
+        diagnostics: { reportIntervalMs: DIAGNOSTICS_INTERVAL_MS },
+        onDiagnostics: (summary) => {
+          if (epoch === this.epoch) this.reportStats(summary)
+        },
         onFirstFrameRendered: () => {
           if (epoch === this.epoch) this.showCanvas()
         },
@@ -262,6 +323,8 @@ export class UpscaleController {
       this.canvas = null
     }
     this.video.style.opacity = this.originalVideoOpacity
+    this.lastGeneratedCount = 0
+    this.callbacks.onStats?.(null)
   }
 
   /** Turn upscaling off but keep the controller reusable. */

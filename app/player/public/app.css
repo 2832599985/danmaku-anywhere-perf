@@ -6,6 +6,77 @@ body,
 #root {
   margin: 0;
   height: 100%;
-  background: #000;
+  background: #0a0a0c;
   overflow: hidden;
+}
+
+::selection {
+  background: #ff2f4d;
+  color: #0a0a0c;
+}
+
+/* 墨线 theme keyframes — shared by EmptyState / Controls / panels.
+ * Hard cuts (steps) for blinks, linear drifts for danmaku/tone. */
+@keyframes ink-dm {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-2100px);
+  }
+}
+@keyframes ink-blink {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  61%,
+  100% {
+    opacity: 0.25;
+  }
+}
+@keyframes ink-bar {
+  0%,
+  100% {
+    transform: scaleY(0.45);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+@keyframes ink-tone {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 14px 14px;
+  }
+}
+@keyframes ink-sweep {
+  0% {
+    transform: translateX(-60%);
+  }
+  100% {
+    transform: translateX(360%);
+  }
+}
+@keyframes ink-sparkle {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.4) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1) rotate(90deg);
+  }
+}
+@keyframes ink-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
 }

@@ -23,6 +23,10 @@ export interface PlayerCommands {
   toggleFullscreen(): void
   /** show/hide danmaku (mirrors settings.visible). */
   toggleDanmaku(): void
+  /** flip the super-resolution master switch (keyboard U). */
+  toggleUpscale(): void
+  /** enter/exit the A/B enhanced-vs-original split (keyboard C). */
+  toggleCompare(): void
 
   /** open the multi-select file picker and ADD the pick to the playlist. */
   openVideo(): Promise<void>

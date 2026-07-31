@@ -1,5 +1,6 @@
-import { Box, Typography } from '@mui/material'
+import { alpha, Box, Typography } from '@mui/material'
 import { usePlayerStore } from '@/store/playerStore'
+import { MONO, PAPER } from '@/theme/theme'
 
 /**
  * Format a duration in seconds as `m:ss` (or `h:mm:ss` past an hour).
@@ -27,28 +28,39 @@ export const TimeDisplay = () => {
     <Box
       sx={{
         display: 'flex',
-        alignItems: 'center',
-        gap: 0.25,
-        px: 0.5,
+        alignItems: 'baseline',
+        marginLeft: '6px',
+        letterSpacing: '0.04em',
         fontVariantNumeric: 'tabular-nums',
         userSelect: 'none',
         whiteSpace: 'nowrap',
+        flexShrink: 0,
       }}
     >
       <Typography
         component="span"
-        variant="body2"
-        sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+        sx={{
+          fontSize: 16,
+          fontWeight: 700,
+          fontFamily: MONO,
+          color: PAPER,
+          fontVariantNumeric: 'tabular-nums',
+        }}
       >
         {formatTime(currentTime)}
       </Typography>
       <Typography
         component="span"
-        variant="body2"
-        sx={{ color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}
+        sx={{
+          fontSize: 16,
+          fontWeight: 400,
+          fontFamily: MONO,
+          color: alpha(PAPER, 0.4),
+          fontVariantNumeric: 'tabular-nums',
+          whiteSpace: 'pre',
+        }}
       >
-        {' / '}
-        {formatTime(duration)}
+        {` / ${formatTime(duration)}`}
       </Typography>
     </Box>
   )

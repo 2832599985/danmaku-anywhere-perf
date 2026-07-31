@@ -350,7 +350,8 @@ await page.evaluate(() =>
 await page.waitForTimeout(500)
 const portal = await page.evaluate(() => {
   const stage = document.querySelector('[data-player-stage]')
-  const drawer = document.querySelector('.MuiDrawer-root')
+  // The settings surface is a full-window Modal page in the ink redesign.
+  const drawer = document.querySelector('[data-settings-page]')
   return {
     hasStage: !!stage,
     hasDrawer: !!drawer,
@@ -495,8 +496,10 @@ await page.waitForTimeout(1200)
 const fsMenu = await page.evaluate(async () => {
   const stage = document.querySelector('[data-player-stage]')
   const isFullscreen = document.fullscreenElement === stage
+  // Match the speed button exactly ("1×" / "1.25×"): the enhancement status
+  // capsule also contains × (e.g. "2× 超分") and sits earlier in the DOM.
   const speed = [...document.querySelectorAll('button')].find((b) =>
-    /×/.test(b.textContent || '')
+    /^[\d.]+×$/.test((b.textContent || '').trim())
   )
   if (!speed) return { isFullscreen, error: 'speed button not found' }
   speed.click()
@@ -634,8 +637,9 @@ const drawerProgress = await page.evaluate(() => {
   const drawer = document.querySelector('.MuiDrawer-root')
   const text = drawer ? drawer.textContent : ''
   return {
-    hasResumeText: /看到|已看完/.test(text),
-    hasBar: !!drawer?.querySelector('.MuiLinearProgress-root'),
+    // Ink redesign shows "m:ss / m:ss" (or 已看完) instead of a 看到 prefix.
+    hasResumeText: /已看完|\d+:\d+\s*\/\s*\d+:\d+/.test(text),
+    hasBar: !!drawer?.querySelector('[data-playlist-progress]'),
   }
 })
 check(

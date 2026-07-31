@@ -1,142 +1,150 @@
-import type { CSSObject, SxProps, Theme } from '@mui/material/styles'
+import type { CSSObject } from '@mui/material/styles'
 import { alpha, createTheme } from '@mui/material/styles'
 
 /**
- * Dark, glassy theme for the danmaku player. Violet -> fuchsia accent, cohesive
- * with the sibling extension's「neon-violet」palette. Dark mode only.
+ * 黑白漫画（单色墨线）+ 朱红点缀 — the manga ink theme.
+ * Zero border radius, 2–3px paper strokes, hard vermilion shadows, halftone
+ * dot backgrounds. Replaces the old violet glassmorphism wholesale.
+ * Design source: 弹幕播放器 UI 设计稿 (DESIGN-HANDOFF.md).
  */
 
-export const ACCENT = {
-  primary: '#a78bfa',
-  primaryStrong: '#8b5cf6',
-  primaryLight: '#c4b5fd',
-  secondary: '#e879f9',
-  secondaryStrong: '#d946ef',
-  secondaryLight: '#f0abfc',
-} as const
+/** 墨黑 — window/panel ground. */
+export const INK = '#0a0a0c'
+/** 舞台底 — slightly lighter stage ground (settings page, idle screen). */
+export const INK_STAGE = '#0d0d10'
+/** 纸白 — text, strokes, selected fills. */
+export const PAPER = '#f4f1e8'
+/** 朱红 — THE accent (selection, activity, danger). */
+export const VERMILION = '#ff2f4d'
+/** HDR / OP-ED markers. */
+export const GOLD = '#ffd23f'
+/** status ACTIVE / match success. */
+export const GREEN = '#3ddc84'
 
-/** App background — near-black with a faint violet cast. */
-export const APP_BG = '#0b0b12'
+export const LINE_STRONG = `2px solid ${PAPER}`
+export const LINE_WEAK = `2px solid ${alpha(PAPER, 0.3)}`
 
-/** Violet -> fuchsia gradient used for accents, titles and prominent buttons. */
-export const ACCENT_GRADIENT = `linear-gradient(135deg, ${ACCENT.primary} 0%, ${ACCENT.secondary} 100%)`
+/** Hard comic shadow for key controls; panels go 8–14px. */
+export const HARD_SHADOW = `4px 4px 0 ${VERMILION}`
+export const hardShadow = (px: number, color: string = VERMILION): string =>
+  `${px}px ${px}px 0 ${color}`
+
+/** Mono stack for ALL numbers, statuses and english micro-labels. */
+export const MONO = '"JetBrains Mono", ui-monospace, monospace'
+/** Decorative kana serif (「再生中」 etc.). */
+export const SERIF_JP = '"Zen Antique", serif'
+/** Body / heading stack. */
+export const SANS =
+  '"Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif'
 
 /**
- * Deep multi-stop violet with a near-white specular stop — the "expensive"
- * purple. A flat two-stop pastel reads like plastic; this one has shadow depth
- * at both ends and a metallic highlight in the middle. Pair with a blurred
- * bloom layer for neon depth on dark stages.
+ * Halftone dot ground — the signature paper-grain texture. `alphaVal` tunes
+ * dot brightness, `size` the grid pitch.
  */
-export const RICH_GRADIENT =
-  'linear-gradient(105deg, #6d28d9 0%, #8b5cf6 20%, #c4b5fd 38%, #f3e8ff 50%, #e879f9 62%, #a855f7 80%, #7c3aed 100%)'
-
-/** Deep saturated fill for hero buttons (dark → bright → fuchsia). */
-export const RICH_BUTTON_GRADIENT =
-  'linear-gradient(135deg, #7c3aed 0%, #a855f7 48%, #d946ef 100%)'
-
-/** rgb triple for the translucent glass fills so alpha can vary per surface. */
-const GLASS_RGB = '20, 20, 32'
-
-/** Radius scale, mirrored from the extension's design tokens. */
-export const RADIUS = { s: 10, m: 16, l: 22, pill: 999 } as const
-
-/**
- * Translucent dark surface with backdrop blur — the signature "glass" look.
- * `strength` tunes the fill opacity (bars 0.55, panels/dialogs 0.72).
- */
-export const glassSx = (strength = 0.6): CSSObject => ({
-  backgroundColor: `rgba(${GLASS_RGB}, ${strength})`,
-  backdropFilter: 'blur(12px) saturate(160%)',
-  WebkitBackdropFilter: 'blur(12px) saturate(160%)',
-  border: '1px solid rgba(255, 255, 255, 0.08)',
+export const halftoneSx = (alphaVal = 0.07, size = 14): CSSObject => ({
+  backgroundColor: INK,
+  backgroundImage: `radial-gradient(${alpha(PAPER, alphaVal)} 1px, transparent 1px)`,
+  backgroundSize: `${size}px ${size}px`,
 })
 
-/** Clip the accent gradient to text. Apply to a Typography/Box. */
-export const gradientTextSx: CSSObject = {
-  backgroundImage: ACCENT_GRADIENT,
-  backgroundClip: 'text',
-  WebkitBackgroundClip: 'text',
-  color: 'transparent',
-  WebkitTextFillColor: 'transparent',
-}
-
-/**
- * Shared sx for the ToggleButtonGroup grids in the settings panels. Typed as
- * SxProps (not CSSObject) because it uses spacing shorthands (`py`, `gap`) that
- * are only valid in the theme-aware `sx` context.
- */
-export const toggleGridSx = (columns: number): SxProps<Theme> => ({
-  display: 'grid',
-  gridTemplateColumns: `repeat(${columns}, 1fr)`,
-  gap: 0.5,
-  '& .MuiToggleButton-root': {
-    border: '1px solid rgba(255,255,255,0.10)',
-    borderRadius: `${RADIUS.s}px !important`,
-    color: 'rgba(255,255,255,0.72)',
-    fontSize: 12.5,
-    fontWeight: 600,
-    py: 0.5,
-    lineHeight: 1.2,
-    textTransform: 'none',
-  },
+/** Diagonal hatch used as placeholder art (thumbnails, video stand-ins). */
+export const hatchSx = (a = '#1b1b22', b = '#141419', w = 12): CSSObject => ({
+  background: `repeating-linear-gradient(48deg, ${a} 0 ${w}px, ${b} ${w}px ${w * 2}px)`,
 })
+
+/** Mono micro-label: 9–10px, wide tracking, dimmed. */
+export const microLabelSx = (color = alpha(PAPER, 0.4)): CSSObject => ({
+  fontFamily: MONO,
+  fontSize: 9,
+  letterSpacing: '0.22em',
+  color,
+  fontWeight: 700,
+})
+
+/** Overlay bar gradient — the ONLY translucent surface left in the app. */
+export const OVERLAY_GRADIENT =
+  'linear-gradient(to top, rgba(10,10,12,0.97) 0%, rgba(10,10,12,0.9) 62%, transparent 100%)'
 
 export const theme = createTheme({
   palette: {
     mode: 'dark',
     primary: {
-      main: ACCENT.primary,
-      light: ACCENT.primaryLight,
-      dark: ACCENT.primaryStrong,
-      contrastText: '#0b0b12',
+      main: VERMILION,
+      light: '#ff6478',
+      dark: '#d91635',
+      contrastText: PAPER,
     },
     secondary: {
-      main: ACCENT.secondary,
-      light: ACCENT.secondaryLight,
-      dark: ACCENT.secondaryStrong,
-      contrastText: '#0b0b12',
+      main: PAPER,
+      light: '#ffffff',
+      dark: '#d6d2c4',
+      contrastText: INK,
     },
     background: {
-      default: APP_BG,
-      paper: '#14141f',
+      default: INK,
+      paper: INK,
     },
     text: {
-      primary: 'rgba(255, 255, 255, 0.92)',
-      secondary: 'rgba(255, 255, 255, 0.60)',
-      disabled: 'rgba(255, 255, 255, 0.35)',
+      primary: alpha(PAPER, 0.92),
+      secondary: alpha(PAPER, 0.6),
+      disabled: alpha(PAPER, 0.35),
     },
-    divider: 'rgba(255, 255, 255, 0.08)',
-    success: { main: '#34d399' },
-    warning: { main: '#fbbf24' },
-    error: { main: '#fb7185' },
-    info: { main: '#818cf8' },
+    divider: alpha(PAPER, 0.14),
+    success: { main: GREEN },
+    warning: { main: GOLD },
+    error: { main: VERMILION },
+    info: { main: PAPER },
   },
   shape: {
-    borderRadius: RADIUS.m,
+    // 漫画风靠直角。No rounding anywhere.
+    borderRadius: 0,
   },
   typography: {
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif',
-    button: { textTransform: 'none', fontWeight: 600 },
+    fontFamily: SANS,
+    button: { textTransform: 'none', fontWeight: 700 },
     caption: { letterSpacing: '0.01em' },
   },
   components: {
     MuiButton: {
-      defaultProps: { disableElevation: true },
+      defaultProps: { disableElevation: true, disableRipple: true },
       styleOverrides: {
         root: {
-          borderRadius: RADIUS.pill,
-          fontWeight: 600,
+          borderRadius: 0,
+          fontWeight: 700,
+          transition: 'background-color 100ms steps(1), color 100ms steps(1)',
+        },
+        outlined: {
+          border: LINE_WEAK,
+          color: alpha(PAPER, 0.8),
+          '&:hover': {
+            border: LINE_STRONG,
+            backgroundColor: PAPER,
+            color: INK,
+          },
+        },
+        contained: {
+          border: LINE_STRONG,
+          backgroundColor: PAPER,
+          color: INK,
+          boxShadow: HARD_SHADOW,
+          '&:hover': {
+            backgroundColor: VERMILION,
+            color: PAPER,
+            boxShadow: HARD_SHADOW,
+          },
         },
       },
     },
     MuiIconButton: {
+      defaultProps: { disableRipple: true },
       styleOverrides: {
         root: {
-          color: 'rgba(255, 255, 255, 0.88)',
-          transition: 'background-color 120ms ease, color 120ms ease',
+          borderRadius: 0,
+          color: alpha(PAPER, 0.88),
+          transition: 'background-color 100ms steps(1), color 100ms steps(1)',
           '&:hover': {
-            backgroundColor: 'rgba(255, 255, 255, 0.10)',
+            backgroundColor: PAPER,
+            color: INK,
           },
         },
       },
@@ -144,109 +152,126 @@ export const theme = createTheme({
     MuiTooltip: {
       styleOverrides: {
         tooltip: {
-          ...glassSx(0.82),
-          borderRadius: RADIUS.s,
+          backgroundColor: INK,
+          border: LINE_STRONG,
+          borderRadius: 0,
+          color: PAPER,
           fontSize: 12,
-          fontWeight: 600,
+          fontWeight: 700,
           padding: '4px 8px',
-        },
-      },
-    },
-    MuiToggleButton: {
-      styleOverrides: {
-        root: {
-          '&.Mui-selected': {
-            color: '#fff',
-            backgroundColor: alpha(ACCENT.primaryStrong, 0.32),
-            borderColor: alpha(ACCENT.primary, 0.55),
-            '&:hover': {
-              backgroundColor: alpha(ACCENT.primaryStrong, 0.42),
-            },
-          },
         },
       },
     },
     MuiSlider: {
       styleOverrides: {
-        root: { color: ACCENT.primary },
+        root: { color: PAPER, borderRadius: 0 },
         thumb: {
-          width: 14,
-          height: 14,
-          boxShadow: `0 0 0 4px ${alpha(ACCENT.primary, 0.16)}`,
-          '&:hover, &.Mui-focusVisible': {
-            boxShadow: `0 0 0 6px ${alpha(ACCENT.primary, 0.22)}`,
+          width: 8,
+          height: 22,
+          borderRadius: 0,
+          backgroundColor: VERMILION,
+          border: LINE_STRONG,
+          boxShadow: 'none',
+          '&:hover, &.Mui-focusVisible, &.Mui-active': {
+            boxShadow: 'none',
           },
         },
         track: {
           border: 'none',
-          backgroundImage: ACCENT_GRADIENT,
+          borderRadius: 0,
+          backgroundColor: PAPER,
         },
         rail: {
           opacity: 1,
-          backgroundColor: 'rgba(255, 255, 255, 0.16)',
+          borderRadius: 0,
+          backgroundColor: alpha(PAPER, 0.16),
         },
         valueLabel: {
-          ...glassSx(0.85),
-          borderRadius: RADIUS.s,
-          fontWeight: 600,
+          backgroundColor: INK,
+          border: LINE_STRONG,
+          borderRadius: 0,
+          fontFamily: MONO,
+          fontWeight: 700,
         },
       },
     },
     MuiDrawer: {
       styleOverrides: {
         paper: {
-          ...glassSx(0.78),
+          backgroundColor: INK,
           backgroundImage: 'none',
+          borderLeft: `3px solid ${PAPER}`,
         },
       },
     },
     MuiDialog: {
       styleOverrides: {
         paper: {
-          ...glassSx(0.82),
+          backgroundColor: INK,
           backgroundImage: 'none',
-          borderRadius: RADIUS.l,
+          border: `3px solid ${PAPER}`,
+          borderRadius: 0,
+          boxShadow: `12px 12px 0 ${alpha(VERMILION, 0.9)}`,
         },
       },
     },
     MuiMenu: {
       styleOverrides: {
         paper: {
-          ...glassSx(0.82),
+          backgroundColor: INK,
           backgroundImage: 'none',
-          borderRadius: RADIUS.m,
+          border: LINE_STRONG,
+          borderRadius: 0,
+          boxShadow: HARD_SHADOW,
         },
       },
     },
-    MuiTabs: {
-      styleOverrides: {
-        indicator: {
-          height: 3,
-          borderRadius: 3,
-          backgroundImage: ACCENT_GRADIENT,
-        },
-      },
-    },
-    MuiTab: {
+    MuiMenuItem: {
+      defaultProps: { disableRipple: true },
       styleOverrides: {
         root: {
-          textTransform: 'none',
-          fontWeight: 600,
-          minHeight: 44,
+          fontWeight: 700,
+          '&:hover': { backgroundColor: PAPER, color: INK },
+          '&.Mui-selected': {
+            backgroundColor: VERMILION,
+            color: PAPER,
+            '&:hover': { backgroundColor: VERMILION, color: PAPER },
+          },
         },
       },
     },
     MuiChip: {
       styleOverrides: {
-        root: { fontWeight: 600 },
+        root: { fontWeight: 700, borderRadius: 0 },
       },
     },
-    MuiAccordion: {
+    MuiDivider: {
+      styleOverrides: {
+        root: { borderColor: alpha(PAPER, 0.2) },
+      },
+    },
+    MuiAlert: {
+      styleOverrides: {
+        root: { borderRadius: 0 },
+        outlined: { border: LINE_WEAK },
+      },
+    },
+    MuiTextField: {
+      defaultProps: { autoComplete: 'off' },
+    },
+    MuiOutlinedInput: {
       styleOverrides: {
         root: {
-          backgroundImage: 'none',
-          backgroundColor: 'transparent',
-          '&:before': { display: 'none' },
+          borderRadius: 0,
+          '& .MuiOutlinedInput-notchedOutline': {
+            border: LINE_WEAK,
+          },
+          '&:hover .MuiOutlinedInput-notchedOutline': {
+            border: LINE_STRONG,
+          },
+          '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+            border: `2px solid ${VERMILION}`,
+          },
         },
       },
     },

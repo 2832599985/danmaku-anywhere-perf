@@ -2,7 +2,7 @@ import { Box, Fade, Stack, Typography } from '@mui/material'
 import { useEffect, useState } from 'react'
 import type { OsdMessage } from '@/store/playerStore'
 import { usePlayerStore } from '@/store/playerStore'
-import { glassSx } from '@/theme/theme'
+import { INK, LINE_STRONG, MONO, PAPER } from '@/theme/theme'
 
 const OSD_DURATION = 900
 
@@ -42,28 +42,35 @@ export const Osd = () => {
         <Stack
           direction="row"
           alignItems="center"
-          spacing={1.25}
+          spacing={1}
           sx={{
-            ...glassSx(0.6),
-            borderRadius: '22px',
-            px: 3,
-            py: 1.75,
+            background: INK,
+            border: LINE_STRONG,
+            px: 2,
+            py: 1.25,
             minWidth: 120,
             justifyContent: 'center',
-            boxShadow: '0 12px 40px rgba(0,0,0,0.45)',
           }}
         >
           {content?.icon && (
-            <Typography component="span" sx={{ fontSize: 32, lineHeight: 1 }}>
+            <Typography
+              component="span"
+              sx={{
+                fontSize: 26,
+                lineHeight: 1,
+                color: PAPER,
+              }}
+            >
               {content.icon}
             </Typography>
           )}
           <Typography
             component="span"
             sx={{
-              fontSize: 26,
+              fontSize: 18,
               fontWeight: 700,
-              color: '#fff',
+              fontFamily: MONO,
+              color: PAPER,
               fontVariantNumeric: 'tabular-nums',
               whiteSpace: 'nowrap',
             }}

@@ -1,5 +1,6 @@
 import { Alert, Box, createTheme, ThemeProvider, useTheme } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { filterComments } from '@/danmaku/filter'
 import { parseDanmakuText } from '@/danmaku/parse'
 import type { Platform } from '@/platform'
 import { type PlaylistItem, usePlayerStore } from '@/store/playerStore'
@@ -93,6 +94,19 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   const upscale = usePlayerStore((s) => s.upscale)
   const isHdr = usePlayerStore((s) => s.isHdr)
   const playing = usePlayerStore((s) => s.playback.playing)
+  const compareRatio = usePlayerStore((s) => s.compareRatio)
+
+  // Blocked words + duplicate merging run BEFORE the renderer; the unfiltered
+  // list stays in the store so loosening a rule brings comments back.
+  const visibleComments = useMemo(
+    () =>
+      filterComments(
+        comments,
+        danmakuSettings.filters,
+        danmakuSettings.mergeDuplicates
+      ),
+    [comments, danmakuSettings.filters, danmakuSettings.mergeDuplicates]
+  )
 
   const [controlsVisible, setControlsVisible] = useState(true)
   const hideTimer = useRef<number | null>(null)
@@ -108,6 +122,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     const upscaleCtrl = new UpscaleController(video, stage, {
       onStatus: (status, error) => store.setUpscaleStatus(status, error),
       onInterpolationStatus: (status) => store.setInterpolationStatus(status),
+      onStats: (stats) => usePlayerStore.getState().setUpscaleStats(stats),
     })
     const danmakuCtrl = new DanmakuController(layer)
     upscaleCtrlRef.current = upscaleCtrl
@@ -141,7 +156,11 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     if (store.comments.length) {
       danmakuCtrlRef.current?.setComments(
         video,
-        store.comments,
+        filterComments(
+          store.comments,
+          store.danmakuSettings.filters,
+          store.danmakuSettings.mergeDuplicates
+        ),
         store.danmakuSettings
       )
     }
@@ -178,20 +197,20 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     }
   }, [media, video])
 
-  // --- comments -> mount / clear danmaku ---
+  // --- comments (post-filter) -> mount / clear danmaku ---
   useEffect(() => {
     const danmaku = danmakuCtrlRef.current
     if (!video || !danmaku) return
-    if (comments.length) {
+    if (visibleComments.length) {
       danmaku.setComments(
         video,
-        comments,
+        visibleComments,
         usePlayerStore.getState().danmakuSettings
       )
     } else {
       danmaku.clear()
     }
-  }, [comments, video])
+  }, [visibleComments, video])
 
   // --- danmaku settings -> live update ---
   useEffect(() => {
@@ -233,6 +252,18 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     }
     void ctrl.apply(upscale)
   }, [upscale, isHdr, media, video])
+
+  // --- A/B compare split -> controller clip-path ---
+  useEffect(() => {
+    upscaleCtrlRef.current?.setCompareRatio(compareRatio)
+  }, [compareRatio])
+
+  // Exiting upscale (or losing the media) also exits compare mode.
+  useEffect(() => {
+    if ((!upscale.enabled || !media) && compareRatio !== null) {
+      usePlayerStore.getState().setCompareRatio(null)
+    }
+  }, [upscale.enabled, media, compareRatio])
 
   // --- fullscreen state mirror ---
   useEffect(() => {
@@ -477,6 +508,23 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         store().toggleDanmakuVisible()
         const visible = store().danmakuSettings.visible
         store().showOsd(visible ? '弹幕开' : '弹幕关', '💬')
+      },
+      toggleUpscale: () => {
+        const enabled = !store().upscale.enabled
+        store().updateUpscale({ enabled })
+        store().showOsd(enabled ? '超分开' : '超分关', '✨')
+      },
+      toggleCompare: () => {
+        const s = store()
+        if (s.compareRatio !== null) {
+          s.setCompareRatio(null)
+          s.showOsd('退出对比', '⇔')
+        } else if (s.upscale.enabled && s.upscaleStatus === 'active') {
+          s.setCompareRatio(0.5)
+          s.showOsd('增强 ⇔ 原片 对比', '⇔')
+        } else {
+          s.showOsd('超分未运行,无法对比', '⇔')
+        }
       },
       openVideo: async () => {
         const picked = await platform.pickVideoFiles()

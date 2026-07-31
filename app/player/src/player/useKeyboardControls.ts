@@ -80,6 +80,14 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
           event.preventDefault()
           commands.toggleDanmaku()
           break
+        case 'u':
+          event.preventDefault()
+          commands.toggleUpscale()
+          break
+        case 'c':
+          event.preventDefault()
+          commands.toggleCompare()
+          break
         case '[':
           event.preventDefault()
           commands.playlistPrev()

@@ -1,25 +1,19 @@
-import { HistoryRounded, PlayArrowRounded } from '@mui/icons-material'
-import { Box, LinearProgress, Stack, Typography } from '@mui/material'
+import { Box, Stack, Typography } from '@mui/material'
+import { alpha } from '@mui/material/styles'
 import { usePlayerCommands } from '@/player/commands'
 import type { PlaylistItem, ResumeEntry } from '@/store/playerStore'
 import { usePlayerStore } from '@/store/playerStore'
-import { RICH_GRADIENT } from '@/theme/theme'
+import {
+  halftoneSx,
+  hatchSx,
+  INK,
+  INK_STAGE,
+  MONO,
+  PAPER,
+  SERIF_JP,
+  VERMILION,
+} from '@/theme/theme'
 import { formatTime } from './TimeDisplay'
-
-/**
- * Ghost danmaku drifting across the idle stage. Purely decorative — they sell
- * "this is a danmaku player" the moment the window opens. Each entry: text,
- * vertical track (%), duration (s), delay (s, negative = already mid-flight),
- * font size and opacity.
- */
-const GHOSTS: [string, number, number, number, number, number][] = [
-  ['前方高能预警', 12, 34, -6, 20, 0.1],
-  ['弹幕护体', 22, 46, -24, 15, 0.07],
-  ['2333333', 31, 28, -12, 17, 0.09],
-  ['名场面收藏了', 64, 52, -30, 14, 0.06],
-  ['awsl', 73, 38, -2, 19, 0.08],
-  ['泪目 T_T', 84, 44, -18, 14, 0.06],
-]
 
 /** Recent, resumable history shown under the hero (most recently watched first). */
 const pickRecent = (
@@ -34,6 +28,25 @@ const pickRecent = (
     .map((item) => ({ item, entry: progress[item.path as string] }))
     .sort((a, b) => b.entry.updatedAt - a.entry.updatedAt)
     .slice(0, 3)
+
+/** Format relative time in Chinese, matching the design (昨天 / N 天前 / 上周). */
+const formatRelativeTime = (epochMs: number): string => {
+  if (!epochMs) return ''
+  const now = Date.now()
+  const diff = now - epochMs
+  const minutes = Math.floor(diff / 60000)
+  const hours = Math.floor(minutes / 60)
+  const days = Math.floor(hours / 24)
+
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  if (hours < 24) return `${hours} 小时前`
+  if (days === 1) return '昨天'
+  if (days < 7) return `${days} 天前`
+  if (days < 14) return '上周'
+  if (days < 30) return `${Math.floor(days / 7)} 周前`
+  return `${Math.floor(days / 30)} 个月前`
+}
 
 /** Four-point anime sparkle (✦). Position/color/animation via sx. */
 const Sparkle = ({ size, sx }: { size: number; sx: object }) => (
@@ -57,120 +70,8 @@ const Sparkle = ({ size, sx }: { size: number; sx: object }) => (
 )
 
 /**
- * Line-art cat-ear TV mascot (电视娘) idling in the corner of the stage —
- * strokes only, in the theme violet, so it reads as set dressing rather than
- * clip-art. Bobs gently; hidden on narrow windows.
- */
-const TvMascot = () => (
-  <Box
-    aria-hidden
-    sx={{
-      position: 'absolute',
-      right: 'clamp(16px, 5vw, 96px)',
-      bottom: '7%',
-      width: 'clamp(150px, 14vw, 210px)',
-      color: 'rgba(196,181,253,0.34)',
-      pointerEvents: 'none',
-      animation: 'da-bob 6s ease-in-out infinite',
-      '@media (max-width: 1080px)': { display: 'none' },
-    }}
-  >
-    <svg viewBox="0 0 220 170" fill="none" stroke="currentColor">
-      {/* cat-ear antennas */}
-      <path d="M82 52 L60 20" strokeWidth="3" strokeLinecap="round" />
-      <circle cx="60" cy="20" r="3.5" fill="currentColor" stroke="none" />
-      <path d="M126 52 L148 20" strokeWidth="3" strokeLinecap="round" />
-      <circle cx="148" cy="20" r="3.5" fill="currentColor" stroke="none" />
-      {/* body + screen */}
-      <rect x="46" y="52" width="126" height="88" rx="16" strokeWidth="3" />
-      <rect x="61" y="67" width="96" height="58" rx="9" strokeWidth="2.5" />
-      {/* screen content: danmaku streaking past a play wedge */}
-      <path d="M69 79 H92" strokeWidth="3" strokeLinecap="round" />
-      <path d="M126 113 H149" strokeWidth="3" strokeLinecap="round" />
-      <path
-        d="M103 85 L103 107 L121 96 Z"
-        strokeWidth="2.5"
-        strokeLinejoin="round"
-      />
-      {/* feet */}
-      <path d="M76 140 V150" strokeWidth="3" strokeLinecap="round" />
-      <path d="M142 140 V150" strokeWidth="3" strokeLinecap="round" />
-      {/* a stray danmaku bubble drifting by */}
-      <rect x="178" y="38" width="34" height="20" rx="10" strokeWidth="2.5" />
-      <path d="M186 48 H204" strokeWidth="2.5" strokeLinecap="round" />
-    </svg>
-  </Box>
-)
-
-/** Gradient folder-with-play glyph for the open button (replaces the stock MUI icon). */
-const OpenIcon = () => (
-  <Box
-    component="svg"
-    aria-hidden
-    viewBox="0 0 22 22"
-    sx={{ width: 20, height: 20, flexShrink: 0 }}
-  >
-    <defs>
-      <linearGradient id="da-open-grad" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stopColor="#c4b5fd" />
-        <stop offset="1" stopColor="#e879f9" />
-      </linearGradient>
-    </defs>
-    <path
-      d="M2.5 6.5C2.5 5.4 3.4 4.5 4.5 4.5H8L10 6.5H17.5C18.6 6.5 19.5 7.4 19.5 8.5V15.5C19.5 16.6 18.6 17.5 17.5 17.5H4.5C3.4 17.5 2.5 16.6 2.5 15.5V6.5Z"
-      fill="none"
-      stroke="#fff"
-      strokeOpacity="0.9"
-      strokeWidth="1.6"
-      strokeLinejoin="round"
-    />
-    <path d="M9.4 9.3L14.4 12L9.4 14.7Z" fill="url(#da-open-grad)" />
-  </Box>
-)
-
-/** Mini video-thumbnail glyph for the continue-watching cards. */
-const RecentThumb = () => (
-  <Box
-    component="svg"
-    aria-hidden
-    viewBox="0 0 44 30"
-    sx={{
-      width: 44,
-      height: 30,
-      flexShrink: 0,
-      color: 'rgba(196,181,253,0.55)',
-    }}
-  >
-    <rect
-      x="1.5"
-      y="1.5"
-      width="41"
-      height="27"
-      rx="7"
-      fill="rgba(167,139,250,0.08)"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    />
-    <path d="M18.5 10 L18.5 20 L27 15 Z" fill="currentColor" />
-    <path
-      d="M7 8.5 H13"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-    />
-    <path
-      d="M31 21.5 H37"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-    />
-  </Box>
-)
-
-/**
- * The idle stage. Not a drop-zone card but a scene: projector beam, floor
- * glow, ghost danmaku drifting by, the mark front and center, and — because
- * the playlist is a persistent history now — a "continue watching" strip.
+ * The idle stage: halftone ground + manga speed-lines + drifting danmaku strip
+ * + centered hero + button + continue-watching grid + floating mascot.
  */
 export const EmptyState = () => {
   const commands = usePlayerCommands()
@@ -184,431 +85,442 @@ export const EmptyState = () => {
         position: 'absolute',
         inset: 0,
         overflow: 'hidden',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        p: 3,
-        // ambient pools of violet/fuchsia in the dark
-        background:
-          'radial-gradient(110% 80% at 20% -12%, rgba(167,139,250,0.13), transparent 55%),' +
-          'radial-gradient(90% 70% at 104% 112%, rgba(232,121,249,0.10), transparent 60%)',
-        '@keyframes da-drift': {
-          from: { transform: 'translateX(104vw)' },
-          to: { transform: 'translateX(-110%)' },
-        },
-        '@keyframes da-rise': {
-          from: { opacity: 0, transform: 'translateY(14px)' },
-          to: { opacity: 1, transform: 'translateY(0)' },
-        },
-        '@keyframes da-bob': {
-          '0%, 100%': { transform: 'translateY(0)' },
-          '50%': { transform: 'translateY(-8px)' },
-        },
-        '@keyframes da-twinkle': {
-          '0%, 100%': { opacity: 0.2, transform: 'scale(0.75)' },
-          '50%': { opacity: 0.9, transform: 'scale(1)' },
-        },
+        ...halftoneSx(0.1, 12),
+        animation: 'ink-tone 12s linear infinite',
       }}
     >
-      {/* soft light falling from above the stage (no hard edges) */}
+      {/* Manga speed-line layer: conic gradient burst. */}
       <Box
         aria-hidden
         sx={{
           position: 'absolute',
           left: '50%',
-          top: '-28%',
-          width: '120%',
-          height: '85%',
-          transform: 'translateX(-50%)',
+          top: '34%',
+          width: 1300,
+          height: 1300,
+          transform: 'translate(-50%, -50%)',
           background:
-            'radial-gradient(48% 60% at 50% 22%, rgba(196,181,253,0.09), transparent 72%)',
+            'repeating-conic-gradient(from 0deg at 50% 50%, rgba(244,241,232,.09) 0deg 1.4deg, transparent 1.4deg 7deg)',
+          opacity: 0.5,
           pointerEvents: 'none',
         }}
       />
-      {/* floor glow where the beam lands */}
+
+      {/* Faint drifting danmaku strip at top (4 lines, staggered). */}
       <Box
         aria-hidden
         sx={{
           position: 'absolute',
-          left: '50%',
-          bottom: '4%',
-          width: '68%',
-          height: '22%',
-          transform: 'translateX(-50%)',
-          background:
-            'radial-gradient(50% 50% at 50% 50%, rgba(167,139,250,0.12), transparent 70%)',
-          filter: 'blur(6px)',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 320,
+          overflow: 'hidden',
+          opacity: 0.28,
           pointerEvents: 'none',
         }}
-      />
-      {/* film grain */}
+      >
+        {[
+          { text: 'また会えたね', duration: 17, delay: 0 },
+          { text: '拖入视频就能开始', duration: 21, delay: -7 },
+          { text: '4K 补帧待机中', duration: 19, delay: -12, color: VERMILION },
+          { text: 'おかえり', duration: 24, delay: -3 },
+        ].map(({ text, duration, delay, color }, idx) => (
+          <Typography
+            key={idx}
+            aria-hidden
+            sx={{
+              position: 'absolute',
+              top: `${24 + idx * 68}px`,
+              // Start off-screen right; ink-dm translates -2100px so the line
+              // sweeps right→left. left:0 (the old value) parked them stacked
+              // at the left edge, never moving.
+              left: '100%',
+              whiteSpace: 'nowrap',
+              fontWeight: 700,
+              fontSize: `${19 + idx * 2}px`,
+              color: color || PAPER,
+              animation: `ink-dm ${duration}s linear ${delay}s infinite`,
+              willChange: 'transform',
+            }}
+          >
+            {text}
+          </Typography>
+        ))}
+      </Box>
+
+      {/* Center column: title + hero + button + caption + continue-watching + mascot. */}
+      {/* Scroll layer: the centered column can exceed small windows, so it
+          must scroll rather than clip. A `min-height:100%` centerer keeps the
+          content vertically centered when it fits and top-aligned (scrollable,
+          never clipping the title) when it does not — the safe flex-centering
+          pattern that a plain `align-items:center` on the outer box breaks. */}
       <Box
-        aria-hidden
         sx={{
           position: 'absolute',
           inset: 0,
-          opacity: 0.05,
-          pointerEvents: 'none',
-          backgroundImage:
-            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E\")",
+          zIndex: 1,
+          overflowY: 'auto',
+          overflowX: 'hidden',
         }}
-      />
-
-      {/* ghost danmaku */}
-      {GHOSTS.map(([text, top, duration, delay, fontSize, opacity]) => (
-        <Typography
-          key={text}
-          aria-hidden
-          sx={{
-            position: 'absolute',
-            top: `${top}%`,
-            left: 0,
-            whiteSpace: 'nowrap',
-            fontWeight: 700,
-            fontSize,
-            color: '#fff',
-            opacity,
-            pointerEvents: 'none',
-            animation: `da-drift ${duration}s linear ${delay}s infinite`,
-            willChange: 'transform',
-          }}
-        >
-          {text}
-        </Typography>
-      ))}
-
-      <TvMascot />
-
-      {/* the scene itself */}
-      <Stack
-        alignItems="center"
-        spacing={0}
-        sx={{ textAlign: 'center', maxWidth: 560, width: '100%', zIndex: 1 }}
       >
-        {/* typography-led hero — the brand IS the picture. Two stacked layers:
-            a blurred neon bloom underneath, a metallic gradient with a slow
-            specular sweep on top. */}
         <Box
           sx={{
-            position: 'relative',
-            animation: 'da-rise 600ms cubic-bezier(0.2,0.8,0.2,1) both',
-            '@keyframes da-sheen': {
-              '0%': { backgroundPosition: '0% 50%' },
-              '100%': { backgroundPosition: '100% 50%' },
-            },
+            minHeight: '100%',
+            boxSizing: 'border-box',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            textAlign: 'center',
+            gap: '26px',
+            py: '40px',
+            px: 3,
+            mx: 'auto',
+            width: 840,
+            maxWidth: '90%',
           }}
         >
+          {/* Title cluster: mono 11px tracked VERMILION label */}
           <Typography
-            aria-hidden
-            component="span"
             sx={{
-              position: 'absolute',
-              inset: 0,
-              fontSize: 'clamp(40px, 6vw, 64px)',
-              fontWeight: 900,
-              lineHeight: 1.15,
-              letterSpacing: '0.06em',
-              backgroundImage:
-                'linear-gradient(105deg, #7c3aed, #d946ef 70%, #a855f7)',
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              color: 'transparent',
-              WebkitTextFillColor: 'transparent',
-              filter: 'blur(22px) saturate(150%)',
-              opacity: 0.65,
-              userSelect: 'none',
-              pointerEvents: 'none',
+              fontFamily: MONO,
+              fontSize: 11,
+              letterSpacing: '0.5em',
+              color: VERMILION,
+              fontWeight: 700,
+              ml: '0.5em',
             }}
           >
-            弹幕播放器
+            DANMAKU PLAYER
           </Typography>
-          {/* anime sparkles around the wordmark, twinkling out of phase */}
-          <Sparkle
-            size={16}
-            sx={{
-              top: -18,
-              left: -44,
-              color: '#c4b5fd',
-              animation: 'da-twinkle 2.8s ease-in-out infinite',
-            }}
-          />
-          <Sparkle
-            size={11}
-            sx={{
-              top: 26,
-              right: -38,
-              color: '#f0abfc',
-              animation: 'da-twinkle 3.4s ease-in-out 0.9s infinite',
-            }}
-          />
-          <Sparkle
-            size={8}
-            sx={{
-              bottom: -4,
-              left: -20,
-              color: '#e879f9',
-              animation: 'da-twinkle 3s ease-in-out 1.7s infinite',
-            }}
-          />
-          <Typography
-            component="h1"
+
+          {/* Hero: PAPER block with rotated text + sparkles + shadow. */}
+          <Box
             sx={{
               position: 'relative',
-              fontSize: 'clamp(40px, 6vw, 64px)',
-              fontWeight: 900,
-              lineHeight: 1.15,
-              letterSpacing: '0.06em',
-              backgroundImage: RICH_GRADIENT,
-              backgroundSize: '220% 100%',
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              color: 'transparent',
-              WebkitTextFillColor: 'transparent',
-              animation: 'da-sheen 7s ease-in-out infinite alternate',
+              background: PAPER,
+              padding: '6px 26px 10px',
+              transform: 'rotate(-1.2deg)',
+              boxShadow: `10px 10px 0 ${VERMILION}`,
             }}
           >
-            弹幕播放器
-          </Typography>
-        </Box>
-        <Typography
-          variant="body2"
-          sx={{
-            color: 'rgba(255,255,255,0.4)',
-            letterSpacing: '0.42em',
-            textTransform: 'uppercase',
-            fontSize: 12,
-            mt: 1.25,
-            ml: '0.42em',
-            animation: 'da-rise 600ms cubic-bezier(0.2,0.8,0.2,1) 80ms both',
-          }}
-        >
-          Danmaku Player
-        </Typography>
+            <Typography
+              component="h1"
+              sx={{
+                fontSize: 'clamp(40px, 7vw, 74px)',
+                fontWeight: 900,
+                letterSpacing: '0.06em',
+                fontFamily: `"${SERIF_JP}", sans-serif`,
+                color: INK,
+                lineHeight: 1.2,
+                margin: 0,
+              }}
+            >
+              弾幕プレイヤー
+            </Typography>
 
-        <Typography
-          sx={{
-            color: 'rgba(255,255,255,0.55)',
-            fontSize: 15,
-            mt: 4,
-            animation: 'da-rise 600ms cubic-bezier(0.2,0.8,0.2,1) 140ms both',
-          }}
-        >
-          拖入视频文件，或点击打开
-        </Typography>
-
-        {/* SVG stroke-dash button: a gradient light segment runs around the
-            pill outline (pathLength-normalized, so it works at any width);
-            hovering draws the stroke closed and blooms. */}
-        <Box
-          component="button"
-          type="button"
-          onClick={() => void commands.openVideo()}
-          sx={{
-            all: 'unset',
-            cursor: 'pointer',
-            position: 'relative',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 1,
-            mt: 3,
-            px: 4.5,
-            py: 1.4,
-            borderRadius: '999px',
-            fontSize: 15,
-            fontWeight: 700,
-            color: '#fff',
-            backgroundColor: 'rgba(18, 13, 30, 0.85)',
-            animation: 'da-rise 600ms cubic-bezier(0.2,0.8,0.2,1) 200ms both',
-            transition:
-              'background-color 200ms ease, box-shadow 250ms ease, transform 200ms ease',
-            '@keyframes da-dash': {
-              to: { strokeDashoffset: -100 },
-            },
-            '& .da-btn-rect': {
-              // one gradient comet (14%) orbiting the outline
-              strokeDasharray: '14 86',
-              animation: 'da-dash 3.2s linear infinite',
-              transition: 'stroke-dasharray 450ms ease',
-            },
-            '&:hover': {
-              backgroundColor: 'rgba(32, 22, 52, 0.92)',
-              boxShadow: '0 10px 38px rgba(168,85,247,0.4)',
-              transform: 'translateY(-1px)',
-              '& .da-btn-rect': {
-                // the comet stretches into a fully drawn border
-                strokeDasharray: '100 0',
-              },
-            },
-            '&:focus-visible': {
-              outline: '2px solid rgba(196,181,253,0.7)',
-              outlineOffset: 2,
-            },
-          }}
-        >
-          <Box
-            component="svg"
-            aria-hidden
-            sx={{
-              position: 'absolute',
-              inset: 0,
-              width: '100%',
-              height: '100%',
-              overflow: 'visible',
-              pointerEvents: 'none',
-              filter: 'drop-shadow(0 0 6px rgba(168,85,247,0.65))',
-            }}
-          >
-            <defs>
-              <linearGradient id="da-btn-grad" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stopColor="#8b5cf6" />
-                <stop offset="0.55" stopColor="#c4b5fd" />
-                <stop offset="1" stopColor="#e879f9" />
-              </linearGradient>
-            </defs>
-            <rect
-              className="da-btn-rect"
-              x="1"
-              y="1"
-              rx="999"
-              pathLength={100}
-              fill="none"
-              stroke="url(#da-btn-grad)"
-              strokeWidth="2"
-              strokeLinecap="round"
-              style={{ width: 'calc(100% - 2px)', height: 'calc(100% - 2px)' }}
+            {/* Sparkles: ✦ accent marks. */}
+            <Sparkle
+              size={20}
+              sx={{
+                position: 'absolute',
+                top: -26,
+                left: -38,
+                color: VERMILION,
+                animation: 'ink-sparkle 2.6s ease-in-out infinite',
+              }}
+            />
+            <Sparkle
+              size={15}
+              sx={{
+                position: 'absolute',
+                top: 14,
+                right: -46,
+                color: PAPER,
+                animation: 'ink-sparkle 3.4s ease-in-out 0.7s infinite',
+              }}
             />
           </Box>
-          <OpenIcon />
-          打开视频 / Open
-        </Box>
 
-        <Typography
-          variant="caption"
-          sx={{
-            color: 'rgba(255,255,255,0.35)',
-            mt: 1.75,
-            animation: 'da-rise 600ms cubic-bezier(0.2,0.8,0.2,1) 260ms both',
-          }}
-        >
-          支持 MP4 / MKV / WebM 等主流格式 · 同名 .xml / .json 弹幕自动挂载
-        </Typography>
-
-        {/* continue watching */}
-        {recent.length > 0 && (
-          <Box
+          {/* Subtitle: mono tracked label. */}
+          <Typography
             sx={{
-              width: '100%',
-              mt: 5,
-              animation: 'da-rise 600ms cubic-bezier(0.2,0.8,0.2,1) 340ms both',
+              fontFamily: MONO,
+              fontSize: 14,
+              letterSpacing: '0.32em',
+              color: alpha(PAPER, 0.55),
+              fontWeight: 700,
             }}
           >
-            <Stack
-              direction="row"
-              alignItems="center"
-              spacing={0.75}
-              sx={{ mb: 1.25, px: 0.5, color: 'rgba(255,255,255,0.4)' }}
+            超分辨率 · 补帧 · 弹幕
+          </Typography>
+
+          {/* Main button: 3px border, light sweep animation, hard-cut hover. */}
+          <Box
+            component="button"
+            type="button"
+            onClick={() => void commands.openVideo()}
+            sx={{
+              all: 'unset',
+              cursor: 'pointer',
+              position: 'relative',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: `3px solid ${PAPER}`,
+              background: INK_STAGE,
+              color: PAPER,
+              fontSize: 19,
+              fontWeight: 900,
+              letterSpacing: '0.1em',
+              padding: '15px 46px',
+              boxShadow: `8px 8px 0 ${VERMILION}`,
+              overflow: 'hidden',
+              transition:
+                'background-color 100ms steps(1), color 100ms steps(1), box-shadow 100ms steps(1)',
+              '&:hover': {
+                background: PAPER,
+                color: INK,
+                boxShadow: `8px 8px 0 ${PAPER}`,
+              },
+            }}
+          >
+            {/* Light sweep gradient band inside. */}
+            <Box
+              aria-hidden
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                width: 46,
+                background: `linear-gradient(90deg, transparent, ${alpha(VERMILION, 0.55)}, transparent)`,
+                animation: 'ink-sweep 2.8s linear infinite',
+                pointerEvents: 'none',
+              }}
+            />
+            <Typography
+              component="span"
+              sx={{
+                position: 'relative',
+                zIndex: 1,
+              }}
             >
-              <HistoryRounded sx={{ fontSize: 15 }} />
-              <Typography
-                variant="caption"
-                sx={{ fontWeight: 700, letterSpacing: '0.12em' }}
+              打开视频 / OPEN
+            </Typography>
+          </Box>
+
+          {/* Caption: tracking, dimmed mono. */}
+          <Typography
+            sx={{
+              fontFamily: MONO,
+              fontSize: 11,
+              letterSpacing: '0.32em',
+              color: alpha(PAPER, 0.4),
+              fontWeight: 700,
+            }}
+          >
+            拖入文件亦可 · MP4 / MKV / WEBM · 同名 .xml / .json 自动挂载
+          </Typography>
+
+          {/* Continue watching grid (3 cols, only if recent items exist). */}
+          {recent.length > 0 && (
+            <Box sx={{ width: '100%', mt: 1 }}>
+              {/* Header row: 标题 + EN micro-label + rule. */}
+              <Stack
+                direction="row"
+                alignItems="center"
+                spacing={1}
+                sx={{
+                  mb: 3,
+                  pb: 2,
+                  borderBottom: `2px solid ${alpha(PAPER, 0.2)}`,
+                }}
               >
-                继续观看
-              </Typography>
-            </Stack>
-            <Stack spacing={0.75}>
-              {recent.map(({ item, entry }) => {
-                const ratio =
-                  entry.duration > 0
-                    ? Math.min(1, entry.time / entry.duration)
-                    : 0
-                return (
-                  <Box
-                    key={item.path}
-                    component="button"
-                    type="button"
-                    onClick={() =>
-                      item.path && commands.openVideoFromPath(item.path)
-                    }
-                    sx={{
-                      all: 'unset',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 1.25,
-                      px: 1.5,
-                      py: 1,
-                      borderRadius: '14px',
-                      border: '1px solid rgba(255,255,255,0.07)',
-                      backgroundColor: 'rgba(255,255,255,0.03)',
-                      transition:
-                        'background-color 140ms ease, border-color 140ms ease',
-                      '&:hover': {
-                        backgroundColor: 'rgba(167,139,250,0.10)',
-                        borderColor: 'rgba(167,139,250,0.35)',
-                        '& .da-recent-play': { opacity: 1 },
-                      },
-                    }}
-                  >
-                    <RecentThumb />
-                    <Box sx={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                      <Typography
-                        variant="body2"
-                        noWrap
-                        title={item.name}
+                <Typography
+                  sx={{
+                    fontSize: 13,
+                    fontWeight: 900,
+                    color: PAPER,
+                    letterSpacing: '0.08em',
+                  }}
+                >
+                  継続観看
+                </Typography>
+                <Typography
+                  sx={{
+                    fontFamily: MONO,
+                    fontSize: 9,
+                    letterSpacing: '0.24em',
+                    color: alpha(PAPER, 0.4),
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  CONTINUE WATCHING
+                </Typography>
+                <Box sx={{ flex: 1 }} />
+              </Stack>
+
+              {/* Grid: 3 cols or fewer. */}
+              <Box
+                sx={{
+                  display: 'grid',
+                  // minmax(0,1fr) not 1fr: a bare 1fr track floors at its
+                  // min-content, so a long filename in one card starves the
+                  // others (one card collapsed to 78px). 0 lets tracks share
+                  // equally and the inner ellipsis do the clipping.
+                  gridTemplateColumns: `repeat(${Math.min(3, recent.length)}, minmax(0, 1fr))`,
+                  gap: 3,
+                }}
+              >
+                {recent.map(({ item, entry }, idx) => {
+                  const ratio =
+                    entry.duration > 0
+                      ? Math.min(1, entry.time / entry.duration)
+                      : 0
+                  const isFirst = idx === 0
+                  return (
+                    <Box
+                      key={item.path}
+                      component="button"
+                      type="button"
+                      onClick={() =>
+                        item.path && commands.openVideoFromPath(item.path)
+                      }
+                      sx={{
+                        all: 'unset',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        border: `2px solid ${alpha(PAPER, 0.3)}`,
+                        background: 'rgba(244,241,232,.04)',
+                        transition:
+                          'border-color 100ms steps(1), background-color 100ms steps(1)',
+                        '&:hover': {
+                          borderColor: PAPER,
+                          background: alpha(PAPER, 0.09),
+                        },
+                      }}
+                    >
+                      {/* Thumbnail placeholder area. */}
+                      <Box
                         sx={{
-                          fontWeight: 600,
-                          color: 'rgba(255,255,255,0.85)',
+                          height: 88,
+                          borderBottom: `2px solid ${alpha(PAPER, 0.3)}`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          ...hatchSx(),
                         }}
                       >
-                        {item.name}
-                      </Typography>
-                      <Stack
-                        direction="row"
-                        alignItems="center"
-                        spacing={1}
-                        sx={{ mt: 0.5 }}
-                      >
-                        <LinearProgress
-                          variant="determinate"
-                          value={ratio * 100}
-                          sx={{
-                            flex: 1,
-                            height: 3,
-                            borderRadius: 2,
-                            bgcolor: 'rgba(255,255,255,0.10)',
-                          }}
-                        />
                         <Typography
-                          variant="caption"
                           sx={{
-                            color: 'rgba(255,255,255,0.4)',
-                            fontVariantNumeric: 'tabular-nums',
-                            flexShrink: 0,
+                            fontFamily: MONO,
+                            fontSize: 9,
+                            color: alpha(PAPER, 0.4),
+                            fontWeight: 700,
+                            letterSpacing: '0.2em',
                           }}
                         >
-                          {formatTime(entry.time)}
-                          {entry.duration > 0 &&
-                            ` / ${formatTime(entry.duration)}`}
+                          THUMB
                         </Typography>
-                      </Stack>
+                      </Box>
+
+                      {/* Body: name + progress. */}
+                      <Box sx={{ padding: '8px 10px' }}>
+                        <Typography
+                          noWrap
+                          title={item.name}
+                          sx={{
+                            fontSize: 12,
+                            fontWeight: 700,
+                            color: PAPER,
+                            letterSpacing: '0.02em',
+                            lineHeight: 1.4,
+                            mb: 1,
+                          }}
+                        >
+                          {item.name}
+                        </Typography>
+
+                        {/* Progress bar: fill color = VERMILION for most-recent, PAPER for others. */}
+                        <Box
+                          sx={{
+                            width: '100%',
+                            height: 2,
+                            background: alpha(PAPER, 0.18),
+                            mb: 1,
+                            position: 'relative',
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: `${ratio * 100}%`,
+                              height: '100%',
+                              background: isFirst ? VERMILION : PAPER,
+                            }}
+                          />
+                        </Box>
+
+                        {/* Time label: mono tracked. */}
+                        <Typography
+                          noWrap
+                          title={`${formatTime(entry.time)}${entry.duration > 0 ? ` / ${formatTime(entry.duration)}` : ''} · ${formatRelativeTime(entry.updatedAt)}`}
+                          sx={{
+                            fontFamily: MONO,
+                            fontSize: 9,
+                            color: alpha(PAPER, 0.45),
+                            fontWeight: 700,
+                            letterSpacing: '0.1em',
+                            lineHeight: 1.4,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          看到 {formatTime(entry.time)}
+                          {entry.duration > 0 &&
+                            ` / ${formatTime(entry.duration)}`}{' '}
+                          · {formatRelativeTime(entry.updatedAt)}
+                        </Typography>
+                      </Box>
                     </Box>
-                    <PlayArrowRounded
-                      className="da-recent-play"
-                      sx={{
-                        color: 'primary.light',
-                        opacity: 0,
-                        transition: 'opacity 140ms ease',
-                        flexShrink: 0,
-                      }}
-                    />
-                  </Box>
-                )
-              })}
-            </Stack>
-          </Box>
-        )}
-      </Stack>
+                  )
+                })}
+              </Box>
+            </Box>
+          )}
+        </Box>
+      </Box>
+
+      {/* Floating mascot (看板娘) at bottom-right. */}
+      <Box
+        component="img"
+        src={`${import.meta.env.BASE_URL}assets/mascot-manga.png`}
+        alt=""
+        aria-hidden
+        sx={{
+          position: 'absolute',
+          right: 10,
+          bottom: 8,
+          width: 352,
+          pointerEvents: 'none',
+          animation: 'ink-float 6s ease-in-out infinite',
+          filter: `drop-shadow(6px 6px 0 ${alpha(VERMILION, 0.85)})`,
+          // The mascot overlaps the 3rd continue-watching card on anything
+          // narrower than the design's 1600 canvas; shrink it on mid widths
+          // and drop it entirely when there's no room.
+          '@media (max-width: 1599px)': { width: 280 },
+          '@media (max-width: 1199px)': {
+            display: 'none',
+          },
+        }}
+      />
     </Box>
   )
 }

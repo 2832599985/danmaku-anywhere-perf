@@ -53,6 +53,16 @@ export interface DanmakuSource {
   count: number
 }
 
+/** Live renderer statistics for the HUD (session-only, ~1s cadence). */
+export interface UpscaleStats {
+  /** presented frames per second over the report window. */
+  fps: number
+  /** average CPU cost per frame in ms. */
+  cpuFrameMs: number
+  /** interpolation-generated frames per second (0 when off). */
+  generatedFps: number
+}
+
 export interface OsdMessage {
   id: number
   text: string
@@ -97,10 +107,16 @@ export interface PlayerStore {
   upscaleStatus: UpscaleStatus
   upscaleError: string | null
   interpolationStatus: InterpolationStatus
+  /** live HUD stats, null while the renderer is off. */
+  upscaleStats: UpscaleStats | null
+  /** A/B compare split ratio (0..1 = position of the divider), null = off. */
+  compareRatio: number | null
 
   // --- transient UI ---
   osd: OsdMessage | null
   settingsOpen: boolean
+  /** which page the settings window shows (also used to deep-link into it). */
+  settingsSection: string
   danmakuDialogOpen: boolean
 
   // --- playlist (session-only) ---
@@ -129,10 +145,16 @@ export interface PlayerStore {
 
   setUpscaleStatus: (status: UpscaleStatus, error?: string | null) => void
   setInterpolationStatus: (status: InterpolationStatus) => void
+  setUpscaleStats: (stats: UpscaleStats | null) => void
+  /** move the A/B divider; null exits compare mode. */
+  setCompareRatio: (ratio: number | null) => void
 
   showOsd: (text: string, icon?: string) => void
   clearOsd: () => void
   setSettingsOpen: (open: boolean) => void
+  setSettingsSection: (section: string) => void
+  /** open the settings window directly on a given page. */
+  openSettingsAt: (section: string) => void
   setDanmakuDialogOpen: (open: boolean) => void
 
   updateUpscale: (partial: UpscaleSettingsPatch) => void
@@ -211,9 +233,12 @@ export const usePlayerStore = create<PlayerStore>()(
       upscaleStatus: 'idle',
       upscaleError: null,
       interpolationStatus: 'off',
+      upscaleStats: null,
+      compareRatio: null,
 
       osd: null,
       settingsOpen: false,
+      settingsSection: 'shortcuts',
       danmakuDialogOpen: false,
 
       playlist: [],
@@ -273,6 +298,16 @@ export const usePlayerStore = create<PlayerStore>()(
           s.interpolationStatus = status
         }),
 
+      setUpscaleStats: (stats) =>
+        set((s) => {
+          s.upscaleStats = stats
+        }),
+
+      setCompareRatio: (ratio) =>
+        set((s) => {
+          s.compareRatio = ratio
+        }),
+
       showOsd: (text, icon) =>
         set((s) => {
           osdSeq += 1
@@ -287,6 +322,17 @@ export const usePlayerStore = create<PlayerStore>()(
       setSettingsOpen: (open) =>
         set((s) => {
           s.settingsOpen = open
+        }),
+
+      setSettingsSection: (section) =>
+        set((s) => {
+          s.settingsSection = section
+        }),
+
+      openSettingsAt: (section) =>
+        set((s) => {
+          s.settingsSection = section
+          s.settingsOpen = true
         }),
 
       setDanmakuDialogOpen: (open) =>

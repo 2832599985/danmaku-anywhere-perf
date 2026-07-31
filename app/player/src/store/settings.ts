@@ -58,6 +58,12 @@ export type UpscaleSettingsPatch = Partial<
   frameInterpolation?: Partial<UpscaleSettings['frameInterpolation']>
 }
 
+/** A blocked-word rule: plain substring or (when isRegex) a RegExp source. */
+export interface DanmakuFilter {
+  pattern: string
+  isRegex: boolean
+}
+
 export interface DanmakuSettings {
   /** Whether danmaku are shown (maps to renderer show()/hide()). */
   visible: boolean
@@ -75,7 +81,14 @@ export interface DanmakuSettings {
   maxOnScreen: number
   /** 0..100 overlap tolerance. */
   overlap: number
+  /** drop all but the first of comments with identical text (降重). */
+  mergeDuplicates: boolean
+  /** blocked words applied before comments reach the renderer. */
+  filters: DanmakuFilter[]
 }
+
+/** How the player handles detected OP/ED segments. */
+export type SkipOpEdMode = 'auto' | 'ask' | 'off'
 
 export interface PlaybackSettings {
   /** seconds moved by ArrowLeft / ArrowRight. */
@@ -84,6 +97,8 @@ export interface PlaybackSettings {
   volumeStep: number
   /** when the current video ends, automatically play the next playlist item. */
   autoAdvance: boolean
+  /** OP/ED skip behavior: auto-skip, ask first, or disabled. */
+  skipOpEd: SkipOpEdMode
 }
 
 export interface Settings {
@@ -115,12 +130,15 @@ export const DEFAULT_DANMAKU: DanmakuSettings = {
   offset: 0,
   maxOnScreen: 200,
   overlap: 0,
+  mergeDuplicates: false,
+  filters: [],
 }
 
 export const DEFAULT_PLAYBACK: PlaybackSettings = {
   seekStepSec: 5,
   volumeStep: 0.05,
   autoAdvance: true,
+  skipOpEd: 'ask',
 }
 
 export const DEFAULT_SETTINGS: Settings = {
