@@ -678,7 +678,9 @@ export const UpscaleSettings = () => {
                     color: VERMILION,
                   }}
                 >
-                  {upscaleStats.cpuFrameMs.toFixed(1)}
+                  {upscaleStats.cpuFrameMs > 0
+                    ? upscaleStats.cpuFrameMs.toFixed(1)
+                    : '—'}
                 </Typography>
                 <Typography
                   sx={{

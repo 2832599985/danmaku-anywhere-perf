@@ -191,6 +191,7 @@ export class UpscaleController {
   /** Translate the engine's diagnostics summary into HUD numbers. */
   private reportStats(summary: {
     frames: number
+    presentedFrames: number
     averageCpuFrameMs: number
   }): void {
     const seconds = DIAGNOSTICS_INTERVAL_MS / 1000
@@ -199,8 +200,14 @@ export class UpscaleController {
     const generatedTotal = generatedAttr ? Number(generatedAttr) || 0 : 0
     const generatedDelta = Math.max(0, generatedTotal - this.lastGeneratedCount)
     this.lastGeneratedCount = generatedTotal
+    // `presentedFrames` counts every frame swapped onto the canvas (rAF-paced,
+    // real + interpolated sub-frames) — i.e. the true on-screen rate after
+    // interpolation. `frames` only counts source-video rVFC callbacks, so it
+    // would report the SOURCE rate (~24) even when we present 120. Fall back
+    // to `frames` for the rvfc path where the presentation loop never runs.
+    const presented = summary.presentedFrames || summary.frames
     this.callbacks.onStats?.({
-      fps: Math.round(summary.frames / seconds),
+      fps: Math.round(presented / seconds),
       cpuFrameMs: summary.averageCpuFrameMs,
       generatedFps: Math.round(generatedDelta / seconds),
     })

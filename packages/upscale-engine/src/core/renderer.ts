@@ -129,6 +129,10 @@ export interface RendererDiagnosticsSummary {
   inputTextureFormat: 'rgba16float' | 'rgba8unorm'
   presentationMode: RendererPresentationMode
   frames: number
+  /** Frames actually presented to the canvas (rAF-driven; reflects true output
+   *  rate including interpolated sub-frames, unlike `frames` which counts
+   *  source-video rVFC callbacks). */
+  presentedFrames: number
   presentedFrameGaps: number
   rendererBusyDrops: number
   lateCallbacks: number
@@ -188,6 +192,7 @@ export class Renderer {
   private frameInFlight = false
   private diagnosticsWindowStartedAt = performance.now()
   private diagnosticsFrames = 0
+  private diagnosticsPresentedFrames = 0
   private diagnosticsPresentedFrameGaps = 0
   private diagnosticsBusyDrops = 0
   private diagnosticsLateCallbacks = 0
@@ -1341,6 +1346,7 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       inputTextureFormat: this.diagnostics.inputTextureFormat,
       presentationMode: this.presentationMode,
       frames,
+      presentedFrames: this.diagnosticsPresentedFrames,
       presentedFrameGaps: this.diagnosticsPresentedFrameGaps,
       rendererBusyDrops: this.diagnosticsBusyDrops,
       lateCallbacks: this.diagnosticsLateCallbacks,
@@ -1363,6 +1369,7 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
     })
     this.diagnosticsWindowStartedAt = performance.now()
     this.diagnosticsFrames = 0
+    this.diagnosticsPresentedFrames = 0
     this.diagnosticsPresentedFrameGaps = 0
     this.diagnosticsBusyDrops = 0
     this.diagnosticsLateCallbacks = 0
@@ -1460,7 +1467,13 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
     this.presentationAnimationFrameId = null
     if (this.destroyed) return
 
-    if (this.presentLatestProcessedFrame()) this.notifyFirstFrameRendered()
+    if (this.presentLatestProcessedFrame()) {
+      this.notifyFirstFrameRendered()
+      // Count the frame we just swapped onto the canvas. This is the true
+      // output rate (rAF-paced, includes interpolated sub-frames); the rVFC
+      // `diagnosticsFrames` counter only tracks source-video callbacks.
+      if (this.diagnosticsEnabled) this.diagnosticsPresentedFrames++
+    }
     // Build the next interpolated/real output after presenting the previous
     // one. This keeps Anime4K compute and the canvas swapchain on separate rAF
     // turns, preserving the media/compositor pacing fix.
