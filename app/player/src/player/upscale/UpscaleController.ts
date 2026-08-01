@@ -120,6 +120,18 @@ export class UpscaleController {
   /** monotonic guard so stale async enable/update calls abort */
   private epoch = 0
   private destroyed = false
+  /**
+   * Serialises apply() calls. Two enables racing on the same canvas is fatal:
+   * a canvas's WebGPU context is a singleton, so the loser's destroy()
+   * (context.unconfigure()) unconfigures the winner's live context too,
+   * crashing its presentation loop ("context is not configured") and nulling
+   * the HUD. This happens in practice when persisted upscale.enabled=true meets
+   * a fresh open: the open effect and the async HDR-detect effect both fire
+   * apply() while this.renderer is still null. Chaining every apply behind this
+   * promise means the second call always finds the first's renderer already
+   * installed and takes the in-place update path instead of a second create.
+   */
+  private serial: Promise<void> = Promise.resolve()
   /** cumulative generated-frame count at the last diagnostics report. */
   private lastGeneratedCount = 0
   /** current A/B split ratio, null = compare off. */
@@ -229,6 +241,8 @@ export class UpscaleController {
   /** Enable / update / disable the renderer according to settings.enabled. */
   async apply(settings: UpscaleSettings): Promise<void> {
     if (this.destroyed) return
+    // Disable is synchronous and stays OUT of the queue: it must stop the live
+    // renderer immediately and bump the epoch so any in-flight enable aborts.
     if (!settings.enabled) {
       this.disable()
       return
@@ -237,11 +251,19 @@ export class UpscaleController {
       this.callbacks.onStatus?.('error', 'WebGPU is not available')
       return
     }
-    if (this.renderer) {
-      await this.update(settings)
-    } else {
-      await this.enable(settings)
-    }
+    // Chain behind the previous apply so two enables can never run their
+    // Renderer.create() concurrently on the same canvas (see `serial`). When
+    // the previous call was an enable, this.renderer is installed by the time
+    // we run and we take the in-place update path instead of a second create.
+    const run = this.serial.then(async () => {
+      if (this.destroyed || !settings.enabled) return
+      if (this.renderer) await this.update(settings)
+      else await this.enable(settings)
+    })
+    // Keep the chain alive even if a step throws, so later applies aren't
+    // stranded behind a rejected promise.
+    this.serial = run.catch(() => undefined)
+    await run
   }
 
   private async enable(settings: UpscaleSettings): Promise<void> {
@@ -267,15 +289,27 @@ export class UpscaleController {
         presentationMode: 'raf',
         diagnostics: { reportIntervalMs: DIAGNOSTICS_INTERVAL_MS },
         onDiagnostics: (summary) => {
-          if (epoch === this.epoch) this.reportStats(summary)
+          // Guard on renderer IDENTITY, not the operation epoch. update()
+          // bumps this.epoch (to discard stale async update results) but keeps
+          // the very same Renderer alive, so an epoch guard here would silently
+          // kill the diagnostics stream after the first settings update — the
+          // HUD froze / vanished until the next video rebuilt the closure.
+          // Identity stays true across updates and only goes false once a fresh
+          // enable() replaces this renderer (or it is torn down).
+          if (this.renderer === renderer) this.reportStats(summary)
         },
         onFirstFrameRendered: () => {
-          if (epoch === this.epoch) this.showCanvas()
+          if (this.renderer === renderer) this.showCanvas()
         },
         onFrameInterpolationFallback: () => {
-          this.callbacks.onInterpolationStatus?.('fallback')
+          if (this.renderer === renderer) {
+            this.callbacks.onInterpolationStatus?.('fallback')
+          }
         },
         onError: (error) => {
+          // A late error from a renderer that has already been replaced must
+          // not disable the live one.
+          if (this.renderer !== renderer) return
           this.callbacks.onStatus?.('error', error.message)
           this.disable()
         },
