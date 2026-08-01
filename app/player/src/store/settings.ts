@@ -105,6 +105,13 @@ export interface PlaybackSettings {
   autoAdvance: boolean
   /** OP/ED skip behavior: auto-skip, ask first, or disabled. */
   skipOpEd: SkipOpEdMode
+  /**
+   * Temporary playback rate while the right arrow is HELD (long press). A
+   * short tap still seeks; only an auto-repeated press engages this rate, and
+   * releasing the key restores whatever the global rate was before the hold
+   * (snapshotted on engage, so a 1.5× global rate resumes after a 3× hold).
+   */
+  holdSpeed: number
 }
 
 export interface Settings {
@@ -146,6 +153,7 @@ export const DEFAULT_PLAYBACK: PlaybackSettings = {
   volumeStep: 0.05,
   autoAdvance: true,
   skipOpEd: 'ask',
+  holdSpeed: 3,
 }
 
 export const DEFAULT_SETTINGS: Settings = {

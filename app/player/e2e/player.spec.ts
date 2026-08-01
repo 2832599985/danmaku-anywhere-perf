@@ -97,18 +97,45 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
 
   // --- 2a/2c: volume via ArrowUp/ArrowDown ---
   await page.evaluate(() => (window as any).__player.commands.setVolume(0.5))
+  // A real key press is keydown + keyup. The right-arrow seek now fires on
+  // keyup (so a hold can be distinguished from a tap), so a faithful press
+  // must dispatch both.
   const pressKey = (key: string) =>
-    page.evaluate(
-      (k) =>
-        window.dispatchEvent(
-          new KeyboardEvent('keydown', {
-            key: k,
-            bubbles: true,
-            cancelable: true,
-          })
-        ),
-      key
-    )
+    page.evaluate((k) => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: k,
+          bubbles: true,
+          cancelable: true,
+        })
+      )
+      window.dispatchEvent(
+        new KeyboardEvent('keyup', { key: k, bubbles: true, cancelable: true })
+      )
+    }, key)
+  // Simulate a long press: an auto-repeated keydown (repeat:true) then release.
+  const holdKey = (key: string) =>
+    page.evaluate((k) => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: k,
+          repeat: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      )
+    }, key)
+  const releaseKey = (key: string) =>
+    page.evaluate((k) => {
+      window.dispatchEvent(
+        new KeyboardEvent('keyup', { key: k, bubbles: true, cancelable: true })
+      )
+    }, key)
+  const readRate = () =>
+    page.evaluate(() => {
+      const v = document.querySelector('video') as HTMLVideoElement | null
+      return v ? v.playbackRate : null
+    })
 
   await pressKey('ArrowDown')
   await expect
@@ -139,6 +166,40 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
   await expect
     .poll(async () => (await readVideo())?.currentTime ?? 0)
     .toBeLessThan(3.6)
+
+  // --- 2d: hold right arrow = temporary speed, release restores global rate ---
+  // Set a NON-default global rate (1.5×) so we can prove the release restores
+  // the *global* rate, not 1×. The video stays paused here, which also lets us
+  // assert that a hold does NOT seek (currentTime is frozen while paused).
+  await page.evaluate(() =>
+    (window as any).__player.commands.setPlaybackRate(1.5)
+  )
+  await expect.poll(readRate, { timeout: 5_000 }).toBe(1.5)
+  const tBeforeHold = (await readVideo())?.currentTime ?? 0
+
+  await holdKey('ArrowRight')
+  // the held (temporary) rate engages
+  await expect.poll(readRate, { timeout: 5_000 }).toBe(3)
+  // a hold must not seek — paused, so currentTime stays put
+  expect(
+    Math.abs(((await readVideo())?.currentTime ?? 0) - tBeforeHold)
+  ).toBeLessThan(0.1)
+
+  await releaseKey('ArrowRight')
+  // releasing restores the GLOBAL rate (1.5), not 1×
+  await expect.poll(readRate, { timeout: 5_000 }).toBe(1.5)
+
+  // a plain tap still seeks and does NOT touch the rate
+  await pressKey('ArrowRight')
+  await expect.poll(readRate, { timeout: 5_000 }).toBe(1.5)
+  await expect
+    .poll(async () => (await readVideo())?.currentTime ?? 0)
+    .toBeGreaterThan(tBeforeHold + 0.5)
+
+  // restore the default rate so the GPU tests below aren't run at 1.5×
+  await page.evaluate(() =>
+    (window as any).__player.commands.setPlaybackRate(1)
+  )
 
   // resume playback for the GPU tests (video must be a live texture source)
   await page.evaluate(() => (window as any).__player.commands.play())

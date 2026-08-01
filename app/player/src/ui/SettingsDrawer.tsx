@@ -22,6 +22,7 @@ const SHORTCUTS: Array<{
 }> = [
   { key: 'Space / K', zh: '播放暂停', en: 'PLAY' },
   { key: '← →', zh: '快退快进', en: 'SEEK' },
+  { key: '→ 长按', zh: '临时倍速', en: 'HOLD SPEED' },
   { key: '↑ ↓', zh: '音量', en: 'VOLUME' },
   { key: 'F', zh: '全屏', en: 'FULLSCREEN' },
   { key: 'M', zh: '静音', en: 'MUTE' },
@@ -39,6 +40,8 @@ interface StepperCardProps {
   value: number
   min: number
   max: number
+  /** increment per click (default 1; 0.5 for the hold-speed stepper). */
+  step?: number
   onChange: (value: number) => void
 }
 
@@ -49,6 +52,7 @@ const StepperCard = ({
   value,
   min,
   max,
+  step = 1,
   onChange,
 }: StepperCardProps) => (
   // Bordered card per design (the old version had no frame at all).
@@ -90,7 +94,9 @@ const StepperCard = ({
       <Box
         component="button"
         type="button"
-        onClick={() => onChange(Math.max(min, value - 1))}
+        onClick={() =>
+          onChange(Math.max(min, Math.round((value - step) * 100) / 100))
+        }
         sx={{
           appearance: 'none',
           width: 40,
@@ -136,7 +142,9 @@ const StepperCard = ({
       <Box
         component="button"
         type="button"
-        onClick={() => onChange(Math.min(max, value + 1))}
+        onClick={() =>
+          onChange(Math.min(max, Math.round((value + step) * 100) / 100))
+        }
         sx={{
           appearance: 'none',
           width: 40,
@@ -184,6 +192,15 @@ const PlaybackSettingsPage = () => {
           min={1}
           max={50}
           onChange={(v) => updatePlaybackSettings({ volumeStep: v / 100 })}
+        />
+        <StepperCard
+          label="长按倍速"
+          unit="×"
+          value={playback.holdSpeed}
+          min={1.5}
+          max={8}
+          step={0.5}
+          onChange={(v) => updatePlaybackSettings({ holdSpeed: v })}
         />
       </Stack>
 
@@ -396,6 +413,16 @@ const ShortcutsPage = () => {
             })}
           </Box>
         </Box>
+        <StepperCard
+          label="长按倍速"
+          sub="HOLD SPEED · → HOLD"
+          unit="×"
+          value={playback.holdSpeed}
+          min={1.5}
+          max={8}
+          step={0.5}
+          onChange={(v) => updatePlaybackSettings({ holdSpeed: v })}
+        />
       </Box>
     </Stack>
   )
