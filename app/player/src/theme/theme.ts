@@ -195,6 +195,13 @@ export const theme = createTheme({
         },
       },
     },
+    // Modal root inherits cursor from the stage (which hides it during
+    // playback). Without this, the cursor disappears inside every overlay.
+    MuiModal: {
+      styleOverrides: {
+        root: { cursor: 'default' },
+      },
+    },
     MuiDrawer: {
       styleOverrides: {
         paper: {
