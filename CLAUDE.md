@@ -24,7 +24,7 @@ Danmaku Anywhere is a monorepo for a browser extension and web app that displays
 This is a performance/UX fork (`2832599985/danmaku-anywhere-perf`) of `Mr-Quin/danmaku-anywhere`. Active feature branch: `feat/anime4k-upscale`.
 
 **Fork-specific features** (preserve during upstream merges):
-- Glass/neon UI theme (violet/fuchsia palette, `backdropFilter: blur(12px)`, dark mode only)
+- Glass/neon UI theme (violet/fuchsia palette, `backdropFilter: blur(12px)`, dark mode only) — **extension only**; the desktop player (`app/player`) uses a manga ink theme (vermilion/paper, zero radius, halftone dots, hard shadows; see `app/player/src/theme/theme.ts`)
 - Fixed time skip button (default 90s, `FixedSkip.service.ts`)
 - Auto skip OP via danmaku timestamp analysis (`VideoSkip.service.ts`)
 - Batch download in season details page (`SeasonDetailsPage.tsx`)
@@ -337,6 +337,25 @@ Tauri v2 + React 19 desktop player (fork feature) that reuses the workspace engi
 - On this machine cargo lives at `~/.cargo/bin` but is NOT on PATH; prefix builds with `export PATH="$HOME/.cargo/bin:$PATH"`. Never regex-edit files containing non-ASCII text via PowerShell 5.1 (`Get-Content`/`Set-Content` read BOM-less UTF-8 as ANSI and mojibake it) — use proper editing tools.
 - MUI `Drawer`/`Dialog` portal to `document.body`, which is HIDDEN behind the fullscreen element (only the fullscreen subtree renders in the top layer). Overlays that must work in fullscreen pass `slotProps={{ root: { container } }}` pointing at the stage element (`data-player-stage`, carried via `FullscreenPortalContext`). The `@mr-quin/danmu` engine caches container width, so call `DanmakuController.resize()` from a `ResizeObserver` on fullscreen/window resize or danmaku spawns from a stale x-position.
 - Framegen interpolation is variable-factor: `FrameInterpolationOptions.multiplier`/`targetFps` (extension sets neither → 2×). The model's `runT(t)` takes any `t`; `frame-interpolator.ts` generates N-1 sub-frames per pair. Output is capped at the display refresh rate (rAF), so factors above 2× only help on high-refresh monitors. `resolution` is the model's *processing* size (`480p`/`720p`/`1080p` in both the player and the extension): with interpolation on, every frame — real ones included — is resampled to it before Anime4K runs, so it, not `targetResolution`, is the real detail ceiling. The engine caps the factor per resolution (`computeResolutionFactorCap`, 1080p tops out at 4×).
+- MUI `sx` 里 `width: 1` / `height: 1` = 100%（MUI 把 0..1 裸数字当百分比）。1px 分隔线必须写 `width: '1px'`。
+- MUI Modal/Drawer/Dialog portal 到 stage 内部时继承 stage 的 `cursor: none`（播放时隐藏光标）。theme.ts 的 `MuiModal: { root: { cursor: 'default' } }` 打断继承链——删掉它光标会在 overlay 里消失。
+- `vite.config.ts` 的 alias 数组里 `@danmaku-anywhere/danmaku-provider/genAi` 必须在 bare `@danmaku-anywhere/danmaku-provider` 之前（子路径先匹配），否则 vite 把 `/genAi` 追加到 `src/index.ts` 路径上导致 ENOENT。
+- `public/assets/fonts/fonts.css` 必须在 `index.html` 用 `<link>` 引入（不能 inline style，CSP 硬规则）。删掉它 manga 主题的 JetBrains Mono / Zen Antique / Noto Sans SC 全部回退到系统字体。
+- `UpscaleController` 的 renderer 回调（`onDiagnostics`/`onFirstFrameRendered`/`onError` 等）必须用**渲染器身份** `this.renderer === renderer` 守卫，**不能**用操作 `epoch`：`update()` 会 `++epoch` 丢弃过期异步结果但不换渲染器，epoch 守卫会在第一次设置更新后让闭包捕获的旧 epoch 永远失配，静默丢弃所有诊断 → HUD 冻住/消失直到换视频重建闭包。
+- `UpscaleController.apply()` 必须串行化（挂在 promise 链后），`disable()` 同步不进链。否则持久化 `upscale.enabled=true` 时打开视频，open effect 与异步 HDR-detect effect 会在 `this.renderer` 仍为 null 时并发跑两个 `Renderer.create()`；canvas 的 WebGPU context 是单例，输家的 `destroy()`→`context.unconfigure()` 会废掉赢家活着的 context → 呈现循环 `getCurrentTexture` 抛 `context is not configured` → onError → HUD 归 null。串行后第二个 apply 总能看到第一个的渲染器已装好而走 in-place update。
+- 长按 → 临时倍速（`playbackSettings.holdSpeed`）：用浏览器 key auto-repeat 区分长短按（首次非 repeat keydown 不动作，keyup 时没 repeat 过=短按 seek、repeat 过=恢复倍速），**不用**固定毫秒阈值（慢短按不会被吞）。进倍速前**快照**全局倍速——`setPlaybackRate` 触发 ratechange 把 `store.playbackRate` 也改成 held 值，松手读 store 就拿不到原全局倍速（全局 1.5 长按 3 松手会错回 3 而非 1.5）。失焦（blur）与卸载也要恢复，防倍速卡住。
+
+**Manga ink theme + new features (post-redesign):**
+- Design tokens: `INK`/`PAPER`/`VERMILION`/`GOLD`/`GREEN`; atoms in `src/ui/ink.tsx` (InkToggleGroup/InkSwitch/InkSlider/InkStamp/InkSection/InkBlinkDot/InkPanelHeader/InkLabel); keyframes in `public/app.css`.
+- AI auto-match: `src/danmaku/ai.ts` (free built-in AI via `@danmaku-anywhere/danmaku-provider/genAi`) + `src/danmaku/autoMatch.ts` (pickSeason/pickEpisode heuristics). Runs after sibling-file autoload; gated on `danmakuSettings.autoOnlineMatch`.
+- Danmaku filter chain: `src/danmaku/filter.ts` (blocked words plain+regex + merge-duplicates, applied before render).
+- OP/ED inference: `src/player/useOpEdMarks.ts` (danmaku density heuristic, shared by ProgressBar gold ticks + skip-OP button). Skip mode `playbackSettings.skipOpEd` (auto/ask/off).
+- A/B compare: canvas `clip-path` via `compareRatio` store field; keyboard C. Upscale toggle keyboard U.
+- Real-time HUD: `upscaleStats` (presentedFrames-based OUT FPS, cpuFrameMs, generatedFps) fed by engine `onDiagnostics`. 回调守卫与 apply 串行的坑见上方 hard rules。
+- Hold-to-speed: 长按 → 临时倍速 `playbackSettings.holdSpeed`（默认 3，设置页 1.5–8× / 0.5 步进）；短按 → 仍 seek。逻辑在 `useKeyboardControls.ts`，快照恢复见上方 hard rules。
+- Settings full-window page (not drawer): `settingsSection` store field + `openSettingsAt(section)` action.
+- Self-hosted fonts: `public/assets/fonts/` (~230 woff2 shards, Noto Sans SC + Zen Antique + JetBrains Mono); `mascot-manga.png` for idle screen.
+- E2E screenshot audit: `e2e/ui-audit.mjs` (CDP, 7 screens, overflow detection).
 
 ## Release Workflow
 

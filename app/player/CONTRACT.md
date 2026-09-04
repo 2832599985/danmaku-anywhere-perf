@@ -105,7 +105,7 @@ app/player/
 │   │   ├── DanmakuSettings.tsx
 │   │   ├── DanmakuSourceDialog.tsx  ← local import + DDP search
 │   │   └── EmptyState.tsx           ← drag-drop / open prompt
-│   └── theme/theme.ts               ← dark MUI theme (glass/neon-ish, matches fork)
+│   └── theme/theme.ts               ← manga ink theme (vermilion/paper, zero radius, halftone)
 └── src-tauri/
     ├── Cargo.toml
     ├── tauri.conf.json              ← window, security CSP, protocol allowlist, bundle
@@ -572,16 +572,14 @@ new `Platform.minimizeWindow/toggleMaximizeWindow/closeWindow` (no-ops in the
 browser adapter, buttons gated on `isTauri`). Capabilities add
 `core:window:allow-{minimize,toggle-maximize,close,start-dragging}`.
 
-**Idle stage (EmptyState).** No more dashed drop-card. A scene: ambient violet
-pools + soft top glow + film grain, six ghost danmaku drifting on CSS tracks, a
-typography-led hero (blurred neon bloom under a RICH_GRADIENT metallic sweep —
-the "expensive purple": multi-stop with a near-white specular, animated
-background-position), an SVG stroke-dash button (`pathLength={100}`, a gradient
-comet orbiting the outline that draws closed on hover), anime sparkles (✦)
-twinkling out of phase, a line-art cat-ear TV mascot bottom-right (hidden
-<1080px), and a continue-watching strip fed from playlist+progress (top 3 by
-`updatedAt`, mini thumbnail glyphs, click = `openVideoFromPath`). The bottom
-Controls bar no longer renders with no media loaded.
+**Idle stage (EmptyState).** Manga ink scene: halftone dot ground + conic
+speed-lines, four drifting danmaku (left:100% → ink-dm sweep), a rotated PAPER
+hero block with `弾幕プレイヤー` in Zen Antique + vermilion hard shadow, anime
+sparkles (✦), a sweep-animated open button, a continue-watching grid (3 cols,
+`minmax(0,1fr)`, fed from playlist+progress top 3 by `updatedAt`), and a
+floating mascot (`mascot-manga.png`, responsive shrink <1600px, hidden <1200px).
+Scroll-safe centering via `min-height:100%` flex centerer inside an overflow-auto
+layer. The bottom Controls bar no longer renders with no media loaded.
 
 **Verify:** 30/30 in the packaged exe; the empty-state innerText check now sees
 the ghost danmaku, which is expected.
