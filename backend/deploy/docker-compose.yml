@@ -1,0 +1,17 @@
+services:
+  danmaku-server:
+    build: .
+    container_name: danmaku-community
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - danmaku-data:/data
+    environment:
+      - PORT=3001
+      - DB_PATH=/data/danmaku.db
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash-lite}
+
+volumes:
+  danmaku-data:
