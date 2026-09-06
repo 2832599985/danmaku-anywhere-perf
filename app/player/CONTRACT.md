@@ -803,3 +803,22 @@ shape — the user wants subtitles for what is on screen NOW. Redesign:
   .srt save happens from the merged cache.
 - Contract note: `subtitle_transcribe(path, duration_secs, start_secs,
   on_event)`.
+
+### The real "100% then stuck / no subtitles / 卡顿" root cause (2026-09-06)
+
+Every earlier "window" still extracted the WHOLE file: `region_len` was only
+used for the percent math, ffmpeg was never told to stop, so each task decoded
+the entire 15-min episode (~207 s in the window test) while the video played →
+capsule sat at 100% then kept grinding, no cues for the visible part, stutter.
+
+Fix: `extract_audio_segmented` passes `-t <region_len>` to ffmpeg (hard read
+limit). A 60 s window now consumes exactly 2 segments in ~1.6 s. Regression
+proof = `tests/window_transcribe.rs`: real mp4 + appdata model through
+extract→VAD→ASR, asserts the window yields non-empty Chinese cues (fails if a
+window ever produces nothing or runs long).
+
+Also replaced the cancel/restart-on-every-seek storm: generate.ts is now a
+window scheduler — fixed [playhead, playhead+150s] window, auto-extends when
+playhead nears covered end (throttled store subscription), a seek re-anchors
+the window but DEBOUNCED 450ms so a progress-bar drag opens one window, not
+dozens. Model/CPU are free between windows, so playback never contends.

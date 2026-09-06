@@ -93,7 +93,7 @@ pub fn subtitle_transcribe(
     app: AppHandle,
     path: String,
     start_secs: Option<f64>,
-    duration_secs: Option<f64>,
+    end_secs: Option<f64>,
     on_event: Channel<SubtitleEvent>,
 ) -> Result<(), String> {
     if path.trim().is_empty() {
@@ -112,7 +112,7 @@ pub fn subtitle_transcribe(
             &app,
             &path,
             start_secs.unwrap_or(0.0).max(0.0),
-            duration_secs,
+            end_secs.unwrap_or(f64::MAX),
             &on_event,
             &cancel,
         );
@@ -195,109 +195,91 @@ fn resolve_models(app: &AppHandle) -> Result<(AsrModel, std::path::PathBuf), Str
     Ok((asr, vad))
 }
 
-/// The STREAMING pipeline: ffmpeg extracts 30 s segments in the background
-/// while each ready segment is pushed into ONE streaming VAD + recognizer and
-/// FOLLOW-PLAYHEAD pipeline: recognition starts at the CURRENT PLAYBACK
-/// position (so what's on screen gets subtitles first), runs to the end,
-/// then back-fills everything before the start position. Seek during a run
-/// reprioritizes: `subtitle_seek` cancels the current region and the
-/// frontend restarts from the new playhead (its cues for already-covered
-/// regions come from the partial track already mounted).
+/// FOLLOW-PLAYHEAD window pipeline. Recognition covers exactly
+/// [start_secs, end_secs] — a bounded lookahead ahead of the playhead that
+/// the frontend chooses (e.g. +150 s), never the whole file. This is the
+/// "分段生成 while playing" shape: one short task finishes in ~2 s and stops,
+/// so the CPU is free between windows and the capsule never sits at "100%
+/// then keeps running" (the old whole-file backfill that made the player
+/// stall). As playback approaches the covered end, the frontend opens the
+/// next window.
 ///
-/// Within one region the streaming invariants hold: one VAD instance sees
-/// the whole region so speech spanning an extraction boundary stays a single
-/// cue; region boundaries align to 30 s grid lines (the seek start is
-/// snapped down), so consecutive regions share boundaries exactly and a
-/// sentence at a region seam is only ever split along the grid, never
-/// mid-word across different runs.
+/// One VAD + one recognizer per task (model load is the expensive part and
+/// happens once). Segment times are region-relative; the task adds start.
 ///
-/// COLD-START BUDGET (≤5 s to first cue): ffmpeg input-seeks to the
-/// playhead (`-ss` before `-i`, fast) and spawns immediately; extraction
-/// (IO) overlaps model loading (CPU).
+/// COLD START (first cue ≤5 s): ffmpeg input-seeks to `start_secs` (`-ss`
+/// before `-i`, fast, no decode-from-0) and spawns immediately; the ~1-2 s
+/// model load overlaps the first segment's extraction.
 fn run_pipeline(
     app: &AppHandle,
     path: &str,
     start_secs: f64,
-    duration_secs: Option<f64>,
+    end_secs: f64,
     on_event: &Channel<SubtitleEvent>,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<Cue>, String> {
-    // Load the models first: ONE recognizer serves both regions (the model
-    // load is the expensive part; VAD is per-region by design).
+    let region_len = (end_secs - start_secs).max(0.0);
+    if region_len < audio::SEGMENT_SECS * 0.4 {
+        // Window too short to bother (e.g. playhead already near the video
+        // end and the frontend clamped) — succeed with nothing.
+        return Ok(Vec::new());
+    }
+
+    // 1. Spawn ffmpeg (extraction proceeds on its own thread).
+    let _ = on_event.send(SubtitleEvent::Extracting { percent: None });
+    let extraction =
+        audio::extract_audio_segmented(path, start_secs, Some(region_len), cancel, {
+            let on_event = on_event.clone();
+            move |percent| {
+                let _ = on_event.send(SubtitleEvent::Extracting { percent });
+            }
+        })?;
+    let total_segments = extraction.total.unwrap_or(0);
+
+    // 2. Load the model while ffmpeg extracts. Fixed Chinese recognition.
     let (asr_model, vad_model) = resolve_models(app)?;
+    let mut transcriber =
+        asr::StreamingTranscriber::new(&asr_model, &vad_model, "zh", Arc::clone(cancel))?;
 
+    // 3. Consume the window segment by segment. Extraction (IO) and
+    // inference (CPU) overlap; the loop paces with ffmpeg.
+    let _ = on_event.send(SubtitleEvent::Transcribing { percent: 0.0 });
     let mut all_cues: Vec<Cue> = Vec::new();
-    // Region A: playhead → end. Region B (back-fill): 0 → playhead.
-    let regions = [(start_secs, duration_secs), (0.0, Some(start_secs))];
-    for (region_start, region_end) in regions {
+    let mut processed = 0usize;
+    while let Some(result) = extraction.next_segment() {
+        let seg_path = result?;
         if cancel.load(Ordering::Relaxed) {
             return Err(audio::CANCELLED.to_string());
         }
-        // Skip empty regions (no duration known, or starting at 0).
-        let Some(region_end) = region_end else {
-            continue;
+        let mut seg_cues = transcriber.push_wav(&seg_path)?;
+        for cue in &mut seg_cues {
+            cue.start += start_secs;
+            cue.end += start_secs;
+        }
+        if !seg_cues.is_empty() {
+            all_cues.extend(seg_cues.iter().cloned());
+            let _ = on_event.send(SubtitleEvent::Partial { cues: seg_cues });
+        }
+        processed += 1;
+        let percent = if total_segments > 0 {
+            (processed as f32 / total_segments as f32).min(1.0)
+        } else {
+            0.0
         };
-        if region_end - region_start < audio::SEGMENT_SECS * 0.5 {
-            continue;
-        }
-        let region_len = region_end - region_start;
-
-        let _ = on_event.send(SubtitleEvent::Extracting { percent: None });
-        let extraction = audio::extract_audio_segmented(
-            path,
-            region_start,
-            Some(region_len),
-            cancel,
-            {
-                let on_event = on_event.clone();
-                move |percent| {
-                    let _ = on_event.send(SubtitleEvent::Extracting { percent });
-                }
-            },
-        )?;
-        let total_segments = extraction.total.unwrap_or(0);
-
-        // Fresh VAD per region; its timestamps are region-relative.
-        let mut transcriber =
-            asr::StreamingTranscriber::new(&asr_model, &vad_model, "zh", Arc::clone(cancel))?;
-
-        let _ = on_event.send(SubtitleEvent::Transcribing { percent: 0.0 });
-        let mut processed = 0usize;
-        while let Some(result) = extraction.next_segment() {
-            let seg_path = result?;
-            if cancel.load(Ordering::Relaxed) {
-                return Err(audio::CANCELLED.to_string());
-            }
-            let mut seg_cues = transcriber.push_wav(&seg_path)?;
-            for cue in &mut seg_cues {
-                cue.start += region_start;
-                cue.end += region_start;
-            }
-            if !seg_cues.is_empty() {
-                all_cues.extend(seg_cues.iter().cloned());
-                let _ = on_event.send(SubtitleEvent::Partial { cues: seg_cues });
-            }
-            processed += 1;
-            let percent = if total_segments > 0 {
-                processed as f32 / total_segments as f32
-            } else {
-                0.0
-            };
-            let _ = on_event.send(SubtitleEvent::Transcribing { percent });
-        }
-        if cancel.load(Ordering::Relaxed) {
-            return Err(audio::CANCELLED.to_string());
-        }
-        // Trailing speech still buffered in the VAD.
-        let mut tail = transcriber.finish()?;
-        for cue in &mut tail {
-            cue.start += region_start;
-            cue.end += region_start;
-        }
-        if !tail.is_empty() {
-            all_cues.extend(tail.iter().cloned());
-            let _ = on_event.send(SubtitleEvent::Partial { cues: tail });
-        }
+        let _ = on_event.send(SubtitleEvent::Transcribing { percent });
+    }
+    if cancel.load(Ordering::Relaxed) {
+        return Err(audio::CANCELLED.to_string());
+    }
+    // Trailing speech still buffered in the VAD.
+    let mut tail = transcriber.finish()?;
+    for cue in &mut tail {
+        cue.start += start_secs;
+        cue.end += start_secs;
+    }
+    if !tail.is_empty() {
+        all_cues.extend(tail.iter().cloned());
+        let _ = on_event.send(SubtitleEvent::Partial { cues: tail });
     }
     Ok(all_cues)
 }

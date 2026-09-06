@@ -132,8 +132,15 @@ pub fn extract_audio_segmented(
             "-progress",
             "pipe:1",
             "-nostats",
-        ])
-        .arg(dir.join("seg-%06d.wav"))
+        ]);
+    // HARD window bound: stop reading after region_len SECONDS of audio.
+    // Without `-t` ffmpeg extracts the ENTIRE file regardless of region_len
+    // (region_len was only ever used for the percent math) — that whole-file
+    // extraction behind every "window" was the 卡顿/never-ending-progress bug.
+    if let Some(len) = duration_secs {
+        command.args(["-t", &format!("{len:.3}")]);
+    }
+    command.arg(dir.join("seg-%06d.wav"))
         .stdout(Stdio::piped())
         // Capture stderr so a failed spawn can report ffmpeg's actual error
         // instead of a generic "extraction failed" (diagnosability matters:
