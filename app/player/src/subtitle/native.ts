@@ -11,6 +11,8 @@ import type { SubtitleCue } from './types'
 export type TranscribeEvent =
   | { type: 'extracting'; percent: number | null }
   | { type: 'transcribing'; percent: number }
+  /** incremental cues: mount while inference continues (streaming subtitles) */
+  | { type: 'partial'; cues: SubtitleCue[] }
   | { type: 'translating'; percent: number }
   | { type: 'done'; cues: SubtitleCue[] }
   | { type: 'cancelled' }

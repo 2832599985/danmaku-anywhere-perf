@@ -60,6 +60,26 @@ const runTranscribe = (
         case 'transcribing':
           store.setSttStatus('transcribing', event.percent)
           break
+        case 'partial': {
+          // Streaming subtitles: append recognized cues to the mounted track
+          // while inference keeps running (Quark-style segment-by-segment).
+          // Keep appending unless the user mounted an explicit file meanwhile.
+          if (
+            store.subtitleSource?.kind === 'generated' ||
+            store.subtitleCues.length === 0
+          ) {
+            cache.set(videoPath, {
+              source: [...store.subtitleCues, ...event.cues],
+              zh: null,
+            })
+            store.setSubtitles([...store.subtitleCues, ...event.cues], {
+              label: '语音识别 · 生成中',
+              count: store.subtitleCues.length + event.cues.length,
+              kind: 'generated',
+            })
+          }
+          break
+        }
         case 'done':
           finish(() => resolve(event.cues))
           break

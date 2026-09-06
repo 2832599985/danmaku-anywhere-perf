@@ -28,7 +28,10 @@ pub struct AsrModel {
 
 /// Transcribe `wav_path` into cues. `vad_model` is the installed silero-vad
 /// onnx path. `on_percent` reports 0..1 inference progress across VAD
-/// segments. Returns cues sorted by start.
+/// segments. `on_cues` fires with newly recognized cues every few segments so
+/// the UI can stream subtitles while inference continues (the same
+/// segment-by-segment UX Quark's player uses — same SenseVoice int8 model).
+/// Returns ALL cues.
 pub fn transcribe_wav(
     wav_path: &Path,
     asr: &AsrModel,
@@ -36,6 +39,7 @@ pub fn transcribe_wav(
     language: &str,
     cancel: &Arc<AtomicBool>,
     mut on_percent: impl FnMut(f32),
+    mut on_cues: impl FnMut(Vec<Cue>),
 ) -> Result<Vec<Cue>, String> {
     let samples = read_wav(wav_path)?;
     let segments = segment_with_vad(&samples, vad_model, cancel)?;
@@ -47,8 +51,13 @@ pub fn transcribe_wav(
         .ok_or("初始化识别模型失败")?;
 
     const MIN_CUE_SECS: f64 = 0.2;
+    // Flush a Partial batch every N recognized segments: small enough that
+    // subtitles appear within seconds of pressing 生成, large enough not to
+    // spam the IPC channel.
+    const FLUSH_EVERY: usize = 3;
     let total = segments.len();
-    let mut cues = Vec::with_capacity(total);
+    let mut cues: Vec<Cue> = Vec::with_capacity(total);
+    let mut batch: Vec<Cue> = Vec::with_capacity(FLUSH_EVERY);
     for (index, segment) in segments.iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             return Err(super::audio::CANCELLED.to_string());
@@ -62,9 +71,17 @@ pub fn transcribe_wav(
             let start = segment.start() as f64 / SAMPLE_RATE as f64;
             let end = (start + segment.samples().len() as f64 / SAMPLE_RATE as f64)
                 .max(start + MIN_CUE_SECS);
-            cues.push(Cue { start, end, text });
+            let cue = Cue { start, end, text };
+            cues.push(cue.clone());
+            batch.push(cue);
+        }
+        if batch.len() >= FLUSH_EVERY {
+            on_cues(std::mem::take(&mut batch));
         }
         on_percent((index + 1) as f32 / total as f32);
+    }
+    if !batch.is_empty() {
+        on_cues(batch);
     }
     Ok(cues)
 }
@@ -148,9 +165,12 @@ fn recognizer_config(asr: &AsrModel, language: &str) -> OfflineRecognizerConfig 
                 use_itn: true,
             },
             tokens: Some(asr.tokens.to_string_lossy().into_owned()),
+            // All cores minus one (kept free for the UI/webview). SenseVoice
+            // int8 on CPU scales with intra-op threads; capping at 4 left
+            // 2/3 of a typical machine idle.
             num_threads: std::thread::available_parallelism()
-                .map(|n| n.get().min(4) as i32)
-                .unwrap_or(2),
+                .map(|n| (n.get().saturating_sub(1)).max(2) as i32)
+                .unwrap_or(4),
             debug: false,
             provider: None,
             ..Default::default()
@@ -188,6 +208,7 @@ mod tests {
             Path::new(&vad),
             "auto",
             &Arc::new(AtomicBool::new(false)),
+            |_| {},
             |_| {},
         )
         .expect("transcription failed");

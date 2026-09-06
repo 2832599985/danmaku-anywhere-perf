@@ -34,10 +34,12 @@ pub struct Cue {
 pub enum SubtitleEvent {
     /// audio extraction running; percent is None when total duration is unknown
     Extracting { percent: Option<f32> },
-    /// model inference running over the extracted audio (constructed in stage 3)
-    #[allow(dead_code)]
+    /// model inference running over the extracted audio
     Transcribing { percent: f32 },
-    /// translation pass (stage 4) — optional, only when translating
+    /// incremental cues: mount these on screen while inference continues
+    /// (streamed every few segments so subtitles appear within seconds)
+    Partial { cues: Vec<Cue> },
+    /// translation pass — optional, only when translating
     #[allow(dead_code)]
     Translating { percent: f32 },
     /// pipeline finished; full cue list (sorted by start)
@@ -227,6 +229,9 @@ fn run_pipeline(
         cancel,
         |percent| {
             let _ = on_event.send(SubtitleEvent::Transcribing { percent });
+        },
+        |cues| {
+            let _ = on_event.send(SubtitleEvent::Partial { cues });
         },
     )
 }
