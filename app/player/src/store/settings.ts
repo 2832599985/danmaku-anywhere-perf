@@ -96,6 +96,38 @@ export interface DanmakuSettings {
 /** How the player handles detected OP/ED segments. */
 export type SkipOpEdMode = 'auto' | 'ask' | 'off'
 
+/** Which recognition engine local speech-to-text uses. */
+export type SubtitleEngine = 'sensevoice' | 'whisper'
+/** Language fed to recognition ('auto' lets the engine decide). */
+export type SubtitleSourceLanguage = 'auto' | 'ja' | 'zh'
+/** What the subtitle layer shows: the transcription or a Chinese translation. */
+export type SubtitleDisplayLanguage = 'source' | 'zh'
+
+export interface SubtitleSettings {
+  /** master switch; hides the layer without dropping mounted cues. */
+  visible: boolean
+  /** px */
+  fontSize: number
+  /** timing offset in ms (positive = cues shown later, danmaku convention). */
+  offset: number
+  /** distance of the cue block from the stage bottom, % of stage height. */
+  bottom: number
+  /** 0..1 */
+  opacity: number
+  /** ink outline + hard shadow behind the paper-colored text. */
+  outline: boolean
+  /** recognition engine used when generating subtitles from audio. */
+  engine: SubtitleEngine
+  /** language of the audio source fed to recognition. */
+  sourceLanguage: SubtitleSourceLanguage
+  /** what the layer displays: transcription or the translated Chinese track. */
+  displayLanguage: SubtitleDisplayLanguage
+  /** translate generated cues to Chinese with the built-in AI (ja→zh). */
+  autoTranslate: boolean
+  /** prefer GPU inference when available (falls back to CPU). */
+  useGpu: boolean
+}
+
 export interface PlaybackSettings {
   /** seconds moved by ArrowLeft / ArrowRight. */
   seekStepSec: number
@@ -118,6 +150,7 @@ export interface Settings {
   upscale: UpscaleSettings
   danmaku: DanmakuSettings
   playback: PlaybackSettings
+  subtitle: SubtitleSettings
 }
 
 export const DEFAULT_UPSCALE: UpscaleSettings = {
@@ -156,10 +189,25 @@ export const DEFAULT_PLAYBACK: PlaybackSettings = {
   holdSpeed: 3,
 }
 
+export const DEFAULT_SUBTITLE: SubtitleSettings = {
+  visible: true,
+  fontSize: 30,
+  offset: 0,
+  bottom: 6,
+  opacity: 1,
+  outline: true,
+  engine: 'sensevoice',
+  sourceLanguage: 'auto',
+  displayLanguage: 'source',
+  autoTranslate: true,
+  useGpu: false,
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   upscale: DEFAULT_UPSCALE,
   danmaku: DEFAULT_DANMAKU,
   playback: DEFAULT_PLAYBACK,
+  subtitle: DEFAULT_SUBTITLE,
 }
 
 /** Anime4K base-mode letter for each built-in mode id. */

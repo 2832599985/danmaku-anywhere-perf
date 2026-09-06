@@ -56,6 +56,15 @@ export interface PlayerCommands {
   loadDanmakuFromText(text: string, name: string): Promise<void>
   /** read a danmaku file by absolute path (Tauri drag-drop). */
   loadDanmakuFromPath(path: string): Promise<void>
+
+  /** show/hide subtitles (mirrors settings.visible; cues stay mounted). */
+  toggleSubtitles(): void
+  /** open the subtitle file picker (.srt/.ass/.vtt), parse and mount. */
+  loadSubtitleFromFile(): Promise<void>
+  /** parse a subtitle file from raw text (drag-drop). Throws when unparsable. */
+  loadSubtitleFromText(text: string, name: string): Promise<void>
+  /** read a subtitle file by absolute path (Tauri drag-drop). */
+  loadSubtitleFromPath(path: string): Promise<void>
 }
 
 export const PlayerCommandsContext = createContext<PlayerCommands | null>(null)

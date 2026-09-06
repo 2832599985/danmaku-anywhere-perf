@@ -7,6 +7,8 @@ import { filterComments } from '@/danmaku/filter'
 import { parseDanmakuText } from '@/danmaku/parse'
 import type { Platform } from '@/platform'
 import { type PlaylistItem, usePlayerStore } from '@/store/playerStore'
+import { parseSubtitleText } from '@/subtitle/format'
+import { INK, PAPER, SANS } from '@/theme/theme'
 import { Controls } from '@/ui/Controls'
 import { DanmakuSourceDialog } from '@/ui/DanmakuSourceDialog'
 import { EmptyState } from '@/ui/EmptyState'
@@ -18,6 +20,7 @@ import { type PlayerCommands, PlayerCommandsContext } from './commands'
 import { DanmakuController } from './danmaku/DanmakuController'
 import { detectHdrTransfer } from './detectHdr'
 import { FullscreenPortalContext } from './fullscreenPortal'
+import { SubtitleController } from './subtitle/SubtitleController'
 import { UpscaleController } from './upscale/UpscaleController'
 import { useKeyboardControls } from './useKeyboardControls'
 import { useVideoElement } from './useVideoElement'
@@ -33,7 +36,8 @@ const VIDEO_EXTENSIONS = new Set([
   'flv',
   'ogv',
 ])
-const DANMAKU_EXTENSIONS = new Set(['xml', 'json', 'ass', 'txt'])
+const DANMAKU_EXTENSIONS = new Set(['xml', 'json', 'txt'])
+const SUBTITLE_EXTENSIONS = new Set(['srt', 'ass', 'vtt'])
 
 const basename = (p: string): string => p.split(/[\\/]/).pop() || p
 const extOf = (name: string): string =>
@@ -62,6 +66,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     setStageEl(el)
   }, [])
   const danmakuLayerRef = useRef<HTMLDivElement>(null)
+  const subtitleLayerRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   // State-backed so hooks/effects re-run once the element actually mounts.
   const [video, setVideoState] = useState<HTMLVideoElement | null>(null)
@@ -72,6 +77,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
 
   const upscaleCtrlRef = useRef<UpscaleController | null>(null)
   const danmakuCtrlRef = useRef<DanmakuController | null>(null)
+  const subtitleCtrlRef = useRef<SubtitleController | null>(null)
 
   // Every MUI overlay portals to document.body by default, and document.body is
   // hidden behind the fullscreen element (only the fullscreen subtree renders in
@@ -94,6 +100,9 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   const mediaError = usePlayerStore((s) => s.mediaError)
   const comments = usePlayerStore((s) => s.comments)
   const danmakuSettings = usePlayerStore((s) => s.danmakuSettings)
+  const subtitleCues = usePlayerStore((s) => s.subtitleCues)
+  const subtitleCueIndex = usePlayerStore((s) => s.subtitleCueIndex)
+  const subtitleSettings = usePlayerStore((s) => s.subtitleSettings)
   const upscale = usePlayerStore((s) => s.upscale)
   const isHdr = usePlayerStore((s) => s.isHdr)
   const playing = usePlayerStore((s) => s.playback.playing)
@@ -128,13 +137,20 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       onStats: (stats) => usePlayerStore.getState().setUpscaleStats(stats),
     })
     const danmakuCtrl = new DanmakuController(layer)
+    const subtitleCtrl = new SubtitleController({
+      onCueChange: (index) =>
+        usePlayerStore.getState().setSubtitleCueIndex(index),
+    })
     upscaleCtrlRef.current = upscaleCtrl
     danmakuCtrlRef.current = danmakuCtrl
+    subtitleCtrlRef.current = subtitleCtrl
     return () => {
       upscaleCtrl.destroy()
       danmakuCtrl.destroy()
+      subtitleCtrl.destroy()
       upscaleCtrlRef.current = null
       danmakuCtrlRef.current = null
+      subtitleCtrlRef.current = null
     }
   }, [video])
 
@@ -219,6 +235,22 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   useEffect(() => {
     danmakuCtrlRef.current?.updateSettings(danmakuSettings)
   }, [danmakuSettings])
+
+  // --- subtitles: mount cues / forward style into the timing controller ---
+  // The controller computes the active cue with frame-exact rVFC ticks and only
+  // reports CHANGES (subtitleCueIndex); React renders the text from the store.
+  useEffect(() => {
+    const ctrl = subtitleCtrlRef.current
+    if (!video || !ctrl) return
+    if (subtitleCues.length) ctrl.setCues(video, subtitleCues)
+    else ctrl.clear()
+  }, [subtitleCues, video])
+
+  useEffect(() => {
+    subtitleCtrlRef.current?.updateStyle({
+      offset: subtitleSettings.offset,
+    })
+  }, [subtitleSettings.offset])
 
   // --- keep danmaku laid out correctly across container/fullscreen resizes ---
   // The danmaku engine caches the container width when tracks are created; on a
@@ -392,6 +424,47 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     }
   }, [media, platform])
 
+  // --- auto-load a sibling subtitle file (video.srt / video.ass) on Tauri ---
+  // Same identity-recheck discipline as the danmaku sibling loader above: an
+  // explicit mount or a media switch mid-read must not be clobbered. A
+  // translated cache (video.zh.srt) wins over the raw transcription side.
+  useEffect(() => {
+    if (!platform.isTauri || !media?.path) return
+    const videoPath = media.path
+    const base = videoPath.replace(/\.[^./\\]+$/, '')
+    let stale = false
+    void (async () => {
+      for (const suffix of ['.zh.srt', '.srt', '.ass', '.vtt']) {
+        const candidate = `${base}${suffix}`
+        let text: string
+        try {
+          text = await platform.readTextFile(candidate)
+        } catch {
+          continue // no sibling file with this extension
+        }
+        if (stale) return
+        try {
+          const cues = parseSubtitleText(text, basename(candidate))
+          const s = usePlayerStore.getState()
+          if (stale || s.media?.path !== videoPath || s.subtitleSource) return
+          if (!cues.length) continue
+          s.setSubtitles(cues, {
+            label: basename(candidate),
+            count: cues.length,
+            kind: 'file',
+          })
+          s.showOsd(`自动加载字幕 · ${cues.length} 条`, '🎬')
+          return
+        } catch {
+          // unparsable sibling — try the next extension
+        }
+      }
+    })()
+    return () => {
+      stale = true
+    }
+  }, [media, platform])
+
   // --- resume history: restore last position on open, persist while watching ---
   // Only local files (with a stable `path`) are tracked; browser blob opens have
   // no durable key. Saves are throttled; the cleanup captures the position when
@@ -472,6 +545,18 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     const loadDanmakuFromText = async (text: string, name: string) => {
       const { comments: parsed } = await parseDanmakuText(text, name)
       store().setComments(parsed, { label: name, count: parsed.length })
+    }
+
+    const loadSubtitleFromText = async (text: string, name: string) => {
+      const cues = parseSubtitleText(text, name)
+      if (!cues.length) {
+        throw new Error(`未解析到字幕内容: ${name}`)
+      }
+      store().setSubtitles(cues, {
+        label: name,
+        count: cues.length,
+        kind: 'file',
+      })
     }
 
     const itemFromPath = (path: string): PlaylistItem => ({
@@ -615,6 +700,20 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         const text = await platform.readTextFile(path)
         await loadDanmakuFromText(text, basename(path))
       },
+      toggleSubtitles: () => {
+        store().toggleSubtitleVisible()
+        const visible = store().subtitleSettings.visible
+        store().showOsd(visible ? '字幕开' : '字幕关', '🎬')
+      },
+      loadSubtitleFromFile: async () => {
+        const picked = await platform.pickSubtitleFile()
+        if (picked) await loadSubtitleFromText(picked.text, picked.name)
+      },
+      loadSubtitleFromText,
+      loadSubtitleFromPath: async (path) => {
+        const text = await platform.readTextFile(path)
+        await loadSubtitleFromText(text, basename(path))
+      },
     }
   }, [platform])
 
@@ -632,11 +731,14 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   useEffect(() => {
     if (!platform.isTauri) return
     return platform.onFileDrop((paths) => {
-      // Videos first (they reset the playlist + danmaku), then danmaku files.
+      // Videos first (they reset the playlist + danmaku), then danmaku and
+      // subtitle files.
       const videos = paths.filter((p) => VIDEO_EXTENSIONS.has(extOf(p)))
       const danmaku = paths.filter((p) => DANMAKU_EXTENSIONS.has(extOf(p)))
+      const subtitles = paths.filter((p) => SUBTITLE_EXTENSIONS.has(extOf(p)))
       if (videos.length) commands.openVideosFromPaths(videos)
       for (const path of danmaku) void commands.loadDanmakuFromPath(path)
+      for (const path of subtitles) void commands.loadSubtitleFromPath(path)
     })
   }, [platform, commands])
 
@@ -650,11 +752,20 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
           VIDEO_EXTENSIONS.has(extOf(f.name)) || f.type.startsWith('video/')
       )
       const danmaku = files.filter((f) => DANMAKU_EXTENSIONS.has(extOf(f.name)))
+      const subtitles = files.filter((f) =>
+        SUBTITLE_EXTENSIONS.has(extOf(f.name))
+      )
       if (videos.length) commands.openVideosFromFiles(videos)
       for (const file of danmaku) {
         void file
           .text()
           .then((text) => commands.loadDanmakuFromText(text, file.name))
+      }
+      for (const file of subtitles) {
+        void file
+          .text()
+          .then((text) => commands.loadSubtitleFromText(text, file.name))
+          .catch(() => undefined)
       }
     },
     [commands]
@@ -676,6 +787,13 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   }, [])
 
   const overlaysVisible = controlsVisible || !playing || !media
+
+  // The cue the timing controller reports as on-screen (store-mirrored).
+  const activeCue =
+    subtitleCueIndex >= 0 ? subtitleCues[subtitleCueIndex] : undefined
+  // Lift the cue block above the bottom controls while they are shown.
+  const subtitleBottom =
+    subtitleSettings.bottom + (overlaysVisible && media ? 7 : 0)
 
   return (
     <PlayerCommandsContext.Provider value={commands}>
@@ -702,7 +820,6 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
               cursor: overlaysVisible ? 'default' : 'none',
             }}
           >
-            {/** biome-ignore lint/a11y/useMediaCaption: danmaku overlay player, no caption track */}
             <video
               ref={setVideoRef}
               crossOrigin="anonymous"
@@ -729,6 +846,51 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
                 overflow: 'hidden',
               }}
             />
+            {/* Subtitle layer (zIndex 3): above danmaku, below error/chrome.
+                The SubtitleController owns WHICH cue is active; this div only
+                renders the store-mirrored text, so re-renders happen once per
+                cue boundary, never per frame. */}
+            <div
+              ref={subtitleLayerRef}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: 3,
+                pointerEvents: 'none',
+                overflow: 'hidden',
+              }}
+            >
+              {media && subtitleSettings.visible && activeCue && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '4%',
+                    right: '4%',
+                    bottom: `${subtitleBottom}%`,
+                    display: 'flex',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontFamily: SANS,
+                      fontSize: subtitleSettings.fontSize,
+                      lineHeight: 1.4,
+                      fontWeight: 700,
+                      color: PAPER,
+                      opacity: subtitleSettings.opacity,
+                      textAlign: 'center',
+                      whiteSpace: 'pre-wrap',
+                      textShadow: subtitleSettings.outline
+                        ? `0 0 4px ${INK}, 0 0 8px ${INK}, 2px 2px 2px ${INK}`
+                        : 'none',
+                    }}
+                  >
+                    {activeCue.text}
+                  </span>
+                </div>
+              )}
+            </div>
 
             {!media && <EmptyState />}
 

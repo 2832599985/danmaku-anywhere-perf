@@ -3,12 +3,15 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import type { PickedMedia } from '@/platform/types'
+import type { SubtitleCue, SubtitleSource } from '@/subtitle/types'
 import {
   type DanmakuSettings,
   DEFAULT_DANMAKU,
   DEFAULT_PLAYBACK,
+  DEFAULT_SUBTITLE,
   DEFAULT_UPSCALE,
   type PlaybackSettings,
+  type SubtitleSettings,
   type UpscaleSettings,
   type UpscaleSettingsPatch,
 } from './settings'
@@ -96,6 +99,12 @@ export interface PlayerStore {
   comments: CommentEntity[]
   danmakuSource: DanmakuSource | null
 
+  // --- subtitles (session-only; re-mounted per media by the auto-load effect) ---
+  subtitleCues: SubtitleCue[]
+  subtitleSource: SubtitleSource | null
+  /** cue currently on screen (set by SubtitleController), -1 = none. */
+  subtitleCueIndex: number
+
   // --- source HDR (detected from the decoded frame; session-only) ---
   isHdr: boolean
   hdrTransfer: string | null
@@ -131,6 +140,7 @@ export interface PlayerStore {
   upscale: UpscaleSettings
   danmakuSettings: DanmakuSettings
   playbackSettings: PlaybackSettings
+  subtitleSettings: SubtitleSettings
 
   // --- actions ---
   setMedia: (media: PickedMedia | null) => void
@@ -138,6 +148,11 @@ export interface PlayerStore {
   setMediaError: (message: string | null) => void
   setComments: (comments: CommentEntity[], source: DanmakuSource | null) => void
   clearDanmaku: () => void
+  /** mount a subtitle track (external file or generated cues). */
+  setSubtitles: (cues: SubtitleCue[], source: SubtitleSource) => void
+  clearSubtitles: () => void
+  /** called by SubtitleController when the on-screen cue changes. */
+  setSubtitleCueIndex: (index: number) => void
   /** record the detected HDR transfer ('pq'/'hlg') or null for SDR. */
   setHdr: (transfer: string | null) => void
 
@@ -160,7 +175,9 @@ export interface PlayerStore {
   updateUpscale: (partial: UpscaleSettingsPatch) => void
   updateDanmakuSettings: (partial: Partial<DanmakuSettings>) => void
   updatePlaybackSettings: (partial: Partial<PlaybackSettings>) => void
+  updateSubtitleSettings: (partial: Partial<SubtitleSettings>) => void
   toggleDanmakuVisible: () => void
+  toggleSubtitleVisible: () => void
 
   // --- playlist actions ---
   setPlaylist: (items: PlaylistItem[], startIndex?: number) => void
@@ -210,6 +227,9 @@ function resetPlaybackForNewMedia(s: PlayerStore): void {
   s.isHdr = false
   s.hdrTransfer = null
   s.mediaError = null
+  s.subtitleCues = []
+  s.subtitleSource = null
+  s.subtitleCueIndex = -1
   s.playback = {
     ...INITIAL_PLAYBACK,
     volume: s.playback.volume,
@@ -224,6 +244,10 @@ export const usePlayerStore = create<PlayerStore>()(
       mediaError: null,
       comments: [],
       danmakuSource: null,
+
+      subtitleCues: [],
+      subtitleSource: null,
+      subtitleCueIndex: -1,
 
       isHdr: false,
       hdrTransfer: null,
@@ -250,6 +274,7 @@ export const usePlayerStore = create<PlayerStore>()(
       upscale: DEFAULT_UPSCALE,
       danmakuSettings: DEFAULT_DANMAKU,
       playbackSettings: DEFAULT_PLAYBACK,
+      subtitleSettings: DEFAULT_SUBTITLE,
 
       setMedia: (media) =>
         set((s) => {
@@ -274,6 +299,25 @@ export const usePlayerStore = create<PlayerStore>()(
         set((s) => {
           s.comments = []
           s.danmakuSource = null
+        }),
+
+      setSubtitles: (cues, source) =>
+        set((s) => {
+          s.subtitleCues = cues
+          s.subtitleSource = source
+          s.subtitleCueIndex = -1
+        }),
+
+      clearSubtitles: () =>
+        set((s) => {
+          s.subtitleCues = []
+          s.subtitleSource = null
+          s.subtitleCueIndex = -1
+        }),
+
+      setSubtitleCueIndex: (index) =>
+        set((s) => {
+          s.subtitleCueIndex = index
         }),
 
       setHdr: (transfer) =>
@@ -362,9 +406,19 @@ export const usePlayerStore = create<PlayerStore>()(
           Object.assign(s.playbackSettings, partial)
         }),
 
+      updateSubtitleSettings: (partial) =>
+        set((s) => {
+          Object.assign(s.subtitleSettings, partial)
+        }),
+
       toggleDanmakuVisible: () =>
         set((s) => {
           s.danmakuSettings.visible = !s.danmakuSettings.visible
+        }),
+
+      toggleSubtitleVisible: () =>
+        set((s) => {
+          s.subtitleSettings.visible = !s.subtitleSettings.visible
         }),
 
       setPlaylist: (items, startIndex) =>
@@ -518,6 +572,7 @@ export const usePlayerStore = create<PlayerStore>()(
         upscale: state.upscale,
         danmakuSettings: state.danmakuSettings,
         playbackSettings: state.playbackSettings,
+        subtitleSettings: state.subtitleSettings,
         playlist: state.playlist.filter((i) => !!i.path),
         progress: state.progress,
       }),
@@ -530,6 +585,7 @@ export const usePlayerStore = create<PlayerStore>()(
           upscale?: Partial<UpscaleSettings>
           danmakuSettings?: Partial<DanmakuSettings>
           playbackSettings?: Partial<PlaybackSettings>
+          subtitleSettings?: Partial<SubtitleSettings>
           playlist?: PlaylistItem[]
           progress?: Record<string, ResumeEntry>
         }
@@ -547,6 +603,10 @@ export const usePlayerStore = create<PlayerStore>()(
           playbackSettings: {
             ...current.playbackSettings,
             ...p.playbackSettings,
+          },
+          subtitleSettings: {
+            ...current.subtitleSettings,
+            ...p.subtitleSettings,
           },
           // Restore the queue but start detached: nothing plays until the user
           // clicks an item (which then resumes from `progress`). Media is never

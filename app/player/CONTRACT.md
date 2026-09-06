@@ -61,10 +61,13 @@ Playwright verification.
 ```ts
 interface Platform {
   isTauri: boolean
-  pickVideoFile(): Promise<PickedMedia | null>   // dialog → {url, name, path?}
-  pickDanmakuFile(): Promise<PickedText | null>   // dialog → {text, name}
-  toMediaUrl(path: string): string                // convertFileSrc / stream://
-  httpText(url, init): Promise<string>            // plugin-http | window.fetch
+  pickVideoFiles(): Promise<PickedMedia[]>        // dialog → [{url, name, path?}]
+  pickDanmakuFile(): Promise<PickedText | null>   // dialog → {text, name} (.xml/.json/.txt)
+  pickSubtitleFile(): Promise<PickedText | null>  // dialog → {text, name} (.srt/.ass/.vtt)
+  mediaUrlForPath(path: string): string           // stream:// URL builder
+  readTextFile(path: string): Promise<string>     // plugin-fs (Tauri only)
+  onFileDrop(cb: (paths: string[]) => void): () => void
+  minimizeWindow() / toggleMaximizeWindow() / closeWindow()
 }
 ```
 - **Tauri impl:** `@tauri-apps/plugin-dialog`, `@tauri-apps/plugin-fs`, `@tauri-apps/plugin-http`, custom `stream://` protocol for `toMediaUrl`.
@@ -583,3 +586,77 @@ layer. The bottom Controls bar no longer renders with no media loaded.
 
 **Verify:** 30/30 in the packaged exe; the empty-state innerText check now sees
 the ghost danmaku, which is expected.
+
+## 20. Subtitle system (2026-09-06 — stage 1 DONE; ASR stages planned)
+
+Local subtitle support, built in two halves. **Stage 1 (landed):** external
+subtitle files (SRT/ASS/VTT) — parse, mount, frame-exact rendering. **Stages
+2-6 (planned):** local speech-to-text generation (SenseVoice via sherpa-onnx in
+Rust, ffmpeg sidecar audio extraction, optional ja→zh translation through the
+built-in genAi proxy).
+
+**Stage 1 — what landed:**
+
+- `src/subtitle/format.ts` — `parseSubtitleText(text, name)` → sorted
+  `SubtitleCue[]` ({start, end, text}, seconds). SRT (CRLF + BOM safe, `,` or
+  `.` milliseconds), lenient WebVTT (id lines + cue settings tolerated), basic
+  ASS/SSA ([Events] Format-driven, `{\...}` overrides stripped, `\N`→newline,
+  text may contain commas). `serializeSrt(cues)` is the on-disk cache format
+  for generated subtitles. Verified roundtrip.
+- `src/player/subtitle/SubtitleController.ts` — timing engine. Binary-search
+  cue lookup over the start-sorted array; ticked by
+  `requestVideoFrameCallback` (rAF fallback, `seeked`/`play` one-shot refresh
+  for paused seeks). Reports cue CHANGES only (never per frame) through
+  `onCueChange(index)`; PlayerHost mirrors the index into the store and React
+  renders the text — store writes happen once per cue boundary. `offset` (ms,
+  danmaku sign convention: lookup time = currentTime - offset) is applied at
+  lookup time and re-checks on change.
+- Store: `subtitleCues`/`subtitleSource`/`subtitleCueIndex` (session-only,
+  reset by `resetPlaybackForNewMedia`) + persisted `subtitleSettings`
+  (visible/fontSize/offset/bottom/opacity/outline/engine/sourceLanguage/
+  displayLanguage/autoTranslate/useGpu). NOTE: `subtitleSettings` had to be
+  added to BOTH `partialize` and the deep `merge` (§ persistence notes above).
+- Mount paths: drag-drop (.srt/.ass/.vtt routed to the subtitle channel, no
+  longer misrouted to danmaku — `.ass` was accepted by the danmaku pickers but
+  never parsed, a latent bug), file picker (`Platform.pickSubtitleFile`),
+  and Tauri sibling auto-load (`<video>.zh.srt` → `.srt` → `.ass` → `.vtt`,
+  wins over nothing — explicit loads still take priority via the
+  `subtitleSource` identity recheck, same discipline as the danmaku sibling
+  effect).
+- Rendering: stage layer `zIndex: 3` (above danmaku, below error/chrome),
+  bottom-anchored PAPER text with INK text-shadow outline, lifted 7% while
+  controls are visible. `Platform` gained `pickSubtitleFile`; `PlayerCommands`
+  gained `toggleSubtitles` (S), `loadSubtitleFromFile/FromText/FromPath`;
+  keyboard `,` / `.` nudge the offset ±100ms.
+- Engine/model fields in `subtitleSettings` (`engine: sensevoice|whisper`,
+  `sourceLanguage: auto|ja|zh`, `displayLanguage: source|zh`, `autoTranslate`,
+  `useGpu`) are INERT in stage 1 — defined now so persistence stays stable;
+  wired up in stages 2-6.
+
+**Stages 2-6 — planned ASR pipeline (do not re-litigate, decisions locked):**
+
+- Rust (`src-tauri`): NEW `subtitle/` module. Commands (invoke_handler does not
+  exist yet — create it): `subtitle_transcribe(path, engine, language,
+  onProgress: Channel) -> Vec<Cue>` (single-flight: reject while a task is
+  running), `subtitle_cancel`, `subtitle_model_status/_download` (download via
+  Rust reqwest → app_data_dir/models, SHA256-verified), `subtitle_load_srt/
+  save_srt` (Rust writes files; no fs:allow-write needed).
+- Engine: `sherpa-onnx = "1.13"` crate (NOT whisper-rs — archived). Default
+  model `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8` (~240MB) +
+  Silero-VAD for sentence timing; optional whisper large-v3-turbo-q5_0.
+  Static linking default; build script fetches prebuilt lib.
+- Audio: ffmpeg sidecar (`bundle.externalBin`) extracts 16kHz mono WAV to temp
+  (covers mkv/avi/flv/ts where the webview decoder fails); requires
+  `CREATE_NO_WINDOW` on spawn (windows_subsystem="windows") and
+  `tauri-plugin-shell` + `shell:allow-execute` (sidecar scope).
+- Cargo profile gotchas: `opt-level = "s"` → add
+  `[profile.release.package.sherpa-onnx-sys] opt-level = 3`; `panic = "abort"`
+  → ZERO unwrap()/expect() in the inference path (a panic kills the app).
+- Translation: reuse `@danmaku-anywhere/danmaku-provider/genAi` (host already
+  CSP/capability-allowed). Batch 20-40 cues with context + numbered echo-back;
+  ALL failures silently fall back to source text (ai.ts convention). Cache as
+  `<video>.zh.srt` alongside `<video>.srt`.
+- Concurrency rules: cancel the running task on media switch; guard callbacks
+  by TASK identity not epoch (epoch guard killed the HUD once — CLAUDE.md);
+  re-check `media.path` at every await boundary; transcription and upscale
+  contend for GPU — surface it in the UI.

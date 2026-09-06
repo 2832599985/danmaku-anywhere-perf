@@ -39,8 +39,11 @@ export interface Platform {
    */
   pickVideoFiles(): Promise<PickedMedia[]>
 
-  /** Open a native/browser file picker for a danmaku file (.xml/.json/.ass). */
+  /** Open a native/browser file picker for a danmaku file (.xml/.json). */
   pickDanmakuFile(): Promise<PickedText | null>
+
+  /** Open a native/browser file picker for a subtitle file (.srt/.ass/.vtt). */
+  pickSubtitleFile(): Promise<PickedText | null>
 
   /** Convert an absolute fs path to a playable media URL (Tauri stream:// / convertFileSrc). */
   mediaUrlForPath(path: string): string

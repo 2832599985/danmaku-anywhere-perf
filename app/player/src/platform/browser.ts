@@ -1,7 +1,8 @@
 import type { PickedMedia, PickedText, Platform } from './types'
 
 const VIDEO_EXTENSIONS = 'video/*,.mp4,.m4v,.webm,.mkv,.mov,.avi,.ts,.flv,.ogv'
-const DANMAKU_EXTENSIONS = '.xml,.json,.ass,.txt'
+const DANMAKU_EXTENSIONS = '.xml,.json,.txt'
+const SUBTITLE_EXTENSIONS = '.srt,.ass,.vtt'
 
 const pickFile = (accept: string): Promise<File | null> =>
   new Promise((resolve) => {
@@ -67,6 +68,12 @@ export const browserPlatform: Platform = {
 
   async pickDanmakuFile(): Promise<PickedText | null> {
     const file = await pickFile(DANMAKU_EXTENSIONS)
+    if (!file) return null
+    return { text: await file.text(), name: file.name }
+  },
+
+  async pickSubtitleFile(): Promise<PickedText | null> {
+    const file = await pickFile(SUBTITLE_EXTENSIONS)
     if (!file) return null
     return { text: await file.text(), name: file.name }
   },

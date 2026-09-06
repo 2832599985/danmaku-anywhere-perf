@@ -100,7 +100,19 @@ export const tauriPlatform: Platform = {
     const selected = await open({
       multiple: false,
       directory: false,
-      filters: [{ name: 'Danmaku', extensions: ['xml', 'json', 'ass', 'txt'] }],
+      filters: [{ name: 'Danmaku', extensions: ['xml', 'json', 'txt'] }],
+    })
+    if (typeof selected !== 'string') return null
+    const text = await this.readTextFile(selected)
+    return { text, name: basename(selected) }
+  },
+
+  async pickSubtitleFile(): Promise<PickedText | null> {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'Subtitle', extensions: ['srt', 'ass', 'vtt'] }],
     })
     if (typeof selected !== 'string') return null
     const text = await this.readTextFile(selected)

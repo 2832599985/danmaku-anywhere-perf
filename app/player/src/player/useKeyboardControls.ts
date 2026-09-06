@@ -53,6 +53,17 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
       usePlayerStore.getState().showOsd(`${rate}×`, '▶')
     }
 
+    /** Nudge the subtitle timing offset; wraps the OSD feedback. */
+    const subtitleOffset = (deltaMs: number) => {
+      const s = usePlayerStore.getState()
+      const next = Math.max(
+        -30_000,
+        Math.min(30_000, s.subtitleSettings.offset + deltaMs)
+      )
+      s.updateSubtitleSettings({ offset: next })
+      s.showOsd(`字幕时轴 ${next >= 0 ? '+' : ''}${next}ms`, '⏱')
+    }
+
     const handler = (event: KeyboardEvent) => {
       if (
         event.defaultPrevented ||
@@ -124,6 +135,15 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
         case 'c':
           event.preventDefault()
           commands.toggleCompare()
+          break
+        case 's':
+          event.preventDefault()
+          commands.toggleSubtitles()
+          break
+        case ',':
+        case '.':
+          event.preventDefault()
+          subtitleOffset(event.key === '.' ? 100 : -100)
           break
         case '[':
           event.preventDefault()

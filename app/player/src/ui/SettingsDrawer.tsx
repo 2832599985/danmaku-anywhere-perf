@@ -30,6 +30,8 @@ const SHORTCUTS: Array<{
   { key: '[ ]', zh: '上一集下一集', en: 'PREV/NEXT' },
   { key: 'U', zh: '超分开关', en: 'UPSCALE' },
   { key: 'C', zh: '增强对比', en: 'COMPARE' },
+  { key: 'S', zh: '字幕开关', en: 'SUBTITLE' },
+  { key: ', .', zh: '字幕时轴±100ms', en: 'SUB OFFSET' },
 ]
 
 interface StepperCardProps {
