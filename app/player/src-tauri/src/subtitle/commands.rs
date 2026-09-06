@@ -199,10 +199,11 @@ fn resolve_models(app: &AppHandle) -> Result<(AsrModel, std::path::PathBuf), Str
 }
 
 /// The STREAMING pipeline: ffmpeg extracts 30 s segments in the background
-/// while each ready segment is VAD-segmented + recognized immediately and its
-/// cues are pushed as Partial events. First subtitles appear as soon as the
-/// FIRST segment is extracted (a couple of seconds), not after the whole
-/// episode. Every step checks the cancel flag.
+/// while each ready segment is pushed into ONE streaming VAD + recognizer and
+/// its completed cues are Partial-evented. One VAD instance sees the entire
+/// episode, so speech spanning an extraction boundary stays a single cue
+/// (per-file VADs cut sentences in half at every 30 s mark). Every step
+/// checks the cancel flag.
 fn run_pipeline(
     app: &AppHandle,
     path: &str,
@@ -214,7 +215,8 @@ fn run_pipeline(
     // Resolve models BEFORE spawning ffmpeg so a missing model fails fast
     // with the download hint (rather than after a full extraction).
     let (asr_model, vad_model) = resolve_models(app)?;
-    let recognizer = asr::create_recognizer(&asr_model, language)?;
+    let mut transcriber =
+        asr::StreamingTranscriber::new(&asr_model, &vad_model, language, Arc::clone(cancel))?;
 
     let _ = on_event.send(SubtitleEvent::Extracting { percent: None });
     let extraction = audio::extract_audio_segmented(path, duration_secs, cancel, {
@@ -236,22 +238,11 @@ fn run_pipeline(
         if cancel.load(Ordering::Relaxed) {
             return Err(audio::CANCELLED.to_string());
         }
-        // Segment i covers [i * SEGMENT_SECS, (i+1) * SEGMENT_SECS).
-        let offset = processed as f64 * audio::SEGMENT_SECS;
-        let seg_cues = asr::transcribe_segment(
-            &seg_path,
-            &vad_model,
-            &recognizer,
-            cancel,
-            |mut cues| {
-                for cue in &mut cues {
-                    cue.start += offset;
-                    cue.end += offset;
-                }
-                let _ = on_event.send(SubtitleEvent::Partial { cues });
-            },
-        )?;
-        all_cues.extend(seg_cues);
+        let seg_cues = transcriber.push_wav(&seg_path)?;
+        if !seg_cues.is_empty() {
+            all_cues.extend(seg_cues.iter().cloned());
+            let _ = on_event.send(SubtitleEvent::Partial { cues: seg_cues });
+        }
         processed += 1;
         let percent = if total_segments > 0 {
             processed as f32 / total_segments as f32
@@ -263,6 +254,11 @@ fn run_pipeline(
     if cancel.load(Ordering::Relaxed) {
         return Err(audio::CANCELLED.to_string());
     }
-    all_cues.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+    // Trailing speech still buffered in the VAD.
+    let tail = transcriber.finish()?;
+    if !tail.is_empty() {
+        all_cues.extend(tail.iter().cloned());
+        let _ = on_event.send(SubtitleEvent::Partial { cues: tail });
+    }
     Ok(all_cues)
 }

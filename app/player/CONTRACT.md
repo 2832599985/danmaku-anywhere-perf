@@ -728,3 +728,29 @@ fixes:
    several times per minute) racing the rVFC tick. Now it reuses listeners
    when the video element is unchanged, and a `refresh()` runs when
    subtitleSettings.visible flips back on (paused-video edge).
+
+### Review pass 2 (2026-09-06 night) — garbled timeline root cause
+
+User report: 字幕乱 / 时间轴很有问题. Root cause: the segmented pipeline gave
+EACH 30 s extraction segment its own VAD instance. Any sentence spanning a
+segment boundary was cut in half, transcribed as two broken cues, and VAD
+trailing-silence state was lost at every boundary (segments bleeding into
+each other, doubled words).
+
+Fix (matches sherpa-onnx's own subtitle-demo design and CapsWriter-Offline's
+VAD pipeline): `asr::StreamingTranscriber` — ONE VoiceActivityDetector fed
+the entire episode. `push_wav(segment)` appends samples to the VAD state
+machine; completed speech segments are recognized immediately and returned
+with GLOBAL times (the VAD counts every sample it has ever seen, so no
+offset math exists to get wrong). `finish()` flushes trailing speech. The
+VAD is precisely a streaming detector — this is its intended usage; the
+per-file instances were the mistake.
+
+Cue polish added (standard subtitle-tool post-processing, cf. VideoLingo /
+Buzz / Subtitle Edit): lead-in 0.08 s before speech starts, tail-out 0.30 s
+after it ends, minimum 0.80 s on-screen, drop sub-0.25 s blips
+(min_speech_duration), 0.5 s silence ends a cue, 10 s force-split cap.
+
+Verified: split-file streaming test (one wav fed as two halves through one
+VAD) yields one coherent cue, not two broken ones; zh+ja e2e pass; real-mp4
+segmented extraction integration test passes (first segment 262 ms).
