@@ -25,17 +25,3 @@ export const zExtractTitleResponse = z.discriminatedUnion('success', [
 ])
 
 export type ExtractTitleResponse = z.infer<typeof zExtractTitleSuccessResponse>
-
-export const zTranslateSuccessResponse = zGeminiSuccessResponse.extend({
-  success: z.literal(true),
-  result: z.object({
-    lines: z.array(z.string()),
-  }),
-})
-
-export const zTranslateResponse = z.discriminatedUnion('success', [
-  zTranslateSuccessResponse,
-  zGeminiErrorResponse,
-])
-
-export type TranslateResponse = z.infer<typeof zTranslateSuccessResponse>
