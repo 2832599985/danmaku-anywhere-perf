@@ -3,12 +3,11 @@ import { usePlayerStore } from '@/store/playerStore'
 import { errorMessage } from '@/ui/shared'
 import { serializeSrt } from './format'
 import { cancelTranscribe, modelStatus, transcribe } from './native'
-import { translateCues } from './translate'
 import type { SubtitleCue } from './types'
 
 /**
- * Orchestrates "generate subtitles from audio": Rust transcribe → optional
- * built-in-AI translation → mount + cache to disk (<video>.srt / <video>.zh.srt).
+ * Orchestrates "generate Chinese subtitles from audio": Rust transcribe →
+ * stream cues to the layer as they arrive → cache to disk (<video>.srt).
  *
  * Every await boundary re-checks that the same video is still playing (the
  * store's stt state is reset on media switch, so stale writes must be
@@ -17,10 +16,7 @@ import type { SubtitleCue } from './types'
  */
 
 /** Session cache of generated tracks per video path. Disk is the durable cache. */
-const cache = new Map<
-  string,
-  { source: SubtitleCue[]; zh: SubtitleCue[] | null }
->()
+const cache = new Map<string, SubtitleCue[]>()
 
 export const hasGeneratedCache = (videoPath: string): boolean =>
   cache.has(videoPath)
@@ -35,8 +31,7 @@ export const isGenerating = (): boolean =>
  */
 const runTranscribe = (
   videoPath: string,
-  duration: number | null,
-  language: 'auto' | 'ja' | 'zh'
+  duration: number | null
 ): Promise<SubtitleCue[] | null> =>
   new Promise<SubtitleCue[] | null>((resolve, reject) => {
     let settled = false
@@ -45,7 +40,7 @@ const runTranscribe = (
       settled = true
       fn()
     }
-    void transcribe(videoPath, duration, language, (event) => {
+    void transcribe(videoPath, duration, (event) => {
       // A media switch invalidates the run; stop the Rust side now.
       if (usePlayerStore.getState().media?.path !== videoPath) {
         void cancelTranscribe()
@@ -62,19 +57,17 @@ const runTranscribe = (
           break
         case 'partial': {
           // Streaming subtitles: append recognized cues to the mounted track
-          // while inference keeps running (Quark-style segment-by-segment).
-          // Keep appending unless the user mounted an explicit file meanwhile.
+          // while inference keeps running. Keep appending unless the user
+          // mounted an explicit file meanwhile.
           if (
             store.subtitleSource?.kind === 'generated' ||
             store.subtitleCues.length === 0
           ) {
-            cache.set(videoPath, {
-              source: [...store.subtitleCues, ...event.cues],
-              zh: null,
-            })
-            store.setSubtitles([...store.subtitleCues, ...event.cues], {
+            const merged = [...store.subtitleCues, ...event.cues]
+            cache.set(videoPath, merged)
+            store.setSubtitles(merged, {
               label: '语音识别 · 生成中',
-              count: store.subtitleCues.length + event.cues.length,
+              count: merged.length,
               kind: 'generated',
             })
           }
@@ -101,13 +94,12 @@ const runTranscribe = (
 
 const saveSrt = async (
   videoPath: string,
-  suffix: string,
   cues: SubtitleCue[]
 ): Promise<void> => {
   const base = videoPath.replace(/\.[^./\\]+$/, '')
   try {
     await invoke('subtitle_save_srt', {
-      path: `${base}${suffix}`,
+      path: `${base}.srt`,
       contents: serializeSrt(cues),
     })
   } catch {
@@ -115,42 +107,16 @@ const saveSrt = async (
   }
 }
 
-/** Mount the cached generated track matching the current display language. */
-const mountTrack = (videoPath: string): void => {
-  const store = usePlayerStore.getState()
-  if (store.media?.path !== videoPath) return
-  const tracks = cache.get(videoPath)
-  if (!tracks) return
-  const zh = tracks.zh
-  const cues =
-    store.subtitleSettings.displayLanguage === 'zh' && zh ? zh : tracks.source
-  store.setSubtitles(cues, {
-    label: cues === zh ? '语音识别 · 中文' : '语音识别',
-    count: cues.length,
-    kind: 'generated',
-  })
-}
-
-/** Re-mount the generated track after a displayLanguage flip. */
-export const remountGeneratedTrack = (): void => {
-  const store = usePlayerStore.getState()
-  const path = store.media?.path
-  if (!path) return
-  if (store.subtitleSource?.kind !== 'generated') return
-  mountTrack(path)
-}
-
 export const startGeneration = async (): Promise<void> => {
   const store = usePlayerStore.getState()
   const videoPath = store.media?.path
   if (!videoPath || store.sttStatus !== 'idle') return
-  const { sourceLanguage, autoTranslate } = store.subtitleSettings
   const rawDuration = store.playback.duration
   const duration = Number.isFinite(rawDuration) ? rawDuration : null
 
   // Model pre-flight: without SenseVoice the Rust side fails anyway — check
   // up front and route the user straight to the download UI instead of a
-  // silent failure (bug: 生成字幕 was clickable with no model installed).
+  // silent failure.
   try {
     const statuses = await modelStatus()
     const senseVoice = statuses.find((m) => m.id === 'sensevoice-int8')
@@ -167,52 +133,23 @@ export const startGeneration = async (): Promise<void> => {
   store.setSttError(null)
   store.setSttStatus('extracting', 0)
   try {
-    const cues = await runTranscribe(videoPath, duration, sourceLanguage)
+    const cues = await runTranscribe(videoPath, duration)
     const after = usePlayerStore.getState()
     if (after.media?.path !== videoPath) return
     if (!cues) {
       after.setSttStatus('idle') // cancelled
       return
     }
-    cache.set(videoPath, { source: cues, zh: null })
-    mountTrack(videoPath)
-    void saveSrt(videoPath, '.srt', cues)
-
-    // Translation need: cross-language audio (ja) + autoTranslate on. Chinese
-    // audio is already the display language — no point round-tripping it
-    // through the translator.
-    const needsZh = autoTranslate && cues.length > 0 && sourceLanguage !== 'zh'
-    if (needsZh) {
-      after.setSttStatus('translating', 0)
-      const zh = await translateCues(cues, ({ done, total }) => {
-        const s = usePlayerStore.getState()
-        if (s.media?.path === videoPath) s.setSttProgress(done / total)
-      })
-      if (usePlayerStore.getState().media?.path !== videoPath) return
-      // translateCues falls back to SOURCE text per-batch on failure; detect
-      // a wholesale failure (nothing actually translated) so the UI can say
-      // so instead of silently showing untranslated text as if it worked.
-      const anyTranslated = zh.some((cue, i) => cue.text !== cues[i]?.text)
-      if (!anyTranslated) {
-        usePlayerStore.getState().showOsd('翻译服务不可用 · 显示原文', '🌐')
-      } else {
-        cache.set(videoPath, { source: cues, zh })
-        // Auto-follow: the user asked for a Chinese track; flip the display
-        // language to zh once the translation lands (mountTrack honors it).
-        if (
-          usePlayerStore.getState().subtitleSettings.displayLanguage !== 'zh'
-        ) {
-          usePlayerStore.getState().updateSubtitleSettings({
-            displayLanguage: 'zh',
-          })
-        } else {
-          mountTrack(videoPath)
-        }
-        void saveSrt(videoPath, '.zh.srt', zh)
-      }
+    cache.set(videoPath, cues)
+    after.setSubtitles(cues, {
+      label: '语音识别',
+      count: cues.length,
+      kind: 'generated',
+    })
+    void saveSrt(videoPath, cues)
+    if (usePlayerStore.getState().media?.path === videoPath) {
+      usePlayerStore.getState().setSttStatus('idle')
     }
-    const final = usePlayerStore.getState()
-    if (final.media?.path === videoPath) final.setSttStatus('idle')
   } catch (error) {
     const s = usePlayerStore.getState()
     if (s.media?.path !== videoPath) return
@@ -220,7 +157,7 @@ export const startGeneration = async (): Promise<void> => {
     s.setSttError(message)
     s.setSttStatus('idle')
     // The capsule disappears when idle — surface failures via OSD too or
-    // they are invisible (bug: silent failure with no model installed).
+    // they are invisible.
     s.showOsd(`字幕生成失败: ${message.slice(0, 60)}`, '⚠')
   }
 }

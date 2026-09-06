@@ -13,7 +13,6 @@ export type TranscribeEvent =
   | { type: 'transcribing'; percent: number }
   /** incremental cues: mount while inference continues (streaming subtitles) */
   | { type: 'partial'; cues: SubtitleCue[] }
-  | { type: 'translating'; percent: number }
   | { type: 'done'; cues: SubtitleCue[] }
   | { type: 'cancelled' }
   | { type: 'failed'; message: string }
@@ -38,13 +37,11 @@ export interface ModelStatus {
 export const transcribe = (
   path: string,
   durationSecs: number | null,
-  language: 'auto' | 'ja' | 'zh',
   onEvent: (event: TranscribeEvent) => void
 ): Promise<void> =>
   invoke('subtitle_transcribe', {
     path,
     durationSecs,
-    language,
     onEvent: new Channel<TranscribeEvent>(onEvent),
   })
 

@@ -9,24 +9,7 @@ import {
 } from '@/subtitle/generate'
 import { downloadModel, type ModelStatus, modelStatus } from '@/subtitle/native'
 import { GREEN, INK, LINE_STRONG, MONO, PAPER, VERMILION } from '@/theme/theme'
-import {
-  InkLabeledSlider,
-  type InkOption,
-  InkSection,
-  InkSwitch,
-  InkToggleGroup,
-} from './ink'
-
-const LANGUAGE_OPTIONS: InkOption<'auto' | 'ja' | 'zh'>[] = [
-  { value: 'auto', label: '自动' },
-  { value: 'ja', label: '日语' },
-  { value: 'zh', label: '中文' },
-]
-
-const DISPLAY_OPTIONS: InkOption<'source' | 'zh'>[] = [
-  { value: 'source', label: '原文' },
-  { value: 'zh', label: '中文' },
-]
+import { InkLabeledSlider, InkSection, InkSwitch } from './ink'
 
 export const SubtitleSettings = () => {
   const subtitle = usePlayerStore((s) => s.subtitleSettings)
@@ -72,15 +55,11 @@ export const SubtitleSettings = () => {
     <Stack spacing={2.5}>
       <InkSection zh="显示" en="DISPLAY">
         <Stack spacing={1.5}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Box sx={{ flex: 1 }}>
-              <InkSwitch
-                checked={subtitle.visible}
-                onChange={(checked) => update({ visible: checked })}
-                label="显示字幕"
-              />
-            </Box>
-          </Box>
+          <InkSwitch
+            checked={subtitle.visible}
+            onChange={(checked) => update({ visible: checked })}
+            label="显示字幕"
+          />
           <InkLabeledSlider
             zh="字号"
             en="FONT SIZE"
@@ -192,25 +171,6 @@ export const SubtitleSettings = () => {
               )}
             </Box>
           )}
-          <InkSection zh="音源语言" en="SOURCE LANGUAGE">
-            <InkToggleGroup
-              options={LANGUAGE_OPTIONS}
-              value={subtitle.sourceLanguage}
-              onChange={(value) => update({ sourceLanguage: value })}
-            />
-          </InkSection>
-          <InkSwitch
-            checked={subtitle.autoTranslate}
-            onChange={(checked) => update({ autoTranslate: checked })}
-            label="生成后自动翻译成中文（内置 AI）"
-          />
-          <InkSection zh="显示语言" en="DISPLAY LANGUAGE">
-            <InkToggleGroup
-              options={DISPLAY_OPTIONS}
-              value={subtitle.displayLanguage}
-              onChange={(value) => update({ displayLanguage: value })}
-            />
-          </InkSection>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <Button
               variant="outlined"
@@ -229,7 +189,7 @@ export const SubtitleSettings = () => {
               }}
             >
               {generating
-                ? `取消（${sttStatus === 'extracting' ? '音频' : sttStatus === 'transcribing' ? '识别' : '翻译'} ${Math.round(sttProgress * 100)}%）`
+                ? `取消（${sttStatus === 'extracting' ? '音频' : '识别'} ${Math.round(sttProgress * 100)}%）`
                 : '为本片生成字幕'}
             </Button>
           </Box>

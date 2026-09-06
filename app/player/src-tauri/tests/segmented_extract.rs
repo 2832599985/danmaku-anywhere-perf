@@ -54,3 +54,35 @@ fn segmented_extraction_streams() {
         "first segment too late — streaming broken"
     );
 }
+
+/// Cold-start budget regression: spawn ffmpeg → first segment ready must be
+/// well under the 5 s user-facing first-subtitle budget (the remaining budget
+/// goes to model load ~1-2 s + first decode <1 s). SKIPPED without the env var.
+#[test]
+fn cold_start_first_segment_under_3s() {
+    let Ok(mp4) = std::env::var("SHERPA_TEST_MP4") else {
+        return;
+    };
+    let cancel = Arc::new(AtomicBool::new(false));
+    let start = Instant::now();
+
+    let extraction =
+        audio::extract_audio_segmented(&mp4, Some(919.0), &cancel, |_| {})
+            .expect("spawn extraction");
+    let first = extraction
+        .next_segment()
+        .expect("extraction ended before first segment")
+        .expect("first segment errored");
+
+    let elapsed = start.elapsed();
+    println!("cold start spawn->first segment: {elapsed:?}");
+    assert!(
+        first.is_file(),
+        "announced segment file missing: {}",
+        first.display()
+    );
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "cold start took {elapsed:?} — first subtitles would miss the 5 s budget"
+    );
+}

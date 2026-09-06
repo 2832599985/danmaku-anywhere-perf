@@ -734,11 +734,7 @@ export const Controls = ({ visible }: ControlsProps) => {
                 component="span"
                 sx={{ fontSize: 12, fontWeight: 700, color: PAPER }}
               >
-                {sttStatus === 'extracting'
-                  ? '提取音频'
-                  : sttStatus === 'transcribing'
-                    ? '语音识别'
-                    : '翻译中'}{' '}
+                {sttStatus === 'extracting' ? '提取音频' : '语音识别'}{' '}
                 {Math.round(sttProgress * 100)}%
               </Box>
             </Box>

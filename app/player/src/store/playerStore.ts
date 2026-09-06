@@ -18,7 +18,7 @@ import {
 
 export type UpscaleStatus = 'idle' | 'initializing' | 'active' | 'error'
 export type InterpolationStatus = 'off' | 'active' | 'fallback'
-export type SttStatus = 'idle' | 'extracting' | 'transcribing' | 'translating'
+export type SttStatus = 'idle' | 'extracting' | 'transcribing'
 
 /** Playlist item: a queued media file. */
 export interface PlaylistItem {

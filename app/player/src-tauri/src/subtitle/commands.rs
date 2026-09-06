@@ -39,9 +39,6 @@ pub enum SubtitleEvent {
     /// incremental cues: mount these on screen while inference continues
     /// (streamed every few segments so subtitles appear within seconds)
     Partial { cues: Vec<Cue> },
-    /// translation pass — optional, only when translating
-    #[allow(dead_code)]
-    Translating { percent: f32 },
     /// pipeline finished; full cue list (sorted by start)
     Done { cues: Vec<Cue> },
     /// task was cancelled by the user or a media switch
@@ -96,7 +93,6 @@ pub fn subtitle_transcribe(
     app: AppHandle,
     path: String,
     duration_secs: Option<f64>,
-    language: Option<String>,
     on_event: Channel<SubtitleEvent>,
 ) -> Result<(), String> {
     if path.trim().is_empty() {
@@ -111,14 +107,7 @@ pub fn subtitle_transcribe(
     // (ffmpeg spawn/wait, model inference) happens on this thread so the IPC
     // reply is never held.
     std::thread::spawn(move || {
-        let result = run_pipeline(
-            &app,
-            &path,
-            duration_secs,
-            language.as_deref().unwrap_or("auto"),
-            &on_event,
-            &cancel,
-        );
+        let result = run_pipeline(&app, &path, duration_secs, &on_event, &cancel);
         let registry: State<TaskRegistry> = app.state();
         registry.end();
         let event = match result {
@@ -204,20 +193,19 @@ fn resolve_models(app: &AppHandle) -> Result<(AsrModel, std::path::PathBuf), Str
 /// episode, so speech spanning an extraction boundary stays a single cue
 /// (per-file VADs cut sentences in half at every 30 s mark). Every step
 /// checks the cancel flag.
+///
+/// COLD-START BUDGET (≤5 s to first cue): ffmpeg is spawned FIRST — segment
+/// extraction (IO) runs concurrently with model loading (CPU), so by the
+/// time the ~1-2 s SenseVoice load finishes, the first 30 s segment is
+/// already on disk; the first cue lands at model-load + first-segment-decode.
 fn run_pipeline(
     app: &AppHandle,
     path: &str,
     duration_secs: Option<f64>,
-    language: &str,
     on_event: &Channel<SubtitleEvent>,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<Cue>, String> {
-    // Resolve models BEFORE spawning ffmpeg so a missing model fails fast
-    // with the download hint (rather than after a full extraction).
-    let (asr_model, vad_model) = resolve_models(app)?;
-    let mut transcriber =
-        asr::StreamingTranscriber::new(&asr_model, &vad_model, language, Arc::clone(cancel))?;
-
+    // 1. Spawn ffmpeg immediately (extraction proceeds on its own thread).
     let _ = on_event.send(SubtitleEvent::Extracting { percent: None });
     let extraction = audio::extract_audio_segmented(path, duration_secs, cancel, {
         let on_event = on_event.clone();
@@ -226,6 +214,12 @@ fn run_pipeline(
         }
     })?;
     let total_segments = extraction.total.unwrap_or(0);
+
+    // 2. Load the models while ffmpeg extracts (fixed Chinese recognition —
+    // the scoped feature is zh-audio → zh-subtitles).
+    let (asr_model, vad_model) = resolve_models(app)?;
+    let mut transcriber =
+        asr::StreamingTranscriber::new(&asr_model, &vad_model, "zh", Arc::clone(cancel))?;
 
     let _ = on_event.send(SubtitleEvent::Transcribing { percent: 0.0 });
     let mut all_cues: Vec<Cue> = Vec::new();

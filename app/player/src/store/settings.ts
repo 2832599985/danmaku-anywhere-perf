@@ -96,13 +96,6 @@ export interface DanmakuSettings {
 /** How the player handles detected OP/ED segments. */
 export type SkipOpEdMode = 'auto' | 'ask' | 'off'
 
-/** Which recognition engine local speech-to-text uses. */
-export type SubtitleEngine = 'sensevoice' | 'whisper'
-/** Language fed to recognition ('auto' lets the engine decide). */
-export type SubtitleSourceLanguage = 'auto' | 'ja' | 'zh'
-/** What the subtitle layer shows: the transcription or a Chinese translation. */
-export type SubtitleDisplayLanguage = 'source' | 'zh'
-
 export interface SubtitleSettings {
   /** master switch; hides the layer without dropping mounted cues. */
   visible: boolean
@@ -116,16 +109,6 @@ export interface SubtitleSettings {
   opacity: number
   /** ink outline + hard shadow behind the paper-colored text. */
   outline: boolean
-  /** recognition engine used when generating subtitles from audio. */
-  engine: SubtitleEngine
-  /** language of the audio source fed to recognition. */
-  sourceLanguage: SubtitleSourceLanguage
-  /** what the layer displays: transcription or the translated Chinese track. */
-  displayLanguage: SubtitleDisplayLanguage
-  /** translate generated cues to Chinese with the built-in AI (ja→zh). */
-  autoTranslate: boolean
-  /** prefer GPU inference when available (falls back to CPU). */
-  useGpu: boolean
 }
 
 export interface PlaybackSettings {
@@ -196,11 +179,6 @@ export const DEFAULT_SUBTITLE: SubtitleSettings = {
   bottom: 6,
   opacity: 1,
   outline: true,
-  engine: 'sensevoice',
-  sourceLanguage: 'auto',
-  displayLanguage: 'source',
-  autoTranslate: true,
-  useGpu: false,
 }
 
 export const DEFAULT_SETTINGS: Settings = {

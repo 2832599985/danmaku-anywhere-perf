@@ -754,3 +754,30 @@ after it ends, minimum 0.80 s on-screen, drop sub-0.25 s blips
 Verified: split-file streaming test (one wav fed as two halves through one
 VAD) yields one coherent cue, not two broken ones; zh+ja e2e pass; real-mp4
 segmented extraction integration test passes (first segment 262 ms).
+
+### Scope cut (2026-09-06 late) — zh-only, no translation, cold-start focus
+
+User decision: the feature is CHINESE audio → Chinese subtitles only. All
+translation infrastructure was REMOVED (not feature-flagged):
+
+- backend/proxy: /llm/v1/translate endpoint, translate prompt/config, the
+  shared generateWithGemini refactor — reverted to extractTitle-only (the
+  worker never shipped the endpoint, so nothing deployed changes).
+- danmaku-provider/genAi: translateLines + zTranslate* removed.
+- player: subtitle/translate.ts deleted; generate.ts is a straight
+  transcribe→stream→cache(.srt) flow; SubtitleSettings slimmed to display +
+  timing + model download (engine/sourceLanguage/displayLanguage/autoTranslate/
+  useGpu fields dropped — persisted merges ignore stale fields, old configs
+  survive); Controls capsule: 提取音频/语音识别 states only.
+- Rust: subtitle_transcribe drops the language arg, pipeline hardcodes
+  SenseVoice language "zh" (more accurate than auto for the zh-only scope).
+
+Cold start: ffmpeg now spawns BEFORE model resolution, so extraction (IO)
+overlaps the ~1-2 s model load. Measured spawn→first-segment: 277 ms
+(regression test cold_start_first_segment_under_3s, env SHERPA_TEST_MP4);
+first cue lands well inside the 5 s budget.
+
+Seek following (unchanged, verified design): SubtitleController listens to
+`seeked` → binary-search re-anchor → immediate refresh; both progress-bar
+drags and ArrowLeft/Right (which assign video.currentTime) hit that path
+synchronously. Playback is frame-calibrated via rVFC.
