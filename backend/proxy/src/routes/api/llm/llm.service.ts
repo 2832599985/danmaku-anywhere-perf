@@ -3,19 +3,19 @@ import {
   GoogleGenerativeAI,
 } from '@google/generative-ai'
 
-type GenerateParams = {
+type ExtractTitleParams = {
   env: Env
   input: string
   systemInstruction: string
   generationConfig: GenerationConfig
 }
 
-async function generateWithGemini({
+export async function extractTitleWithGemini({
   env,
   input,
   systemInstruction,
   generationConfig,
-}: GenerateParams) {
+}: ExtractTitleParams) {
   const GEMINI_API_KEY = await env.DANMAKU_GEMINI_API_KEY.get()
   const DA_AI_GATEWAY_NAME = await env.DA_AI_GATEWAY_NAME.get()
   const DA_AI_GATEWAY_ID = await env.DA_AI_GATEWAY_ID.get()
@@ -40,12 +40,4 @@ async function generateWithGemini({
   const result = await session.sendMessage(input)
 
   return JSON.parse(result.response.text())
-}
-
-export function extractTitleWithGemini(params: GenerateParams) {
-  return generateWithGemini(params)
-}
-
-export function translateLinesWithGemini(params: GenerateParams) {
-  return generateWithGemini(params)
 }
