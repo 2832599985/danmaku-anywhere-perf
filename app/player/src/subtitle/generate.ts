@@ -178,16 +178,38 @@ export const startGeneration = async (): Promise<void> => {
     mountTrack(videoPath)
     void saveSrt(videoPath, '.srt', cues)
 
-    if (autoTranslate && cues.length) {
+    // Translation need: cross-language audio (ja) + autoTranslate on. Chinese
+    // audio is already the display language — no point round-tripping it
+    // through the translator.
+    const needsZh = autoTranslate && cues.length > 0 && sourceLanguage !== 'zh'
+    if (needsZh) {
       after.setSttStatus('translating', 0)
       const zh = await translateCues(cues, ({ done, total }) => {
         const s = usePlayerStore.getState()
         if (s.media?.path === videoPath) s.setSttProgress(done / total)
       })
       if (usePlayerStore.getState().media?.path !== videoPath) return
-      cache.set(videoPath, { source: cues, zh })
-      mountTrack(videoPath)
-      void saveSrt(videoPath, '.zh.srt', zh)
+      // translateCues falls back to SOURCE text per-batch on failure; detect
+      // a wholesale failure (nothing actually translated) so the UI can say
+      // so instead of silently showing untranslated text as if it worked.
+      const anyTranslated = zh.some((cue, i) => cue.text !== cues[i]?.text)
+      if (!anyTranslated) {
+        usePlayerStore.getState().showOsd('翻译服务不可用 · 显示原文', '🌐')
+      } else {
+        cache.set(videoPath, { source: cues, zh })
+        // Auto-follow: the user asked for a Chinese track; flip the display
+        // language to zh once the translation lands (mountTrack honors it).
+        if (
+          usePlayerStore.getState().subtitleSettings.displayLanguage !== 'zh'
+        ) {
+          usePlayerStore.getState().updateSubtitleSettings({
+            displayLanguage: 'zh',
+          })
+        } else {
+          mountTrack(videoPath)
+        }
+        void saveSrt(videoPath, '.zh.srt', zh)
+      }
     }
     const final = usePlayerStore.getState()
     if (final.media?.path === videoPath) final.setSttStatus('idle')
