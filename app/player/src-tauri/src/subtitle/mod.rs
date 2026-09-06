@@ -10,5 +10,7 @@
 //! checked between pipeline steps and inside the ffmpeg output loop; a cancel
 //! kills the child process and cleans up temp files.
 
+pub mod asr;
 pub mod audio;
 pub mod commands;
+pub mod models;

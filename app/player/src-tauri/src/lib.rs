@@ -1,7 +1,10 @@
 mod stream;
 mod subtitle;
 
-use subtitle::commands::{subtitle_cancel, subtitle_transcribe, TaskRegistry};
+use subtitle::commands::{
+    subtitle_cancel, subtitle_model_download, subtitle_model_status,
+    subtitle_transcribe, TaskRegistry,
+};
 
 /// Builds and runs the Tauri desktop application.
 ///
@@ -22,6 +25,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             subtitle_transcribe,
             subtitle_cancel,
+            subtitle_model_status,
+            subtitle_model_download,
         ])
         // Async variant so large-file range reads happen off the UI thread.
         .register_asynchronous_uri_scheme_protocol("stream", |_ctx, request, responder| {

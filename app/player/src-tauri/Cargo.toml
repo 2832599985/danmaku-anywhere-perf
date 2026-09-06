@@ -29,6 +29,21 @@ serde_json = "1"
 # Percent-decodes the absolute file path carried in `stream://` URLs.
 urlencoding = "2"
 
+# --- subtitle speech-to-text pipeline (src/subtitle/) ---
+# Offline ASR (SenseVoice/Whisper) + silero VAD over onnxruntime. The build
+# script fetches a prebuilt static sherpa-onnx library for the target; set
+# SHERPA_ONNX_LIB_DIR to point at a local one in offline/CI environments.
+sherpa-onnx = "1.13"
+# WAV reading for the extracted 16 kHz mono audio.
+hound = "3.5"
+# Model download (default features = rustls TLS; no OpenSSL dependency on Windows).
+ureq = "2"
+# SenseVoice ships as tar.bz2 release assets.
+tar = "0.4"
+bzip2 = "0.5"
+# Archive integrity gate before extraction.
+sha2 = "0.10"
+
 # Sensible release optimizations (smaller, faster binary).
 [profile.release]
 codegen-units = 1

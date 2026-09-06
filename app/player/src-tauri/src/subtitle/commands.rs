@@ -10,13 +10,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
 use tauri::ipc::Channel;
+use tauri::{AppHandle, Manager, State};
 
+use super::asr::{self, AsrModel};
 use super::audio;
+use super::models::{self, DownloadEvent, ModelStatus};
 
 /// One timed subtitle line (matches the frontend `SubtitleCue` shape).
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct Cue {
     /// seconds from video start
     pub start: f64,
@@ -92,6 +94,7 @@ pub fn subtitle_transcribe(
     app: AppHandle,
     path: String,
     duration_secs: Option<f64>,
+    language: Option<String>,
     on_event: Channel<SubtitleEvent>,
 ) -> Result<(), String> {
     if path.trim().is_empty() {
@@ -106,7 +109,14 @@ pub fn subtitle_transcribe(
     // (ffmpeg spawn/wait, model inference) happens on this thread so the IPC
     // reply is never held.
     std::thread::spawn(move || {
-        let result = run_pipeline(&path, duration_secs, &on_event, &cancel);
+        let result = run_pipeline(
+            &app,
+            &path,
+            duration_secs,
+            language.as_deref().unwrap_or("auto"),
+            &on_event,
+            &cancel,
+        );
         let registry: State<TaskRegistry> = app.state();
         registry.end();
         let event = match result {
@@ -126,25 +136,86 @@ pub fn subtitle_cancel(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// The transcription pipeline. Stage 2 wires extraction + plumbing; the ASR
-/// step (stage 3) slots in at `asr_stage`.
+// --- model management ---
+
+#[tauri::command]
+pub fn subtitle_model_status(app: AppHandle) -> Result<Vec<ModelStatus>, String> {
+    let mut statuses = Vec::new();
+    for spec in models::downloadable_models() {
+        statuses.push(models::model_status(&app, spec)?);
+    }
+    // The VAD ships inside the app; report it as always-present.
+    statuses.push(ModelStatus {
+        id: models::SILERO_VAD_ID,
+        downloaded: true,
+        bundled: true,
+        size_bytes: 0,
+        size_label: "内置".to_string(),
+    });
+    Ok(statuses)
+}
+
+#[tauri::command]
+pub fn subtitle_model_download(
+    app: AppHandle,
+    id: String,
+    on_event: Channel<DownloadEvent>,
+) -> Result<(), String> {
+    let spec = models::spec_by_id(&id).ok_or_else(|| format!("未知模型: {id}"))?;
+    // Downloads are independent of the transcription single-flight (fetching a
+    // model while a task runs is harmless); no registry interaction.
+    std::thread::spawn(move || {
+        let result = models::download_model(&app, spec, &on_event);
+        if let Err(message) = result {
+            let _ = on_event.send(DownloadEvent::Failed { message });
+        }
+    });
+    Ok(())
+}
+
+/// Resolve the installed models the pipeline needs, or explain what's missing.
+fn resolve_models(app: &AppHandle) -> Result<(AsrModel, std::path::PathBuf), String> {
+    let sense = models::resolve_pipeline_models(app)?;
+    let tokens = sense.tokens.ok_or("SenseVoice tokens.txt 缺失")?;
+    let asr = AsrModel {
+        model: sense.model,
+        tokens,
+    };
+    let vad = models::vad_model_path(app)?;
+    Ok((asr, vad))
+}
+
+/// The transcription pipeline: ffmpeg audio extraction → VAD segmentation →
+/// SenseVoice inference → cues. Every step checks the cancel flag.
 fn run_pipeline(
+    app: &AppHandle,
     path: &str,
     duration_secs: Option<f64>,
+    language: &str,
     on_event: &Channel<SubtitleEvent>,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<Cue>, String> {
     let _ = on_event.send(SubtitleEvent::Extracting { percent: None });
     // Keep the WAV alive for the whole pipeline; Drop cleans it up.
-    let _audio = audio::extract_audio(path, duration_secs, cancel, |percent| {
-        let _ = on_event.send(SubtitleEvent::Extracting { percent });
-    })?;
+    let extracted =
+        audio::extract_audio(path, duration_secs, cancel, |percent| {
+            let _ = on_event.send(SubtitleEvent::Extracting { percent });
+        })?;
     if cancel.load(Ordering::Relaxed) {
         return Err(audio::CANCELLED.to_string());
     }
 
-    // TODO(stage 3): Silero-VAD segmentation + sherpa-onnx SenseVoice/Whisper
-    // inference over `_audio.path`, emitting Transcribing percent events.
+    let (asr_model, vad_model) = resolve_models(app)?;
 
-    Ok(Vec::new())
+    let _ = on_event.send(SubtitleEvent::Transcribing { percent: 0.0 });
+    asr::transcribe_wav(
+        &extracted.path,
+        &asr_model,
+        &vad_model,
+        language,
+        cancel,
+        |percent| {
+            let _ = on_event.send(SubtitleEvent::Transcribing { percent });
+        },
+    )
 }
