@@ -7,9 +7,13 @@ import { useLLMLogger } from '@/routes/api/llm/middleware/llmLogger'
 import {
   handleExtractTitle,
   handleExtractTitleLegacy,
+  handleTranslate,
   validateTitleInputOpenApi,
+  validateTranslateInputOpenApi,
 } from './llm.controller'
 import {
+  translateGenerationConfig,
+  translatePrompt,
   v1GenerationConfig,
   v1Prompt,
   v2GenerationConfig,
@@ -62,4 +66,34 @@ llm.post(
   }),
   validateTitleInputOpenApi,
   handleExtractTitle(v2Prompt, v2GenerationConfig)
+)
+
+llm.post(
+  '/translate',
+  describeRoute({
+    description:
+      'Translate subtitle lines into Simplified Chinese. Input lines map 1:1 to output lines.',
+    responses: {
+      200: {
+        description: 'Successful translation',
+        content: {
+          'application/json': {
+            schema: resolver(
+              z.object({
+                success: z.boolean(),
+                result: z.object({
+                  lines: z.array(z.string()),
+                }),
+              })
+            ),
+          },
+        },
+      },
+      429: {
+        description: 'Rate limit exceeded',
+      },
+    },
+  }),
+  validateTranslateInputOpenApi,
+  handleTranslate(translatePrompt, translateGenerationConfig)
 )

@@ -71,3 +71,29 @@ export const v2GenerationConfig: GenerationConfig = {
     },
   },
 }
+
+export const translatePrompt = `You are a professional subtitle translator for anime content. Translate each numbered input line into natural, conversational Simplified Chinese (简体中文) suitable for subtitles.
+Rules:
+- Output exactly one translated line per input line, in the same order. Line i of the output corresponds to line i of the input.
+- Japanese, English and other languages are translated into Simplified Chinese. Lines that are already Simplified Chinese pass through unchanged.
+- Keep translations concise and idiomatic; do not add explanations, quotation marks, or numbering of your own.
+- Keep character names consistent across lines.
+- If a line is purely a sound or exclamation, translate it naturally (e.g. あー → 啊).`
+
+export const translateGenerationConfig: GenerationConfig = {
+  temperature: 0.3,
+  maxOutputTokens: 8192,
+  responseMimeType: 'application/json',
+  responseSchema: {
+    type: SchemaType.OBJECT,
+    properties: {
+      lines: {
+        type: SchemaType.ARRAY,
+        items: {
+          type: SchemaType.STRING,
+        },
+      },
+    },
+    required: ['lines'],
+  },
+}
