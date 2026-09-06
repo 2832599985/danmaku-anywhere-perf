@@ -3,7 +3,7 @@ mod subtitle;
 
 use subtitle::commands::{
     subtitle_cancel, subtitle_model_download, subtitle_model_status,
-    subtitle_transcribe, TaskRegistry,
+    subtitle_save_srt, subtitle_transcribe, TaskRegistry,
 };
 
 /// Builds and runs the Tauri desktop application.
@@ -27,6 +27,7 @@ pub fn run() {
             subtitle_cancel,
             subtitle_model_status,
             subtitle_model_download,
+            subtitle_save_srt,
         ])
         // Async variant so large-file range reads happen off the UI thread.
         .register_asynchronous_uri_scheme_protocol("stream", |_ctx, request, responder| {

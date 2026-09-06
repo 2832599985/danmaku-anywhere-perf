@@ -1,9 +1,11 @@
 import { alpha, Box, Menu, MenuItem } from '@mui/material'
 import { useMemo, useRef, useState } from 'react'
+import { getPlatform } from '@/platform'
 import { usePlayerCommands } from '@/player/commands'
 import { useOpEdMarks } from '@/player/useOpEdMarks'
 import { usePlayerStore } from '@/store/playerStore'
 import type { TargetResolution } from '@/store/settings'
+import { cancelGeneration, startGeneration } from '@/subtitle/generate'
 import {
   GOLD,
   INK,
@@ -53,6 +55,22 @@ const squareSx = {
   '&:disabled:hover': { background: 'transparent', color: PAPER },
 } as const
 
+/** Pill-shaped status capsule (danmaku/subtitle/upscale buttons share it). */
+const capsuleSx = {
+  appearance: 'none',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  padding: '8px 12px',
+  fontSize: 13,
+  fontWeight: 700,
+  cursor: 'pointer',
+  flexShrink: 0,
+  whiteSpace: 'nowrap',
+  color: PAPER,
+  transition: 'background-color 100ms steps(1), color 100ms steps(1)',
+} as const
+
 interface ControlsProps {
   /** When false, the bar fades and slides out (parent owns the hide timer). */
   visible: boolean
@@ -72,6 +90,11 @@ export const Controls = ({ visible }: ControlsProps) => {
   const upscale = usePlayerStore((s) => s.upscale)
   const upscaleStatus = usePlayerStore((s) => s.upscaleStatus)
   const openSettingsAt = usePlayerStore((s) => s.openSettingsAt)
+  const subtitleSource = usePlayerStore((s) => s.subtitleSource)
+  const sttStatus = usePlayerStore((s) => s.sttStatus)
+  const sttProgress = usePlayerStore((s) => s.sttProgress)
+  const subtitleVisible = usePlayerStore((s) => s.subtitleSettings.visible)
+  const isTauri = getPlatform().isTauri
 
   const [rateAnchor, setRateAnchor] = useState<HTMLElement | null>(null)
 
@@ -683,6 +706,86 @@ export const Controls = ({ visible }: ControlsProps) => {
           >
             ≡
           </Box>
+
+          {sttStatus !== 'idle' ? (
+            <Box
+              component="button"
+              type="button"
+              aria-label="取消生成字幕 / Cancel subtitle generation"
+              title="点击取消"
+              onClick={() => void cancelGeneration()}
+              sx={{
+                ...capsuleSx,
+                border: `2px solid ${VERMILION}`,
+                background: alpha(VERMILION, 0.1),
+              }}
+            >
+              <Box
+                component="span"
+                sx={{
+                  width: 7,
+                  height: 7,
+                  background: VERMILION,
+                  borderRadius: '50%',
+                  animation: 'ink-blink 1.2s steps(1) infinite',
+                }}
+              />
+              <Box
+                component="span"
+                sx={{ fontSize: 12, fontWeight: 700, color: PAPER }}
+              >
+                {sttStatus === 'extracting'
+                  ? '提取音频'
+                  : sttStatus === 'transcribing'
+                    ? '语音识别'
+                    : '翻译中'}{' '}
+                {Math.round(sttProgress * 100)}%
+              </Box>
+            </Box>
+          ) : subtitleSource ? (
+            <>
+              <Box
+                component="button"
+                type="button"
+                onClick={() => commands.toggleSubtitles()}
+                sx={{
+                  ...capsuleSx,
+                  border: `2px solid ${subtitleVisible ? PAPER : alpha(PAPER, 0.6)}`,
+                  background: subtitleVisible ? PAPER : 'transparent',
+                  color: subtitleVisible ? INK : PAPER,
+                  '&:hover': { background: VERMILION, color: PAPER },
+                }}
+              >
+                字 字幕 {subtitleVisible ? 'ON' : 'OFF'}
+              </Box>
+              <Box
+                component="button"
+                type="button"
+                aria-label="字幕设置 / Subtitle settings"
+                onClick={() => openSettingsAt('subtitle')}
+                sx={squareSx}
+              >
+                ≡
+              </Box>
+            </>
+          ) : isTauri ? (
+            <Box
+              component="button"
+              type="button"
+              aria-label="生成字幕 / Generate subtitles"
+              title="语音识别生成字幕（本地模型）"
+              onClick={() => void startGeneration()}
+              sx={{
+                ...capsuleSx,
+                border: `2px solid ${alpha(PAPER, 0.6)}`,
+                background: 'transparent',
+                '&:hover': { background: PAPER, color: INK },
+              }}
+            >
+              字 生成字幕
+            </Box>
+          ) : null}
+
           <Box
             component="button"
             type="button"

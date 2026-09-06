@@ -18,6 +18,7 @@ import {
 
 export type UpscaleStatus = 'idle' | 'initializing' | 'active' | 'error'
 export type InterpolationStatus = 'off' | 'active' | 'fallback'
+export type SttStatus = 'idle' | 'extracting' | 'transcribing' | 'translating'
 
 /** Playlist item: a queued media file. */
 export interface PlaylistItem {
@@ -105,6 +106,14 @@ export interface PlayerStore {
   /** cue currently on screen (set by SubtitleController), -1 = none. */
   subtitleCueIndex: number
 
+  // --- speech-to-text generation (session-only) ---
+  /** pipeline stage; 'idle' = nothing running, no error. */
+  sttStatus: SttStatus
+  /** 0..1 progress within the current stage. */
+  sttProgress: number
+  /** last pipeline failure (null when idle/running). */
+  sttError: string | null
+
   // --- source HDR (detected from the decoded frame; session-only) ---
   isHdr: boolean
   hdrTransfer: string | null
@@ -153,6 +162,9 @@ export interface PlayerStore {
   clearSubtitles: () => void
   /** called by SubtitleController when the on-screen cue changes. */
   setSubtitleCueIndex: (index: number) => void
+  setSttStatus: (status: SttStatus, progress?: number) => void
+  setSttProgress: (progress: number) => void
+  setSttError: (message: string | null) => void
   /** record the detected HDR transfer ('pq'/'hlg') or null for SDR. */
   setHdr: (transfer: string | null) => void
 
@@ -230,6 +242,9 @@ function resetPlaybackForNewMedia(s: PlayerStore): void {
   s.subtitleCues = []
   s.subtitleSource = null
   s.subtitleCueIndex = -1
+  s.sttStatus = 'idle'
+  s.sttProgress = 0
+  s.sttError = null
   s.playback = {
     ...INITIAL_PLAYBACK,
     volume: s.playback.volume,
@@ -248,6 +263,10 @@ export const usePlayerStore = create<PlayerStore>()(
       subtitleCues: [],
       subtitleSource: null,
       subtitleCueIndex: -1,
+
+      sttStatus: 'idle',
+      sttProgress: 0,
+      sttError: null,
 
       isHdr: false,
       hdrTransfer: null,
@@ -318,6 +337,23 @@ export const usePlayerStore = create<PlayerStore>()(
       setSubtitleCueIndex: (index) =>
         set((s) => {
           s.subtitleCueIndex = index
+        }),
+
+      setSttStatus: (status, progress = 0) =>
+        set((s) => {
+          s.sttStatus = status
+          s.sttProgress = progress
+          if (status !== 'idle') s.sttError = null
+        }),
+
+      setSttProgress: (progress) =>
+        set((s) => {
+          s.sttProgress = progress
+        }),
+
+      setSttError: (message) =>
+        set((s) => {
+          s.sttError = message
         }),
 
       setHdr: (transfer) =>

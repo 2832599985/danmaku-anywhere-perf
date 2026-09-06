@@ -136,6 +136,17 @@ pub fn subtitle_cancel(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Persist a generated/translated subtitle file next to the video. Frontend
+/// serializes the cues; Rust writes the file (bypasses the webview's
+/// read-only fs capability). Extension-gated on purpose.
+#[tauri::command]
+pub fn subtitle_save_srt(path: String, contents: String) -> Result<(), String> {
+    if !path.to_lowercase().ends_with(".srt") {
+        return Err("只允许写入 .srt 字幕文件".to_string());
+    }
+    std::fs::write(&path, contents).map_err(|e| format!("写入字幕失败: {e}"))
+}
+
 // --- model management ---
 
 #[tauri::command]

@@ -11,9 +11,16 @@ import {
   VERMILION,
 } from '@/theme/theme'
 import { DanmakuSettings } from './DanmakuSettings'
+import { SubtitleSettings } from './SubtitleSettings'
 import { UpscaleSettings } from './UpscaleSettings'
 
-type SettingsPage = 'shortcuts' | 'playback' | 'danmaku' | 'upscale' | 'about'
+type SettingsPage =
+  | 'shortcuts'
+  | 'playback'
+  | 'danmaku'
+  | 'upscale'
+  | 'subtitle'
+  | 'about'
 
 const SHORTCUTS: Array<{
   key: string
@@ -495,6 +502,7 @@ export const SettingsDrawer = () => {
     { id: 'playback', zh: '播放' },
     { id: 'danmaku', zh: '弹幕' },
     { id: 'upscale', zh: '画质增强' },
+    { id: 'subtitle', zh: '字幕' },
     { id: 'about', zh: '关于' },
   ]
 
@@ -694,6 +702,7 @@ export const SettingsDrawer = () => {
             {page === 'playback' && <PlaybackSettingsPage />}
             {page === 'danmaku' && <DanmakuSettings />}
             {page === 'upscale' && <UpscaleSettings />}
+            {page === 'subtitle' && <SubtitleSettings />}
             {page === 'about' && <AboutPage />}
           </Box>
         </Box>

@@ -8,6 +8,7 @@ import { parseDanmakuText } from '@/danmaku/parse'
 import type { Platform } from '@/platform'
 import { type PlaylistItem, usePlayerStore } from '@/store/playerStore'
 import { parseSubtitleText } from '@/subtitle/format'
+import { remountGeneratedTrack } from '@/subtitle/generate'
 import { INK, PAPER, SANS } from '@/theme/theme'
 import { Controls } from '@/ui/Controls'
 import { DanmakuSourceDialog } from '@/ui/DanmakuSourceDialog'
@@ -252,6 +253,11 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     })
   }, [subtitleSettings.offset])
 
+  // --- displayLanguage flip -> re-mount the generated track (source/zh) ---
+  useEffect(() => {
+    remountGeneratedTrack()
+  }, [subtitleSettings.displayLanguage])
+
   // --- keep danmaku laid out correctly across container/fullscreen resizes ---
   // The danmaku engine caches the container width when tracks are created; on a
   // resize (window drag OR entering/leaving fullscreen) it must re-measure or
@@ -432,9 +438,16 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     if (!platform.isTauri || !media?.path) return
     const videoPath = media.path
     const base = videoPath.replace(/\.[^./\\]+$/, '')
+    // When the user wants Chinese, prefer a translated cache; otherwise keep
+    // the raw transcription ahead of a translated side file.
+    const zhFirst =
+      usePlayerStore.getState().subtitleSettings.displayLanguage === 'zh'
+    const suffixOrder = zhFirst
+      ? ['.zh.srt', '.srt', '.ass', '.vtt']
+      : ['.srt', '.ass', '.vtt', '.zh.srt']
     let stale = false
     void (async () => {
-      for (const suffix of ['.zh.srt', '.srt', '.ass', '.vtt']) {
+      for (const suffix of suffixOrder) {
         const candidate = `${base}${suffix}`
         let text: string
         try {

@@ -660,3 +660,41 @@ built-in genAi proxy).
   by TASK identity not epoch (epoch guard killed the HUD once — CLAUDE.md);
   re-check `media.path` at every await boundary; transcription and upscale
   contend for GPU — surface it in the UI.
+
+### Stage 3-5 landed (2026-09-06) — verified end-to-end at the unit level
+
+- **Rust pipeline complete**: `subtitle_transcribe(path, duration_secs,
+  language, on_event)` runs ffmpeg extract → Silero VAD → SenseVoice int8 on a
+  worker thread; events stream Extracting/Transcribing/Done/Failed/Cancelled
+  through a Tauri Channel. `subtitle_save_srt` (extension-gated) persists
+  cues; model status/download commands power the settings page.
+- **Models**: silero-vad.onnx is BUNDLED (`src-tauri/resources/`, in
+  `bundle.resources`, resolved via `BaseDirectory::Resource`). SenseVoice
+  int8 (~240MB) downloads through hf-mirror per-file (CN-friendly) then the
+  GitHub tar.bz2, SHA256-verified (hashes in `models.rs` computed from the
+  official 2024-07-17 release), installed to app_data_dir/models/.
+  ASR verified with the official zh/ja test wavs (`cargo test
+  transcribes_real_sample`, needs SHERPA_TEST_* env vars + 
+  SHERPA_ONNX_LIB_DIR for offline builds — see binaries/README.md).
+- **Frontend generate flow** (`src/subtitle/generate.ts`): startGeneration →
+  runTranscribe (Promise around the Channel, cancels on media switch) →
+  mountTrack + saveSrt(`<video>.srt`) → optional translateCues (40-line
+  batches, per-batch silent fallback) → saveSrt(`<video>.zh.srt`). Session
+  cache Map<path, {source, zh}> drives remount on displayLanguage flips;
+  sibling auto-load order follows displayLanguage (.zh.srt first when zh).
+- **UI**: Controls capsule (生成字幕 → 识别%/翻译% (click=cancel) → 字 ON/OFF +
+  ≡ settings); SubtitleSettings page (显示样式 sliders/switches, 时轴 offset
+  ±10s with center tick, 源语言 auto/ja/zh, 自动翻译, 显示语言 原文/中文,
+  model download with progress bar, sttError banner). Settings drawer gains
+  the 字幕 page.
+- **Store**: sttStatus ('idle'|'extracting'|'transcribing'|'translating') /
+  sttProgress / sttError, reset on media switch.
+- **Verification status**: tsc + biome + cargo check + `vite build` clean;
+  ASR unit-e2e passes. NOT yet exercised in the packaged exe (the extract →
+  VAD → decode path over a real video and the proxy /llm/v1/translate
+  deployment still need a manual run-through; the proxy must be redeployed
+  for translation to work).
+- **Stage 6 (open)**: GPU inference (needs a CUDA/Vulkan sherpa-onnx prebuilt
+  lib + provider plumbing; the shipped lib is CPU-only) and the Whisper
+  large-v3-turbo engine switch (sherpa-onnx OfflineWhisperModelConfig; the
+  `engine`/`useGpu` settings fields are defined but inert).
