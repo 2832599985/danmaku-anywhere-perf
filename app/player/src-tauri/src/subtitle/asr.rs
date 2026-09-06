@@ -26,19 +26,15 @@ pub struct AsrModel {
     pub tokens: std::path::PathBuf,
 }
 
-/// Transcribe `wav_path` into cues. `vad_model` is the installed silero-vad
-/// onnx path. `on_percent` reports 0..1 inference progress across VAD
-/// segments. `on_cues` fires with newly recognized cues every few segments so
-/// the UI can stream subtitles while inference continues (the same
-/// segment-by-segment UX Quark's player uses — same SenseVoice int8 model).
-/// Returns ALL cues.
-pub fn transcribe_wav(
+/// Transcribe ONE already-extracted 16 kHz mono WAV segment file (a
+/// fixed-length slice of the episode; the segment's start offset is added by
+/// the caller). `on_cues` fires with the segment's cues so the UI streams
+/// subtitles while extraction of later segments is still running.
+pub fn transcribe_segment(
     wav_path: &Path,
-    asr: &AsrModel,
     vad_model: &Path,
-    language: &str,
+    recognizer: &OfflineRecognizer,
     cancel: &Arc<AtomicBool>,
-    mut on_percent: impl FnMut(f32),
     mut on_cues: impl FnMut(Vec<Cue>),
 ) -> Result<Vec<Cue>, String> {
     let samples = read_wav(wav_path)?;
@@ -47,18 +43,9 @@ pub fn transcribe_wav(
         return Ok(Vec::new());
     }
 
-    let recognizer = OfflineRecognizer::create(&recognizer_config(asr, language))
-        .ok_or("初始化识别模型失败")?;
-
     const MIN_CUE_SECS: f64 = 0.2;
-    // Flush a Partial batch every N recognized segments: small enough that
-    // subtitles appear within seconds of pressing 生成, large enough not to
-    // spam the IPC channel.
-    const FLUSH_EVERY: usize = 3;
-    let total = segments.len();
-    let mut cues: Vec<Cue> = Vec::with_capacity(total);
-    let mut batch: Vec<Cue> = Vec::with_capacity(FLUSH_EVERY);
-    for (index, segment) in segments.iter().enumerate() {
+    let mut cues = Vec::with_capacity(segments.len());
+    for segment in segments.iter() {
         if cancel.load(Ordering::Relaxed) {
             return Err(super::audio::CANCELLED.to_string());
         }
@@ -71,19 +58,20 @@ pub fn transcribe_wav(
             let start = segment.start() as f64 / SAMPLE_RATE as f64;
             let end = (start + segment.samples().len() as f64 / SAMPLE_RATE as f64)
                 .max(start + MIN_CUE_SECS);
-            let cue = Cue { start, end, text };
-            cues.push(cue.clone());
-            batch.push(cue);
+            cues.push(Cue { start, end, text });
         }
-        if batch.len() >= FLUSH_EVERY {
-            on_cues(std::mem::take(&mut batch));
-        }
-        on_percent((index + 1) as f32 / total as f32);
     }
-    if !batch.is_empty() {
-        on_cues(batch);
+    if !cues.is_empty() {
+        on_cues(cues.clone());
     }
     Ok(cues)
+}
+
+/// Build a recognizer once for the whole pipeline (model load is expensive;
+/// per-segment reuse keeps streaming latency at inference-only cost).
+pub fn create_recognizer(asr: &AsrModel, language: &str) -> Result<OfflineRecognizer, String> {
+    OfflineRecognizer::create(&recognizer_config(asr, language))
+        .ok_or_else(|| "初始化识别模型失败".to_string())
 }
 
 /// Read the extracted WAV (mono 16 kHz s16le written by ffmpeg) as f32.
@@ -202,13 +190,12 @@ mod tests {
             model: model.into(),
             tokens: tokens.into(),
         };
-        let cues = transcribe_wav(
+        let recognizer = create_recognizer(&asr, "auto").expect("create recognizer");
+        let cues = transcribe_segment(
             Path::new(&wav),
-            &asr,
             Path::new(&vad),
-            "auto",
+            &recognizer,
             &Arc::new(AtomicBool::new(false)),
-            |_| {},
             |_| {},
         )
         .expect("transcription failed");
@@ -218,5 +205,60 @@ mod tests {
             assert!(!cue.text.is_empty());
         }
         println!("cues: {:#?}", cues);
+    }
+}
+
+#[cfg(test)]
+mod bench_tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+    use std::time::Instant;
+
+    /// Decode-throughput benchmark over a long synthetic wav
+    /// (SHERPA_TEST_LONG): VAD total, decode total, RTF. The streaming
+    /// time-to-first-subtitle is now dominated by the FIRST 30 s extraction
+    /// segment (see audio.rs SEGMENT_SECS), measured in the app, not here.
+    /// SKIPPED without the env var.
+    #[test]
+    fn bench_streaming_latency() {
+        let (Ok(wav), Ok(model), Ok(tokens), Ok(vad)) = (
+            std::env::var("SHERPA_TEST_LONG"),
+            std::env::var("SHERPA_TEST_MODEL"),
+            std::env::var("SHERPA_TEST_TOKENS"),
+            std::env::var("SHERPA_TEST_VAD"),
+        ) else {
+            return;
+        };
+        let asr = AsrModel { model: model.into(), tokens: tokens.into() };
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        let t0 = Instant::now();
+        let samples = read_wav(Path::new(&wav)).expect("read wav");
+        let t_read = t0.elapsed();
+        println!("wav read: {t_read:?} ({} samples)", samples.len());
+
+        let t1 = Instant::now();
+        let segments = segment_with_vad(&samples, Path::new(&vad), &cancel).expect("vad");
+        let t_vad = t1.elapsed();
+        println!("vad: {t_vad:?} -> {} segments", segments.len());
+
+        let recognizer = OfflineRecognizer::create(&recognizer_config(&asr, "auto")).expect("create");
+
+        let mut cue_count = 0usize;
+        let t2 = Instant::now();
+        for segment in segments.iter() {
+            let stream = recognizer.create_stream();
+            stream.accept_waveform(SAMPLE_RATE as i32, segment.samples());
+            recognizer.decode(&stream);
+            let result = stream.get_result().expect("result");
+            if !result.text.trim().is_empty() {
+                cue_count += 1;
+            }
+        }
+        let t_decode = t2.elapsed();
+        let total = t_read + t_vad + t_decode;
+        println!("decode total: {t_decode:?} for {} segments ({} cues)", segments.len(), cue_count);
+        println!("total pipeline (read+vad+decode): {total:?}");
+        println!("RTF: {:.1}x realtime", 911.0 / total.as_secs_f64());
     }
 }

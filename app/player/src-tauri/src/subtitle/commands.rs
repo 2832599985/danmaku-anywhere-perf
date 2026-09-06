@@ -198,8 +198,11 @@ fn resolve_models(app: &AppHandle) -> Result<(AsrModel, std::path::PathBuf), Str
     Ok((asr, vad))
 }
 
-/// The transcription pipeline: ffmpeg audio extraction → VAD segmentation →
-/// SenseVoice inference → cues. Every step checks the cancel flag.
+/// The STREAMING pipeline: ffmpeg extracts 30 s segments in the background
+/// while each ready segment is VAD-segmented + recognized immediately and its
+/// cues are pushed as Partial events. First subtitles appear as soon as the
+/// FIRST segment is extracted (a couple of seconds), not after the whole
+/// episode. Every step checks the cancel flag.
 fn run_pipeline(
     app: &AppHandle,
     path: &str,
@@ -208,30 +211,58 @@ fn run_pipeline(
     on_event: &Channel<SubtitleEvent>,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<Cue>, String> {
+    // Resolve models BEFORE spawning ffmpeg so a missing model fails fast
+    // with the download hint (rather than after a full extraction).
+    let (asr_model, vad_model) = resolve_models(app)?;
+    let recognizer = asr::create_recognizer(&asr_model, language)?;
+
     let _ = on_event.send(SubtitleEvent::Extracting { percent: None });
-    // Keep the WAV alive for the whole pipeline; Drop cleans it up.
-    let extracted =
-        audio::extract_audio(path, duration_secs, cancel, |percent| {
+    let extraction = audio::extract_audio_segmented(path, duration_secs, cancel, {
+        let on_event = on_event.clone();
+        move |percent| {
             let _ = on_event.send(SubtitleEvent::Extracting { percent });
-        })?;
+        }
+    })?;
+    let total_segments = extraction.total.unwrap_or(0);
+
+    let _ = on_event.send(SubtitleEvent::Transcribing { percent: 0.0 });
+    let mut all_cues: Vec<Cue> = Vec::new();
+    let mut processed = 0usize;
+    // Blocking recv: the recognizer waits for the next EXTRACTED segment.
+    // Extraction (IO) and inference (CPU) overlap; when inference is faster
+    // than extraction the loop simply paces with ffmpeg.
+    while let Some(result) = extraction.next_segment() {
+        let seg_path = result?;
+        if cancel.load(Ordering::Relaxed) {
+            return Err(audio::CANCELLED.to_string());
+        }
+        // Segment i covers [i * SEGMENT_SECS, (i+1) * SEGMENT_SECS).
+        let offset = processed as f64 * audio::SEGMENT_SECS;
+        let seg_cues = asr::transcribe_segment(
+            &seg_path,
+            &vad_model,
+            &recognizer,
+            cancel,
+            |mut cues| {
+                for cue in &mut cues {
+                    cue.start += offset;
+                    cue.end += offset;
+                }
+                let _ = on_event.send(SubtitleEvent::Partial { cues });
+            },
+        )?;
+        all_cues.extend(seg_cues);
+        processed += 1;
+        let percent = if total_segments > 0 {
+            processed as f32 / total_segments as f32
+        } else {
+            0.0
+        };
+        let _ = on_event.send(SubtitleEvent::Transcribing { percent });
+    }
     if cancel.load(Ordering::Relaxed) {
         return Err(audio::CANCELLED.to_string());
     }
-
-    let (asr_model, vad_model) = resolve_models(app)?;
-
-    let _ = on_event.send(SubtitleEvent::Transcribing { percent: 0.0 });
-    asr::transcribe_wav(
-        &extracted.path,
-        &asr_model,
-        &vad_model,
-        language,
-        cancel,
-        |percent| {
-            let _ = on_event.send(SubtitleEvent::Transcribing { percent });
-        },
-        |cues| {
-            let _ = on_event.send(SubtitleEvent::Partial { cues });
-        },
-    )
+    all_cues.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(all_cues)
 }

@@ -253,6 +253,13 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     })
   }, [subtitleSettings.offset])
 
+  // --- subtitle visibility flip -> re-evaluate the active cue immediately ---
+  // While hidden the tick may have stopped (paused video); flipping back on
+  // must not wait for the next seek/play edge to show the current cue.
+  useEffect(() => {
+    if (subtitleSettings.visible) subtitleCtrlRef.current?.refresh()
+  }, [subtitleSettings.visible])
+
   // --- displayLanguage flip -> re-mount the generated track (source/zh) ---
   useEffect(() => {
     remountGeneratedTrack()

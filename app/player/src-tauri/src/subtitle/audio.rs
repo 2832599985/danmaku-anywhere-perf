@@ -1,4 +1,4 @@
-//! Audio extraction via ffmpeg.
+//! Audio extraction via ffmpeg, SEGMENTED for streaming.
 //!
 //! The player accepts containers the webview cannot decode audio for
 //! (mkv/avi/flv/ts, AC3/DTS tracks), so extraction runs in Rust through an
@@ -7,14 +7,17 @@
 //!      sidecar location in release builds — see `binaries/README.md`)
 //!   2. `ffmpeg` on PATH (dev machines)
 //!
-//! Output: 16 kHz mono s16le WAV in the system temp dir (whisper/SenseVoice
-//! input format), deleted by the caller when the pipeline finishes.
+//! Instead of one whole-file WAV, ffmpeg writes fixed-length 16 kHz mono
+//! segments (`-f segment`), so the pipeline can transcribe-and-STREAM segment
+//! by segment: first subtitles appear while extraction of the rest of the
+//! episode is still running. Extraction and inference run on two threads with
+//! a bounded queue of ready segment files.
 
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(windows)]
@@ -25,6 +28,13 @@ use std::os::windows::process::CommandExt;
 /// children do not inherit that).
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Segment length in seconds. Small enough that the first segment finishes
+/// extracting in a couple of seconds, large enough that per-segment ffmpeg
+/// overhead stays negligible.
+pub const SEGMENT_SECS: f64 = 30.0;
+/// Upper bound on segments buffered between extractor and recognizer.
+const QUEUE_BOUND: usize = 4;
 
 /// Locate the ffmpeg binary. Errors only when neither the sidecar location
 /// nor PATH provides one (surfaced as a user-facing message).
@@ -44,32 +54,38 @@ pub fn resolve_ffmpeg() -> Result<PathBuf, String> {
     Ok(PathBuf::from("ffmpeg"))
 }
 
-/// Temp WAV sink for the current extraction.
-pub struct ExtractedAudio {
-    pub path: PathBuf,
+pub const CANCELLED: &str = "__cancelled__";
+
+/// A streaming extraction session: files appear in the output dir as ffmpeg
+/// progresses; `segments()` yields them in order until the process exits.
+pub struct SegmentedExtraction {
+    /// Directory holding seg-000000.wav, seg-000001.wav, …
+    pub dir: PathBuf,
+    /// Bound-checked channel of segment file paths, closed on completion.
+    rx: mpsc::Receiver<Result<PathBuf, String>>,
+    /// Total segments expected (None when duration unknown).
+    pub total: Option<usize>,
 }
 
-impl Drop for ExtractedAudio {
+impl Drop for SegmentedExtraction {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 
-/// Extract a 16 kHz mono WAV from `video`.
-///
-/// `duration_secs` (from the frontend's playback mirror) drives progress
-/// percentages; without it extraction reports an indeterminate progress
-/// (None). `on_percent` receives 0..1 (called with the raw fraction; the
-/// caller clamps) — or None when the total duration is unknown. Cancelling
-/// kills ffmpeg and removes the partial output.
-pub fn extract_audio(
+/// Start a segmented extraction. Returns once ffmpeg has SPAWNED (it keeps
+/// running on a background thread, feeding the channel). Cancelling kills
+/// ffmpeg; the Drop cleans the temp dir.
+pub fn extract_audio_segmented(
     video: &str,
     duration_secs: Option<f64>,
     cancel: &Arc<AtomicBool>,
-    mut on_percent: impl FnMut(Option<f32>),
-) -> Result<ExtractedAudio, String> {
+    mut on_percent: impl FnMut(Option<f32>) + Send + 'static,
+) -> Result<SegmentedExtraction, String> {
     let ffmpeg = resolve_ffmpeg()?;
-    let out_path = temp_wav_path();
+    let dir = temp_seg_dir();
+
+    let total = duration_secs.map(|d| (d / SEGMENT_SECS).ceil() as usize);
 
     let mut command = Command::new(&ffmpeg);
     command
@@ -87,91 +103,145 @@ pub fn extract_audio(
             "16000",
             "-acodec",
             "pcm_s16le",
+            // fixed-length WAV segments: seg-000000.wav, seg-000001.wav, …
+            "-f",
+            "segment",
+            "-segment_time",
+            &SEGMENT_SECS.to_string(),
+            "-reset_timestamps",
+            "1",
             // machine-readable `key=value` progress lines on stdout
             "-progress",
             "pipe:1",
             "-nostats",
         ])
-        .arg(&out_path)
+        .arg(dir.join("seg-%06d.wav"))
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        // Capture stderr so a failed spawn can report ffmpeg's actual error
+        // instead of a generic "extraction failed" (diagnosability matters:
+        // the same command succeeds from a shell).
+        .stderr(Stdio::piped());
 
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
-    let mut child = command
-        .spawn()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                "未找到 ffmpeg（请将 ffmpeg.exe 放到程序目录或加入 PATH）".to_string()
-            } else {
-                format!("启动 ffmpeg 失败: {e}")
-            }
-        })?;
+    let mut child = command.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            "未找到 ffmpeg（请将 ffmpeg.exe 放到程序目录或加入 PATH）".to_string()
+        } else {
+            format!("启动 ffmpeg 失败: {e}")
+        }
+    })?;
 
     let stdout = child
         .stdout
         .take()
         .ok_or_else(|| "无法读取 ffmpeg 输出".to_string())?;
+    // Take stderr too: read it AFTER the stdout loop so a failure message can
+    // be appended to the generic error (ffmpeg writes its last words here).
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "无法读取 ffmpeg 错误输出".to_string())?;
 
-    let mut emitted: Option<f32> = None;
-    for line in BufReader::new(stdout).lines() {
-        if cancel.load(Ordering::Relaxed) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(CANCELLED.to_string());
-        }
-        let line = match line {
-            Ok(line) => line,
-            Err(_) => break,
-        };
-        // `out_time_us=1234567` (ffmpeg ≥ 4.x) / `out_time_ms=` (microseconds,
-        // despite the name, in ffmpeg 4.x era builds we also accept it).
-        let fraction = if let Some(us) = line.strip_prefix("out_time_us=") {
-            parse_us(us).map(|us| us / 1_000_000.0)
-        } else if let Some(ms) = line.strip_prefix("out_time_ms=") {
-            parse_us(ms).map(|us| us / 1_000_000.0)
-        } else {
-            None
-        };
-        if let (Some(seconds), Some(total)) = (fraction, duration_secs) {
-            if total > 0.0 {
-                let percent = (seconds / total).clamp(0.0, 1.0) as f32;
-                // Throttle identical/rounding-noise updates.
-                if emitted.map_or(true, |last| percent - last >= 0.005) {
-                    emitted = Some(percent);
-                    on_percent(Some(percent));
+    let (tx, rx) = mpsc::sync_channel::<Result<PathBuf, String>>(QUEUE_BOUND);
+    let done_count = Arc::new(AtomicUsize::new(0));
+    let done_for_thread = Arc::clone(&done_count);
+    let cancel_for_thread = Arc::clone(cancel);
+    let dir_for_thread = dir.clone();
+
+    // Watcher thread: parse ffmpeg progress, announce each completed segment
+    // on the channel. `tx` closes when the thread ends = extraction complete.
+    std::thread::spawn(move || {
+        let dir = dir_for_thread;
+        let cancel = cancel_for_thread;
+        let mut announced = 0usize;
+        for line in BufReader::new(stdout).lines() {
+            if cancel.load(Ordering::Relaxed) {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = tx.send(Err(CANCELLED.to_string()));
+                return;
+            }
+            let line = match line {
+                Ok(line) => line,
+                Err(_) => break,
+            };
+            if let Some(us) = line.strip_prefix("out_time_us=") {
+                if let Ok(micros) = us.trim().parse::<f64>() {
+                    let seconds = micros / 1_000_000.0;
+                    let seg_index = (seconds / SEGMENT_SECS).floor() as usize;
+                    // A segment file is complete once ffmpeg is past it.
+                    while announced < seg_index {
+                        let path = dir.join(format!("seg-{announced:06}.wav"));
+                        if path.is_file() {
+                            let _ = tx.send(Ok(path));
+                            done_for_thread.store(announced + 1, Ordering::Relaxed);
+                        }
+                        announced += 1;
+                    }
+                    if let Some(total) = total {
+                        let percent =
+                            (seconds / (total as f64 * SEGMENT_SECS)).clamp(0.0, 1.0) as f32;
+                        on_percent(Some(percent));
+                    }
                 }
             }
         }
-    }
+        let status = match child.wait() {
+            Ok(status) => status,
+            Err(e) => {
+                let _ = tx.send(Err(format!("等待 ffmpeg 失败: {e}")));
+                return;
+            }
+        };
+        if cancel.load(Ordering::Relaxed) {
+            let _ = tx.send(Err(CANCELLED.to_string()));
+            return;
+        }
+        if !status.success() {
+            let mut detail = String::new();
+            use std::io::Read;
+            let _ = stderr.read_to_string(&mut detail);
+            let detail = detail.trim();
+            let message = if detail.is_empty() {
+                "音频提取失败（容器或音轨编码可能不受 ffmpeg 支持）".to_string()
+            } else {
+                format!("音频提取失败: {}", &detail[..detail.len().min(300)])
+            };
+            let _ = tx.send(Err(message));
+            return;
+        }
+        // Final flush: announce every remaining segment file in order.
+        loop {
+            let path = dir.join(format!("seg-{announced:06}.wav"));
+            if !path.is_file() {
+                break;
+            }
+            let _ = tx.send(Ok(path));
+            done_for_thread.store(announced + 1, Ordering::Relaxed);
+            announced += 1;
+        }
+        // Channel close = extraction complete (tx dropped here).
+    });
 
-    let status = child.wait().map_err(|e| format!("等待 ffmpeg 失败: {e}"))?;
-    if cancel.load(Ordering::Relaxed) {
-        return Err(CANCELLED.to_string());
-    }
-    if !status.success() {
-        return Err(
-            "音频提取失败（容器或音轨编码可能不受 ffmpeg 支持）".to_string()
-        );
-    }
-    if !out_path.is_file() {
-        return Err("ffmpeg 未产出音频文件".to_string());
-    }
-
-    Ok(ExtractedAudio { path: out_path })
+    Ok(SegmentedExtraction { dir, rx, total })
 }
 
-pub const CANCELLED: &str = "__cancelled__";
-
-fn parse_us(raw: &str) -> Option<f64> {
-    raw.trim().parse::<f64>().ok()
+impl SegmentedExtraction {
+    /// Block for the next ready segment file; None once extraction finished.
+    pub fn next_segment(&self) -> Option<Result<PathBuf, String>> {
+        self.rx.recv().ok()
+    }
 }
 
-fn temp_wav_path() -> PathBuf {
+fn temp_seg_dir() -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    std::env::temp_dir().join(format!("danmaku-player-audio-{nanos}.wav"))
+    let dir = std::env::temp_dir().join(format!("danmaku-player-audio-{nanos}"));
+    // ffmpeg's segment muxer will not create the directory itself.
+    std::fs::create_dir_all(&dir).ok();
+    dir
 }

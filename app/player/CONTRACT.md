@@ -698,3 +698,33 @@ built-in genAi proxy).
   lib + provider plumbing; the shipped lib is CPU-only) and the Whisper
   large-v3-turbo engine switch (sherpa-onnx OfflineWhisperModelConfig; the
   `engine`/`useGpu` settings fields are defined but inert).
+
+### Review pass 1 (2026-09-06 evening) — 4 user-reported bugs fixed
+
+User verification on the packaged exe surfaced real gaps; root causes and
+fixes:
+
+1. **生成字幕 clickable with no model / silent failure** — the capsule only
+   gated on `isTauri`. Now `startGeneration` pre-flights `modelStatus()`:
+   missing model → OSD「请先在 设置 → 字幕 下载语音识别模型」+ deep-links to
+   the subtitle settings page. Pipeline failures now also surface via OSD
+   (`字幕生成失败: …`), not just the settings-page banner.
+2. **(not fixed, acknowledged)** model download speed — hf-mirror then
+   GitHub source chain stays; user pre-seeded the model manually.
+3. **Not actually streaming** — the pipeline extracted the WHOLE file first
+   (ffmpeg single-pass), so nothing displayed until extraction of the full
+   episode finished. audio.rs rewritten to SEGMENTED extraction: ffmpeg
+   `-f segment -segment_time 30` writes seg-000000.wav, … as it goes; a
+   watcher thread announces completed segments on a bounded channel;
+   run_pipeline transcribes each segment as it arrives (recognizer created
+   ONCE) and Partial-events its cues with the segment offset added. Extraction
+   and inference overlap. Measured on a real 15-min mp4: first segment ready
+   in **0.3 s** (integration test `tests/segmented_extract.rs`, env
+   SHERPA_TEST_MP4; skipped otherwise). ffmpeg stderr is now captured and
+   surfaced in failures. Root cause of the initial broken build: the segment
+   temp DIR was never created (single-file output didn't need one).
+4. **Subtitles vanish after toggling off/on** — SubtitleController.setCues
+   detached/reattached video listeners on EVERY cue batch (streaming =
+   several times per minute) racing the rVFC tick. Now it reuses listeners
+   when the video element is unchanged, and a `refresh()` runs when
+   subtitleSettings.visible flips back on (paused-video edge).

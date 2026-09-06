@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { usePlayerStore } from '@/store/playerStore'
 import { errorMessage } from '@/ui/shared'
 import { serializeSrt } from './format'
-import { cancelTranscribe, transcribe } from './native'
+import { cancelTranscribe, modelStatus, transcribe } from './native'
 import { translateCues } from './translate'
 import type { SubtitleCue } from './types'
 
@@ -148,6 +148,22 @@ export const startGeneration = async (): Promise<void> => {
   const rawDuration = store.playback.duration
   const duration = Number.isFinite(rawDuration) ? rawDuration : null
 
+  // Model pre-flight: without SenseVoice the Rust side fails anyway — check
+  // up front and route the user straight to the download UI instead of a
+  // silent failure (bug: 生成字幕 was clickable with no model installed).
+  try {
+    const statuses = await modelStatus()
+    const senseVoice = statuses.find((m) => m.id === 'sensevoice-int8')
+    if (!senseVoice?.downloaded) {
+      store.showOsd('请先在 设置 → 字幕 下载语音识别模型', '⬇')
+      store.openSettingsAt('subtitle')
+      return
+    }
+  } catch {
+    // Status check failed (non-Tauri / IPC hiccup) — let the Rust pipeline
+    // surface the real error instead of blocking here.
+  }
+
   store.setSttError(null)
   store.setSttStatus('extracting', 0)
   try {
@@ -178,8 +194,12 @@ export const startGeneration = async (): Promise<void> => {
   } catch (error) {
     const s = usePlayerStore.getState()
     if (s.media?.path !== videoPath) return
-    s.setSttError(errorMessage(error))
+    const message = errorMessage(error)
+    s.setSttError(message)
     s.setSttStatus('idle')
+    // The capsule disappears when idle — surface failures via OSD too or
+    // they are invisible (bug: silent failure with no model installed).
+    s.showOsd(`字幕生成失败: ${message.slice(0, 60)}`, '⚠')
   }
 }
 

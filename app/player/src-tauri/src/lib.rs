@@ -1,5 +1,5 @@
 mod stream;
-mod subtitle;
+pub mod subtitle;
 
 use subtitle::commands::{
     subtitle_cancel, subtitle_model_download, subtitle_model_status,

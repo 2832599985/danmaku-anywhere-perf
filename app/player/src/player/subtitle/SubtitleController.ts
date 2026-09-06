@@ -46,16 +46,29 @@ export class SubtitleController {
     this.callbacks = callbacks
   }
 
-  /** Mount cues for the given video element (replacing any previous set). */
+  /**
+   * Mount cues for the given video element (replacing any previous set).
+   * Re-uses the existing listeners/tick when the video element is unchanged —
+   * the streaming pipeline calls this every few segments, and a full
+   * detach/reattach per batch raced the rVFC tick (cue went stale until the
+   * next seek/play edge; visible as "subtitles gone after toggling").
+   */
   setCues(video: HTMLVideoElement, cues: SubtitleCue[]): void {
     if (this.destroyed) return
-    this.detachVideo()
-    this.video = video as RVFCVideo
+    if (this.video !== (video as RVFCVideo)) {
+      this.detachVideo()
+      this.video = video as RVFCVideo
+      video.addEventListener('seeked', this.refreshOnce)
+      video.addEventListener('play', this.refreshOnce)
+    }
     this.cues = cues
-    this.setIndex(-1)
-    video.addEventListener('seeked', this.refreshOnce)
-    video.addEventListener('play', this.refreshOnce)
-    // Align immediately (e.g. cues mounted mid-playback) and keep ticking.
+    this.refreshOnce()
+    this.scheduleTick()
+  }
+
+  /** Public re-evaluate (used when visibility flips back on). */
+  refresh(): void {
+    if (this.destroyed) return
     this.refreshOnce()
     this.scheduleTick()
   }
