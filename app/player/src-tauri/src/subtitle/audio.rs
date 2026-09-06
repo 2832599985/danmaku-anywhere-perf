@@ -58,9 +58,13 @@ pub const CANCELLED: &str = "__cancelled__";
 
 /// A streaming extraction session: files appear in the output dir as ffmpeg
 /// progresses; `segments()` yields them in order until the process exits.
+/// Segment 0 corresponds to `start_secs` in the VIDEO's timeline (callers add
+/// that offset to derive absolute cue times).
 pub struct SegmentedExtraction {
     /// Directory holding seg-000000.wav, seg-000001.wav, …
     pub dir: PathBuf,
+    /// Video-timeline position of segment 0 (seconds).
+    pub start_secs: f64,
     /// Bound-checked channel of segment file paths, closed on completion.
     rx: mpsc::Receiver<Result<PathBuf, String>>,
     /// Total segments expected (None when duration unknown).
@@ -76,8 +80,14 @@ impl Drop for SegmentedExtraction {
 /// Start a segmented extraction. Returns once ffmpeg has SPAWNED (it keeps
 /// running on a background thread, feeding the channel). Cancelling kills
 /// ffmpeg; the Drop cleans the temp dir.
+///
+/// `start_secs`: extraction BEGINS here (playhead position) instead of 0 —
+/// the follow-playhead mode: subtitles for what is on screen RIGHT NOW
+/// arrive first; regions before/behind are back-filled later by re-running
+/// with different start points.
 pub fn extract_audio_segmented(
     video: &str,
+    start_secs: f64,
     duration_secs: Option<f64>,
     cancel: &Arc<AtomicBool>,
     mut on_percent: impl FnMut(Option<f32>) + Send + 'static,
@@ -94,6 +104,14 @@ pub fn extract_audio_segmented(
             "-hide_banner",
             "-loglevel",
             "error",
+        ]);
+    // Seek to the playhead BEFORE -i so ffmpeg input-seeks (fast, keyframe-
+    // accurate enough for audio) rather than decoding everything from 0.
+    if start_secs > 0.0 {
+        command.args(["-ss", &start_secs.to_string()]);
+    }
+    command
+        .args([
             "-i",
             video,
             "-vn",
@@ -225,7 +243,12 @@ pub fn extract_audio_segmented(
         // Channel close = extraction complete (tx dropped here).
     });
 
-    Ok(SegmentedExtraction { dir, rx, total })
+    Ok(SegmentedExtraction {
+        dir,
+        start_secs,
+        rx,
+        total,
+    })
 }
 
 impl SegmentedExtraction {

@@ -781,3 +781,25 @@ Seek following (unchanged, verified design): SubtitleController listens to
 `seeked` → binary-search re-anchor → immediate refresh; both progress-bar
 drags and ArrowLeft/Right (which assign video.currentTime) hit that path
 synchronously. Playback is frame-calibrated via rVFC.
+
+### Follow-playhead mode (2026-09-06 final) — recognition tracks the PLAYHEAD, not the file
+
+User feedback: a whole-file progress bar (提取音频 47% → 识别 30%) is the WRONG
+shape — the user wants subtitles for what is on screen NOW. Redesign:
+
+- Rust `run_pipeline` takes `start_secs` (the playhead). Region A covers
+  playhead→end (what the user is about to watch); region B back-fills 0→playhead.
+  ffmpeg gets `-ss <start>` BEFORE `-i` (fast input-seek, no decode-from-0);
+  measured cold start (spawn → first segment) 157-277 ms.
+- Region starts are snapped to the 30 s grid implicitly (segments are 30 s),
+  so consecutive runs share boundaries; one StreamingTranscriber (one VAD)
+  per region keeps boundary-spanning speech whole within a region.
+- Frontend `generate.ts`: 30 s grid coverage tracking per video (coveredCells)
+  + merged cue cache across runs (dedup by start|text). `onUserSeek(time)`
+  fires from commands.seekTo/seekBy (progress bar drags + arrow keys both
+  route there): seek into a covered cell = the controller follows the
+  existing track; seek into an UNCOVERED cell = cancel the running task and
+  restart from the new playhead. Done/cancelled runs merge into the track;
+  .srt save happens from the merged cache.
+- Contract note: `subtitle_transcribe(path, duration_secs, start_secs,
+  on_event)`.

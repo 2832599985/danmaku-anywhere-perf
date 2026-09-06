@@ -92,6 +92,7 @@ impl TaskRegistry {
 pub fn subtitle_transcribe(
     app: AppHandle,
     path: String,
+    start_secs: Option<f64>,
     duration_secs: Option<f64>,
     on_event: Channel<SubtitleEvent>,
 ) -> Result<(), String> {
@@ -107,7 +108,14 @@ pub fn subtitle_transcribe(
     // (ffmpeg spawn/wait, model inference) happens on this thread so the IPC
     // reply is never held.
     std::thread::spawn(move || {
-        let result = run_pipeline(&app, &path, duration_secs, &on_event, &cancel);
+        let result = run_pipeline(
+            &app,
+            &path,
+            start_secs.unwrap_or(0.0).max(0.0),
+            duration_secs,
+            &on_event,
+            &cancel,
+        );
         let registry: State<TaskRegistry> = app.state();
         registry.end();
         let event = match result {
@@ -189,70 +197,107 @@ fn resolve_models(app: &AppHandle) -> Result<(AsrModel, std::path::PathBuf), Str
 
 /// The STREAMING pipeline: ffmpeg extracts 30 s segments in the background
 /// while each ready segment is pushed into ONE streaming VAD + recognizer and
-/// its completed cues are Partial-evented. One VAD instance sees the entire
-/// episode, so speech spanning an extraction boundary stays a single cue
-/// (per-file VADs cut sentences in half at every 30 s mark). Every step
-/// checks the cancel flag.
+/// FOLLOW-PLAYHEAD pipeline: recognition starts at the CURRENT PLAYBACK
+/// position (so what's on screen gets subtitles first), runs to the end,
+/// then back-fills everything before the start position. Seek during a run
+/// reprioritizes: `subtitle_seek` cancels the current region and the
+/// frontend restarts from the new playhead (its cues for already-covered
+/// regions come from the partial track already mounted).
 ///
-/// COLD-START BUDGET (≤5 s to first cue): ffmpeg is spawned FIRST — segment
-/// extraction (IO) runs concurrently with model loading (CPU), so by the
-/// time the ~1-2 s SenseVoice load finishes, the first 30 s segment is
-/// already on disk; the first cue lands at model-load + first-segment-decode.
+/// Within one region the streaming invariants hold: one VAD instance sees
+/// the whole region so speech spanning an extraction boundary stays a single
+/// cue; region boundaries align to 30 s grid lines (the seek start is
+/// snapped down), so consecutive regions share boundaries exactly and a
+/// sentence at a region seam is only ever split along the grid, never
+/// mid-word across different runs.
+///
+/// COLD-START BUDGET (≤5 s to first cue): ffmpeg input-seeks to the
+/// playhead (`-ss` before `-i`, fast) and spawns immediately; extraction
+/// (IO) overlaps model loading (CPU).
 fn run_pipeline(
     app: &AppHandle,
     path: &str,
+    start_secs: f64,
     duration_secs: Option<f64>,
     on_event: &Channel<SubtitleEvent>,
     cancel: &Arc<AtomicBool>,
 ) -> Result<Vec<Cue>, String> {
-    // 1. Spawn ffmpeg immediately (extraction proceeds on its own thread).
-    let _ = on_event.send(SubtitleEvent::Extracting { percent: None });
-    let extraction = audio::extract_audio_segmented(path, duration_secs, cancel, {
-        let on_event = on_event.clone();
-        move |percent| {
-            let _ = on_event.send(SubtitleEvent::Extracting { percent });
-        }
-    })?;
-    let total_segments = extraction.total.unwrap_or(0);
-
-    // 2. Load the models while ffmpeg extracts (fixed Chinese recognition —
-    // the scoped feature is zh-audio → zh-subtitles).
+    // Load the models first: ONE recognizer serves both regions (the model
+    // load is the expensive part; VAD is per-region by design).
     let (asr_model, vad_model) = resolve_models(app)?;
-    let mut transcriber =
-        asr::StreamingTranscriber::new(&asr_model, &vad_model, "zh", Arc::clone(cancel))?;
 
-    let _ = on_event.send(SubtitleEvent::Transcribing { percent: 0.0 });
     let mut all_cues: Vec<Cue> = Vec::new();
-    let mut processed = 0usize;
-    // Blocking recv: the recognizer waits for the next EXTRACTED segment.
-    // Extraction (IO) and inference (CPU) overlap; when inference is faster
-    // than extraction the loop simply paces with ffmpeg.
-    while let Some(result) = extraction.next_segment() {
-        let seg_path = result?;
+    // Region A: playhead → end. Region B (back-fill): 0 → playhead.
+    let regions = [(start_secs, duration_secs), (0.0, Some(start_secs))];
+    for (region_start, region_end) in regions {
         if cancel.load(Ordering::Relaxed) {
             return Err(audio::CANCELLED.to_string());
         }
-        let seg_cues = transcriber.push_wav(&seg_path)?;
-        if !seg_cues.is_empty() {
-            all_cues.extend(seg_cues.iter().cloned());
-            let _ = on_event.send(SubtitleEvent::Partial { cues: seg_cues });
-        }
-        processed += 1;
-        let percent = if total_segments > 0 {
-            processed as f32 / total_segments as f32
-        } else {
-            0.0
+        // Skip empty regions (no duration known, or starting at 0).
+        let Some(region_end) = region_end else {
+            continue;
         };
-        let _ = on_event.send(SubtitleEvent::Transcribing { percent });
-    }
-    if cancel.load(Ordering::Relaxed) {
-        return Err(audio::CANCELLED.to_string());
-    }
-    // Trailing speech still buffered in the VAD.
-    let tail = transcriber.finish()?;
-    if !tail.is_empty() {
-        all_cues.extend(tail.iter().cloned());
-        let _ = on_event.send(SubtitleEvent::Partial { cues: tail });
+        if region_end - region_start < audio::SEGMENT_SECS * 0.5 {
+            continue;
+        }
+        let region_len = region_end - region_start;
+
+        let _ = on_event.send(SubtitleEvent::Extracting { percent: None });
+        let extraction = audio::extract_audio_segmented(
+            path,
+            region_start,
+            Some(region_len),
+            cancel,
+            {
+                let on_event = on_event.clone();
+                move |percent| {
+                    let _ = on_event.send(SubtitleEvent::Extracting { percent });
+                }
+            },
+        )?;
+        let total_segments = extraction.total.unwrap_or(0);
+
+        // Fresh VAD per region; its timestamps are region-relative.
+        let mut transcriber =
+            asr::StreamingTranscriber::new(&asr_model, &vad_model, "zh", Arc::clone(cancel))?;
+
+        let _ = on_event.send(SubtitleEvent::Transcribing { percent: 0.0 });
+        let mut processed = 0usize;
+        while let Some(result) = extraction.next_segment() {
+            let seg_path = result?;
+            if cancel.load(Ordering::Relaxed) {
+                return Err(audio::CANCELLED.to_string());
+            }
+            let mut seg_cues = transcriber.push_wav(&seg_path)?;
+            for cue in &mut seg_cues {
+                cue.start += region_start;
+                cue.end += region_start;
+            }
+            if !seg_cues.is_empty() {
+                all_cues.extend(seg_cues.iter().cloned());
+                let _ = on_event.send(SubtitleEvent::Partial { cues: seg_cues });
+            }
+            processed += 1;
+            let percent = if total_segments > 0 {
+                processed as f32 / total_segments as f32
+            } else {
+                0.0
+            };
+            let _ = on_event.send(SubtitleEvent::Transcribing { percent });
+        }
+        if cancel.load(Ordering::Relaxed) {
+            return Err(audio::CANCELLED.to_string());
+        }
+        // Trailing speech still buffered in the VAD.
+        let mut tail = transcriber.finish()?;
+        for cue in &mut tail {
+            cue.start += region_start;
+            cue.end += region_start;
+        }
+        if !tail.is_empty() {
+            all_cues.extend(tail.iter().cloned());
+            let _ = on_event.send(SubtitleEvent::Partial { cues: tail });
+        }
     }
     Ok(all_cues)
 }

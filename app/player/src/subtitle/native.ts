@@ -33,15 +33,18 @@ export interface ModelStatus {
   size_label: string
 }
 
-/** Start a transcription task; events stream through `onEvent`. Single-flight. */
+/** Start a transcription task; events stream through `onEvent`. Single-flight.
+ * `startSecs` = playhead: recognition begins there, then back-fills before it. */
 export const transcribe = (
   path: string,
   durationSecs: number | null,
+  startSecs: number,
   onEvent: (event: TranscribeEvent) => void
 ): Promise<void> =>
   invoke('subtitle_transcribe', {
     path,
     durationSecs,
+    startSecs,
     onEvent: new Channel<TranscribeEvent>(onEvent),
   })
 

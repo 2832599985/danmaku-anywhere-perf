@@ -17,6 +17,7 @@ fn segmented_extraction_streams() {
 
     let extraction = audio::extract_audio_segmented(
         &mp4,
+        0.0,
         Some(919.0),
         &cancel,
         |_| {},
@@ -67,7 +68,7 @@ fn cold_start_first_segment_under_3s() {
     let start = Instant::now();
 
     let extraction =
-        audio::extract_audio_segmented(&mp4, Some(919.0), &cancel, |_| {})
+        audio::extract_audio_segmented(&mp4, 0.0, Some(919.0), &cancel, |_| {})
             .expect("spawn extraction");
     let first = extraction
         .next_segment()

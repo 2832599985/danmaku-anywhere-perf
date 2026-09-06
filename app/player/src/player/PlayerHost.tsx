@@ -8,6 +8,7 @@ import { parseDanmakuText } from '@/danmaku/parse'
 import type { Platform } from '@/platform'
 import { type PlaylistItem, usePlayerStore } from '@/store/playerStore'
 import { parseSubtitleText } from '@/subtitle/format'
+import { onUserSeek } from '@/subtitle/generate'
 import { INK, PAPER, SANS } from '@/theme/theme'
 import { Controls } from '@/ui/Controls'
 import { DanmakuSourceDialog } from '@/ui/DanmakuSourceDialog'
@@ -603,7 +604,9 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         const dur = Number.isFinite(v.duration)
           ? v.duration
           : Number.POSITIVE_INFINITY
-        v.currentTime = Math.max(0, Math.min(seconds, dur))
+        const next = Math.max(0, Math.min(seconds, dur))
+        v.currentTime = next
+        onUserSeek(next)
       },
       seekBy: (delta) => {
         const v = getVideo()
@@ -614,6 +617,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         const next = Math.max(0, Math.min(v.currentTime + delta, dur))
         v.currentTime = next
         store().showOsd(formatClock(next), delta >= 0 ? '⏩' : '⏪')
+        onUserSeek(next)
       },
       setVolume: (volume) => {
         const v = getVideo()
