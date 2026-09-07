@@ -28,32 +28,38 @@ fn window_yields_chinese_cues() {
         model: model.into(),
         tokens: tokens.into(),
     };
-    let mut transcriber = asr::StreamingTranscriber::new(
-        &asr_model,
-        Path::new(&vad),
-        "zh",
-        Arc::clone(&cancel),
-    )
-    .expect("create transcriber");
+    let recognizer = asr::create_recognizer(&asr_model, "zh").expect("create recognizer");
 
     let mut cues = Vec::new();
     let mut segments_seen = 0usize;
     while let Some(result) = extraction.next_segment() {
         let seg = result.expect("segment");
-        let part = transcriber.push_wav(&seg).expect("push");
+        let part = asr::transcribe_segment(
+            &seg,
+            Path::new(&vad),
+            &recognizer,
+            &cancel,
+            |_| {},
+        )
+        .expect("push");
         segments_seen += 1;
         cues.extend(part);
     }
-    cues.extend(transcriber.finish().expect("finish"));
 
     println!("segments consumed: {segments_seen}, cues: {}", cues.len());
+    for cue in &cues {
+        println!("  [{:.3}-{:.3}] {:?}", cue.start, cue.end, cue.text);
+    }
     for cue in &cues {
         println!("  [{:.1}-{:.1}] {}", cue.start, cue.end, cue.text);
     }
     assert!(segments_seen >= 2, "expected multiple segments in a 60s window");
     assert!(!cues.is_empty(), "WINDOW PRODUCED NO CUES — the regression");
     // Times must be region-absoluted & monotonic-ish and non-negative.
-    assert!(cues.iter().all(|c| c.start >= 0.0 && c.end > c.start));
+    assert!(
+        cues.iter().all(|c| c.start >= 0.0 && c.end > c.start),
+        "bad cue timing: {cues:?}"
+    );
     // Recognized text should contain CJK (the sample is Chinese).
     let joined: String = cues.iter().map(|c| c.text.clone()).collect();
     assert!(

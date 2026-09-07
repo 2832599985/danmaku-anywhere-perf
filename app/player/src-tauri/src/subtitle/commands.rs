@@ -266,8 +266,7 @@ fn run_pipeline(
         asr_model.model.display(),
         vad_model.display()
     ));
-    let mut transcriber =
-        asr::StreamingTranscriber::new(&asr_model, &vad_model, "zh", Arc::clone(cancel))?;
+    let recognizer = asr::create_recognizer(&asr_model, "zh")?;
 
     // 3. Consume the window segment by segment. Extraction (IO) and
     // inference (CPU) overlap; the loop paces with ffmpeg.
@@ -279,7 +278,13 @@ fn run_pipeline(
         if cancel.load(Ordering::Relaxed) {
             return Err(audio::CANCELLED.to_string());
         }
-        let mut seg_cues = transcriber.push_wav(&seg_path)?;
+        let mut seg_cues = asr::transcribe_segment(
+            &seg_path,
+            &vad_model,
+            &recognizer,
+            cancel,
+            |_| {},
+        )?;
         if seg_cues.is_empty() {
             logging::write(&format!(
                 "segment {processed}: 0 cues (silence or recognition empty)"
@@ -308,17 +313,6 @@ fn run_pipeline(
     }
     if cancel.load(Ordering::Relaxed) {
         return Err(audio::CANCELLED.to_string());
-    }
-    // Trailing speech still buffered in the VAD.
-    let mut tail = transcriber.finish()?;
-    for cue in &mut tail {
-        cue.start += start_secs;
-        cue.end += start_secs;
-    }
-    if !tail.is_empty() {
-        logging::write(&format!("tail: +{} cues", tail.len()));
-        all_cues.extend(tail.iter().cloned());
-        let _ = on_event.send(SubtitleEvent::Partial { cues: tail });
     }
     logging::write(&format!("window complete: {} total cues", all_cues.len()));
     Ok(all_cues)

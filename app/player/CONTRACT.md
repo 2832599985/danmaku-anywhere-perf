@@ -822,3 +822,18 @@ window scheduler — fixed [playhead, playhead+150s] window, auto-extends when
 playhead nears covered end (throttled store subscription), a seek re-anchors
 the window but DEBOUNCED 450ms so a progress-bar drag opens one window, not
 dozens. Model/CPU are free between windows, so playback never contends.
+
+### The FINAL root cause of "no subtitles" (2026-09-07) — chunked VAD feeding
+
+subtitle.log + a cue-printing test exposed it: within each 30 s segment,
+`accept_waveform` was called ONCE with all 480 000 samples, overflowing the
+VAD's 30 s circular buffer (the Overflow warning's "no data loss" claim is
+false for the head of the audio). Result: everything except the last ~0.4 s
+sliver was dropped → each segment recognized as a bare "。" pinned at the
+segment end → no visible subtitles.
+
+Fix: feed the VAD in 512-window-aligned 5120-sample chunks, draining emitted
+segments per chunk (also makes cues appear DURING segment processing), and
+drop punctuation-only cues (SenseVoice emits "。" for sub-second tail
+fragments). Verified: a 60 s window of the sample video now yields 8
+correctly-timed Chinese cues (was 2 garbage cues), all suite green.

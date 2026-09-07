@@ -1,17 +1,20 @@
-//! SenseVoice ASR with a STREAMING Silero VAD.
+//! SenseVoice ASR, segmented by Silero VAD — one VAD per extracted 30 s
+//! segment, flushed at the segment end.
 //!
-//! Timing comes from the VAD: every completed speech segment becomes one cue.
-//! SenseVoice emits no timestamps, so VAD boundaries ARE cue boundaries — the
-//! same design as sherpa-onnx's own subtitle demos and CapsWriter-Offline's
-//! VAD mode.
+//! Timing comes from the VAD: every speech span becomes one cue. SenseVoice
+//! emits no timestamps, so VAD boundaries ARE cue boundaries — the same
+//! design as sherpa-onnx's own subtitle demos and CapsWriter-Offline's VAD
+//! mode.
 //!
-//! The critical invariant: ONE VAD instance is fed the ENTIRE episode
-//! continuously (extraction segments arrive 30 s at a time and are pushed in
-//! order). The VAD is a streaming state machine — speech spanning an
-//! extraction boundary is emitted as a single complete segment, so words are
-//! never cut in half. (Per-file VAD instances were the main cause of garbled
-//! subtitles: every 30 s boundary could split a sentence into two mis-timed,
-//! half-transcribed cues.)
+//! Why per-SEGMENT VAD (a whole-window VAD was tried and reverted): a course
+//! lecture can run minutes without a 0.5 s pause, so a continuously-fed VAD
+//! buffers everything and only emits at flush — cues then arrive a whole
+//! window late and SenseVoice (30 s input capacity) truncates them into one
+//! mis-timed fragment (the "no subtitles appear" regression). Per segment,
+//! cues are PROMPT and always fit the model's input budget. The tradeoff is
+//! that speech spanning an extraction boundary may split into two cues; the
+//! 30 s segment length makes that rare and the polish below keeps either
+//! half readable.
 //!
 //! Cue polish follows standard subtitle-tool post-processing (see
 //! VideoLingo/Buzz/subtitle-edit conventions): drop sub-0.25 s blips, pad the
@@ -38,84 +41,86 @@ pub struct AsrModel {
     pub tokens: std::path::PathBuf,
 }
 
-/// Show the cue a beat before the speech starts (ms).
+/// Show the cue a beat before the speech starts.
 const LEAD_IN_SECS: f64 = 0.08;
-/// Keep the cue on screen after the speech ends (ms).
+/// Keep the cue on screen after the speech ends.
 const TAIL_OUT_SECS: f64 = 0.30;
 /// Minimum on-screen time — flashes shorter than this are unreadable.
 const MIN_CUE_SECS: f64 = 0.80;
 
-/// Streaming transcriber over the whole episode: one recognizer + one VAD.
-pub struct StreamingTranscriber {
-    recognizer: OfflineRecognizer,
-    vad: VoiceActivityDetector,
-    cancel: Arc<AtomicBool>,
+/// Transcribe ONE extracted 30 s WAV segment file, VAD-segmented and
+/// flushed at the file end. `on_cues` delivers the segment's cues for
+/// streaming display; the recognizer is created once per task and shared.
+pub fn transcribe_segment(
+    wav_path: &Path,
+    vad_model: &Path,
+    recognizer: &OfflineRecognizer,
+    cancel: &Arc<AtomicBool>,
+    mut on_cues: impl FnMut(Vec<Cue>),
+) -> Result<Vec<Cue>, String> {
+    let samples = read_wav(wav_path)?;
+    let vad = VoiceActivityDetector::create(&vad_config(vad_model), 30.0)
+        .ok_or("初始化 VAD 失败（silero-vad.onnx 缺失？）")?;
+    // Feed in 512-window-aligned chunks and drain as we go. Pushing a whole
+    // 480 000-sample segment in ONE call overflows the VAD's 30 s circular
+    // buffer (its Overflow warning lies about "no data loss" — the head of
+    // the audio is dropped and only the tail sliver gets recognized).
+    const CHUNK: usize = 512 * 10;
+    let mut cues = Vec::new();
+    for chunk in samples.chunks(CHUNK) {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(super::audio::CANCELLED.to_string());
+        }
+        vad.accept_waveform(chunk);
+        drain_vad(
+            &vad,
+            recognizer,
+            cancel,
+            &mut cues,
+            &mut on_cues,
+        );
+    }
+    vad.flush(); // finalize trailing speech so the segment yields its last cue
+    drain_vad(&vad, recognizer, cancel, &mut cues, &mut on_cues);
+    Ok(cues)
 }
 
-impl StreamingTranscriber {
-    pub fn new(
-        asr: &AsrModel,
-        vad_model: &Path,
-        language: &str,
-        cancel: Arc<AtomicBool>,
-    ) -> Result<Self, String> {
-        Ok(Self {
-            recognizer: create_recognizer(asr, language)?,
-            vad: VoiceActivityDetector::create(&vad_config(vad_model), 30.0)
-                .ok_or("初始化 VAD 失败（silero-vad.onnx 缺失？）")?,
-            cancel,
-        })
-    }
-
-    /// Feed one extracted 30 s WAV segment; returns the cues it completed.
-    /// Cue times are GLOBAL (the VAD counts all samples it has ever seen).
-    pub fn push_wav(&mut self, wav_path: &Path) -> Result<Vec<Cue>, String> {
-        let samples = read_wav(wav_path)?;
-        self.vad.accept_waveform(&samples);
-        self.drain()
-    }
-
-    /// Flush trailing speech once the last segment has been pushed.
-    pub fn finish(&mut self) -> Result<Vec<Cue>, String> {
-        self.vad.flush();
-        self.drain()
-    }
-
-    /// Transcribe every segment the VAD has queued. A segment is only queued
-    /// once its trailing silence confirms it ended, so cues are complete
-    /// sentences by construction.
-    fn drain(&mut self) -> Result<Vec<Cue>, String> {
-        let mut cues = Vec::new();
-        while !self.vad.is_empty() {
-            if self.cancel.load(Ordering::Relaxed) {
-                return Err(super::audio::CANCELLED.to_string());
-            }
-            let segment = match self.vad.front() {
-                Some(segment) => segment,
-                None => break,
-            };
-            // Copy out before pop() invalidates the front slot.
-            let samples: Vec<f32> = segment.samples().to_vec();
-            let start = segment.start() as f64 / SAMPLE_RATE as f64;
-            self.vad.pop();
-            if samples.is_empty() {
-                continue;
-            }
-
-            let stream = self.recognizer.create_stream();
-            stream.accept_waveform(SAMPLE_RATE as i32, &samples);
-            self.recognizer.decode(&stream);
-            let result = stream.get_result().ok_or("识别结果缺失")?;
-            let text = result.text.trim().to_string();
-            if text.is_empty() {
-                continue;
-            }
-
-            let raw_end = start + samples.len() as f64 / SAMPLE_RATE as f64;
-            let (start, end) = polish_cue(start, raw_end);
-            cues.push(Cue { start, end, text });
+/// Transcribe every speech segment the VAD has queued, polish, and hand each
+/// batch to `on_cues` (which also accumulates into `cues`).
+fn drain_vad(
+    vad: &VoiceActivityDetector,
+    recognizer: &OfflineRecognizer,
+    cancel: &Arc<AtomicBool>,
+    cues: &mut Vec<Cue>,
+    on_cues: &mut impl FnMut(Vec<Cue>),
+) {
+    while !vad.is_empty() {
+        if cancel.load(Ordering::Relaxed) {
+            return;
         }
-        Ok(cues)
+        let Some(segment) = vad.front() else { break };
+        let seg_samples: Vec<f32> = segment.samples().to_vec();
+        let start = segment.start() as f64 / SAMPLE_RATE as f64;
+        vad.pop();
+        if seg_samples.is_empty() {
+            continue;
+        }
+
+        let stream = recognizer.create_stream();
+        stream.accept_waveform(SAMPLE_RATE as i32, &seg_samples);
+        recognizer.decode(&stream);
+        let Some(result) = stream.get_result() else { continue };
+        let text = result.text.trim().to_string();
+        // A cue must carry at least one real character — SenseVoice sometimes
+        // emits bare punctuation for sub-second tail fragments.
+        if text.is_empty() || !text.chars().any(|c| c.is_alphanumeric()) {
+            continue;
+        }
+        let raw_end = start + seg_samples.len() as f64 / SAMPLE_RATE as f64;
+        let (start, end) = polish_cue(start, raw_end);
+        let cue = Cue { start, end, text };
+        on_cues(vec![cue.clone()]);
+        cues.push(cue);
     }
 }
 
@@ -138,7 +143,8 @@ fn vad_config(vad_model: &Path) -> VadModelConfig {
             min_silence_duration: 0.5,
             // Drop breaths/clicks shorter than a quarter second.
             min_speech_duration: 0.25,
-            // Hard cap: force-split marathon monologues.
+            // Force-split marathon speech past 10 s (the per-segment flush
+            // also bounds cues to the 30 s segment length).
             max_speech_duration: 10.0,
             window_size: 512,
         },
@@ -168,7 +174,7 @@ fn read_wav(path: &Path) -> Result<Vec<f32>, String> {
         .collect())
 }
 
-/// Build a recognizer once for the whole pipeline (model load is expensive;
+/// Build a recognizer once for the whole task (model load is expensive;
 /// per-segment reuse keeps streaming latency at inference-only cost).
 pub fn create_recognizer(asr: &AsrModel, language: &str) -> Result<OfflineRecognizer, String> {
     OfflineRecognizer::create(&recognizer_config(asr, language))
@@ -180,7 +186,7 @@ fn recognizer_config(asr: &AsrModel, language: &str) -> OfflineRecognizerConfig 
         model_config: OfflineModelConfig {
             sense_voice: OfflineSenseVoiceModelConfig {
                 model: Some(asr.model.to_string_lossy().into_owned()),
-                // "auto" | "zh" | "ja" — SenseVoice picks per-utterance in auto.
+                // Fixed zh: the scoped feature is zh-audio → zh-subtitles.
                 language: Some(language.to_string()),
                 use_itn: true,
             },
@@ -205,9 +211,8 @@ mod tests {
     use std::sync::atomic::AtomicBool;
 
     /// End-to-end VAD+ASR smoke test against the official sherpa-onnx sample
-    /// wavs, pushed through the streaming path (multiple push_wav calls of
-    /// the same file emulate multi-segment input). SKIPPED unless the model
-    /// files are present:
+    /// wavs, split in half and fed as two segment files (the follow-playhead
+    /// shape). SKIPPED unless the model files are present:
     ///   SHERPA_TEST_WAV=<16k mono wav> SHERPA_TEST_MODEL=<model.int8.onnx>
     ///   SHERPA_TEST_TOKENS=<tokens.txt> SHERPA_TEST_VAD=<silero-vad.onnx>
     #[test]
@@ -224,19 +229,11 @@ mod tests {
             model: model.into(),
             tokens: tokens.into(),
         };
-        let mut transcriber = StreamingTranscriber::new(
-            &asr,
-            Path::new(&vad),
-            "auto",
-            Arc::new(AtomicBool::new(false)),
-        )
-        .expect("create transcriber");
+        let recognizer = create_recognizer(&asr, "auto").expect("create recognizer");
 
-        // Split the wav in half on disk to prove boundary-spanning speech
-        // still yields one cue: feed the halves in order through ONE VAD.
         let samples = read_wav(Path::new(&wav)).expect("read wav");
         let half = samples.len() / 2;
-        let write_part = |name: &str, data: &[f32]| {
+        let write_part = |name: &Path, data: &[f32]| {
             let spec = hound::WavSpec {
                 channels: 1,
                 sample_rate: SAMPLE_RATE as u32,
@@ -251,12 +248,21 @@ mod tests {
         let tmp = std::env::temp_dir();
         let part0 = tmp.join("da-part0.wav");
         let part1 = tmp.join("da-part1.wav");
-        write_part(part0.to_str().unwrap(), &samples[..half]);
-        write_part(part1.to_str().unwrap(), &samples[half..]);
+        write_part(&part0, &samples[..half]);
+        write_part(&part1, &samples[half..]);
 
-        let mut cues = transcriber.push_wav(&part0).expect("push 0");
-        cues.extend(transcriber.push_wav(&part1).expect("push 1"));
-        cues.extend(transcriber.finish().expect("finish"));
+        let mut cues = Vec::new();
+        for part in [&part0, &part1] {
+            let batch = transcribe_segment(
+                part,
+                Path::new(&vad),
+                &recognizer,
+                &Arc::new(AtomicBool::new(false)),
+                |_| {},
+            )
+            .expect("push");
+            cues.extend(batch);
+        }
         let _ = std::fs::remove_file(&part0);
         let _ = std::fs::remove_file(&part1);
 
