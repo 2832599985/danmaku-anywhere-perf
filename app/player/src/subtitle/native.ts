@@ -51,6 +51,11 @@ export const transcribe = (
 
 export const cancelTranscribe = (): Promise<void> => invoke('subtitle_cancel')
 
+/** Frontend diagnostic line → app_log_dir/subtitle.log (see logging.rs). */
+export const subtitleLog = (line: string): void => {
+  void invoke('subtitle_log', { line }).catch(() => undefined)
+}
+
 export const modelStatus = (): Promise<ModelStatus[]> =>
   invoke('subtitle_model_status')
 

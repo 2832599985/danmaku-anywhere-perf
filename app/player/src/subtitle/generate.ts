@@ -2,7 +2,12 @@ import { invoke } from '@tauri-apps/api/core'
 import { usePlayerStore } from '@/store/playerStore'
 import { errorMessage } from '@/ui/shared'
 import { serializeSrt } from './format'
-import { cancelTranscribe, modelStatus, transcribe } from './native'
+import {
+  cancelTranscribe,
+  modelStatus,
+  subtitleLog,
+  transcribe,
+} from './native'
 import type { SubtitleCue } from './types'
 
 /**
@@ -54,6 +59,9 @@ const mountTrack = (videoPath: string): void => {
   if (store.media?.path !== videoPath) return
   const cues = cueCache.get(videoPath)
   if (!cues?.length) return
+  subtitleLog(
+    `mount track: cues=${cues.length} visible=${store.subtitleSettings.visible}`
+  )
   store.setSubtitles(cues, {
     label: store.sttStatus === 'idle' ? '语音识别' : '语音识别 · 生成中',
     count: cues.length,
@@ -65,6 +73,9 @@ const ingest = (videoPath: string, cues: SubtitleCue[]): void => {
   if (!cues.length) return
   const merged = mergeCues(cueCache.get(videoPath) ?? [], cues)
   cueCache.set(videoPath, merged)
+  subtitleLog(
+    `ingest +${cues.length} total=${merged.length} first=${merged[0]?.text?.slice(0, 12)}`
+  )
   mountTrack(videoPath)
 }
 
@@ -161,13 +172,28 @@ const ensureModel = async (): Promise<boolean> => {
 const scheduleWindow = async (force: boolean): Promise<void> => {
   const store = usePlayerStore.getState()
   const videoPath = store.media?.path
-  if (!videoPath || store.sttStatus !== 'idle') return
+  if (!videoPath) {
+    subtitleLog('schedule skip: no media')
+    return
+  }
+  if (store.sttStatus !== 'idle') {
+    subtitleLog('schedule skip: task already running')
+    return
+  }
   const playhead = store.playback.currentTime
-  if (!Number.isFinite(playhead) || playhead < 0) return
+  if (!Number.isFinite(playhead) || playhead < 0) {
+    subtitleLog(`schedule skip: bad playhead ${playhead}`)
+    return
+  }
 
   const until = coveredUntil.get(videoPath) ?? 0
   // Enough coverage already ahead and not a forced re-anchor → nothing to do.
-  if (!force && playhead < until - TRIGGER_SECS) return
+  if (!force && playhead < until - TRIGGER_SECS) {
+    subtitleLog(
+      `schedule skip: covered ahead until=${until.toFixed(1)} playhead=${playhead.toFixed(1)}`
+    )
+    return
+  }
 
   // Forced (button / seek): start AT the playhead. Auto-extend: continue from
   // where coverage ended (but never before the playhead).
@@ -175,7 +201,15 @@ const scheduleWindow = async (force: boolean): Promise<void> => {
   const duration = store.playback.duration
   const cap = Number.isFinite(duration) ? duration : start + WINDOW_SECS
   const end = Math.min(start + WINDOW_SECS, cap)
-  if (end - start < 5) return // at the very end / nothing left
+  if (end - start < 5) {
+    subtitleLog(
+      `schedule skip: window too short start=${start.toFixed(1)} end=${end.toFixed(1)}`
+    )
+    return // at the very end / nothing left
+  }
+  subtitleLog(
+    `window open: [${start.toFixed(1)}, ${end.toFixed(1)}] force=${force}`
+  )
 
   if (!(await ensureModel())) return
 
@@ -206,6 +240,15 @@ const scheduleWindow = async (force: boolean): Promise<void> => {
 
 /** Manual entry point (Controls capsule / settings button). */
 export const startGeneration = async (): Promise<void> => {
+  const store = usePlayerStore.getState()
+  // Clicking 生成字幕 expresses the intent to SEE subtitles — if the layer
+  // was toggled off in an earlier session (persisted), turning it back on
+  // here is what the user means; a hidden layer reads as "feature broken".
+  if (!store.subtitleSettings.visible) {
+    subtitleLog('visible was false — turning subtitles back on')
+    store.updateSubtitleSettings({ visible: true })
+    store.showOsd('字幕已开启', '🎬')
+  }
   startFollowing()
   await scheduleWindow(true)
 }

@@ -15,6 +15,7 @@ use tauri::{AppHandle, Manager, State};
 
 use super::asr::{self, AsrModel};
 use super::audio;
+use super::logging;
 use super::models::{self, DownloadEvent, ModelStatus};
 
 /// One timed subtitle line (matches the frontend `SubtitleCue` shape).
@@ -99,6 +100,11 @@ pub fn subtitle_transcribe(
     if path.trim().is_empty() {
         return Err("视频路径为空".to_string());
     }
+    let start = start_secs.unwrap_or(0.0).max(0.0);
+    let end = end_secs.unwrap_or(f64::MAX);
+    logging::write(&format!(
+        "cmd transcribe: start={start:.2} end={end:.2} path={path}"
+    ));
     let cancel = {
         let registry: State<TaskRegistry> = app.state();
         registry.try_begin()?
@@ -108,20 +114,22 @@ pub fn subtitle_transcribe(
     // (ffmpeg spawn/wait, model inference) happens on this thread so the IPC
     // reply is never held.
     std::thread::spawn(move || {
-        let result = run_pipeline(
-            &app,
-            &path,
-            start_secs.unwrap_or(0.0).max(0.0),
-            end_secs.unwrap_or(f64::MAX),
-            &on_event,
-            &cancel,
-        );
+        let result = run_pipeline(&app, &path, start, end, &on_event, &cancel);
         let registry: State<TaskRegistry> = app.state();
         registry.end();
         let event = match result {
-            Ok(cues) => SubtitleEvent::Done { cues },
-            Err(message) if message == audio::CANCELLED => SubtitleEvent::Cancelled,
-            Err(message) => SubtitleEvent::Failed { message },
+            Ok(cues) => {
+                logging::write(&format!("pipeline done: {} cues", cues.len()));
+                SubtitleEvent::Done { cues }
+            }
+            Err(message) if message == audio::CANCELLED => {
+                logging::write("pipeline cancelled");
+                SubtitleEvent::Cancelled
+            }
+            Err(message) => {
+                logging::write(&format!("pipeline failed: {message}"));
+                SubtitleEvent::Failed { message }
+            }
         };
         let _ = on_event.send(event);
     });
@@ -144,6 +152,14 @@ pub fn subtitle_save_srt(path: String, contents: String) -> Result<(), String> {
         return Err("只允许写入 .srt 字幕文件".to_string());
     }
     std::fs::write(&path, contents).map_err(|e| format!("写入字幕失败: {e}"))
+}
+
+/// Frontend diagnostic line → subtitle.log (the trace for "no subtitles").
+#[tauri::command]
+pub fn subtitle_log(app: AppHandle, line: String) -> Result<(), String> {
+    let _ = &app;
+    logging::write(&format!("[front] {line}"));
+    Ok(())
 }
 
 // --- model management ---
@@ -222,11 +238,18 @@ fn run_pipeline(
     if region_len < audio::SEGMENT_SECS * 0.4 {
         // Window too short to bother (e.g. playhead already near the video
         // end and the frontend clamped) — succeed with nothing.
+        logging::write(&format!(
+            "window too short: start={start_secs:.2} end={end_secs:.2} — skipped"
+        ));
         return Ok(Vec::new());
     }
 
     // 1. Spawn ffmpeg (extraction proceeds on its own thread).
     let _ = on_event.send(SubtitleEvent::Extracting { percent: None });
+    logging::write(&format!(
+        "extract window: start={start_secs:.2} len={region_len:.2} (5 segments of 30s expected: {})",
+        (region_len / 30.0).ceil() as usize
+    ));
     let extraction =
         audio::extract_audio_segmented(path, start_secs, Some(region_len), cancel, {
             let on_event = on_event.clone();
@@ -238,6 +261,11 @@ fn run_pipeline(
 
     // 2. Load the model while ffmpeg extracts. Fixed Chinese recognition.
     let (asr_model, vad_model) = resolve_models(app)?;
+    logging::write(&format!(
+        "models resolved: model={} vad={}",
+        asr_model.model.display(),
+        vad_model.display()
+    ));
     let mut transcriber =
         asr::StreamingTranscriber::new(&asr_model, &vad_model, "zh", Arc::clone(cancel))?;
 
@@ -252,11 +280,21 @@ fn run_pipeline(
             return Err(audio::CANCELLED.to_string());
         }
         let mut seg_cues = transcriber.push_wav(&seg_path)?;
+        if seg_cues.is_empty() {
+            logging::write(&format!(
+                "segment {processed}: 0 cues (silence or recognition empty)"
+            ));
+        }
         for cue in &mut seg_cues {
             cue.start += start_secs;
             cue.end += start_secs;
         }
         if !seg_cues.is_empty() {
+            logging::write(&format!(
+                "partial: +{} cues (first at {:.2})",
+                seg_cues.len(),
+                seg_cues.first().map(|c| c.start).unwrap_or(0.0)
+            ));
             all_cues.extend(seg_cues.iter().cloned());
             let _ = on_event.send(SubtitleEvent::Partial { cues: seg_cues });
         }
@@ -278,8 +316,10 @@ fn run_pipeline(
         cue.end += start_secs;
     }
     if !tail.is_empty() {
+        logging::write(&format!("tail: +{} cues", tail.len()));
         all_cues.extend(tail.iter().cloned());
         let _ = on_event.send(SubtitleEvent::Partial { cues: tail });
     }
+    logging::write(&format!("window complete: {} total cues", all_cues.len()));
     Ok(all_cues)
 }

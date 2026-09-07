@@ -13,4 +13,5 @@
 pub mod asr;
 pub mod audio;
 pub mod commands;
+pub mod logging;
 pub mod models;

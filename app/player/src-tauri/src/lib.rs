@@ -2,7 +2,7 @@ mod stream;
 pub mod subtitle;
 
 use subtitle::commands::{
-    subtitle_cancel, subtitle_model_download, subtitle_model_status,
+    subtitle_cancel, subtitle_log, subtitle_model_download, subtitle_model_status,
     subtitle_save_srt, subtitle_transcribe, TaskRegistry,
 };
 
@@ -14,7 +14,8 @@ use subtitle::commands::{
 ///   the webview can read local video files without tainting the WebGPU
 ///   texture source.
 /// - Manages the subtitle TaskRegistry (single-flight transcription tasks) and
-///   the subtitle command surface.
+///   the subtitle command surface, plus the subtitle diagnostic log
+///   (app_log_dir/subtitle.log — the trace for "no subtitles appeared").
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -22,12 +23,17 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
         .manage(TaskRegistry::default())
+        .setup(|app| {
+            subtitle::logging::init(app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             subtitle_transcribe,
             subtitle_cancel,
             subtitle_model_status,
             subtitle_model_download,
             subtitle_save_srt,
+            subtitle_log,
         ])
         // Async variant so large-file range reads happen off the UI thread.
         .register_asynchronous_uri_scheme_protocol("stream", |_ctx, request, responder| {
