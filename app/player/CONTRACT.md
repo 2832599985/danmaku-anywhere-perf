@@ -837,3 +837,18 @@ segments per chunk (also makes cues appear DURING segment processing), and
 drop punctuation-only cues (SenseVoice emits "。" for sub-second tail
 fragments). Verified: a 60 s window of the sample video now yields 8
 correctly-timed Chinese cues (was 2 garbage cues), all suite green.
+
+### Subtitles jumping sentences ahead (2026-09-07) — missing per-segment offset
+
+User report: while a sentence was being SPOKEN, the display jumped 1-4
+sentences ahead, re-syncing only at real sentence starts. Root cause: the
+per-segment transcription refactor dropped the `processed * 30 s` term —
+segment i's cues were stamped with only the window start, so segment 1/2/3's
+cues ran 30/60/90 s EARLY. Fixed (`offset = start_secs + i*30`), guarded by
+an offset assertion in window_transcribe (second segment's cues must land in
+[30,60), last_end > 45 s for a 60 s window).
+
+Also fixed a watermark race: coveredUntil was advanced AFTER
+setSttStatus('idle'), whose subscription fired the scheduler synchronously
+and opened an OVERLAPPING window (duplicate transcriptions of the same
+audio). Watermark now advances before going idle.

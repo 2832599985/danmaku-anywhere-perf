@@ -290,9 +290,15 @@ fn run_pipeline(
                 "segment {processed}: 0 cues (silence or recognition empty)"
             ));
         }
+        // Segment i holds audio [start + i*30, start + (i+1)*30); its VAD
+        // times are file-relative and MUST be shifted by the segment's own
+        // offset, not just the window start. Missing this term put every
+        // segment's cues 30s/60s/90s… EARLY — subtitles jumping sentences
+        // ahead of the speech, re-syncing only at each segment boundary.
+        let offset = start_secs + processed as f64 * audio::SEGMENT_SECS;
         for cue in &mut seg_cues {
-            cue.start += start_secs;
-            cue.end += start_secs;
+            cue.start += offset;
+            cue.end += offset;
         }
         if !seg_cues.is_empty() {
             logging::write(&format!(

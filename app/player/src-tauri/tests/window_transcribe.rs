@@ -42,14 +42,19 @@ fn window_yields_chinese_cues() {
             |_| {},
         )
         .expect("push");
+        // Mirror run_pipeline's offset math: segment i covers
+        // [0 + i*30, 0 + (i+1)*30) in the video timeline.
+        let offset = segments_seen as f64 * audio::SEGMENT_SECS;
+        let mut part = part;
+        for cue in &mut part {
+            cue.start += offset;
+            cue.end += offset;
+        }
         segments_seen += 1;
         cues.extend(part);
     }
 
     println!("segments consumed: {segments_seen}, cues: {}", cues.len());
-    for cue in &cues {
-        println!("  [{:.3}-{:.3}] {:?}", cue.start, cue.end, cue.text);
-    }
     for cue in &cues {
         println!("  [{:.1}-{:.1}] {}", cue.start, cue.end, cue.text);
     }
@@ -59,6 +64,14 @@ fn window_yields_chinese_cues() {
     assert!(
         cues.iter().all(|c| c.start >= 0.0 && c.end > c.start),
         "bad cue timing: {cues:?}"
+    );
+    // OFFSET REGRESSION GUARD: with the per-segment offset applied, the
+    // SECOND segment's cues must land in [30, 60) — missing the offset term
+    // collapsed them into [0, 30) (subtitles jumping sentences ahead).
+    let last_end = cues.iter().map(|c| c.end).fold(0.0, f64::max);
+    assert!(
+        last_end > 45.0,
+        "cues stop at {last_end:.1}s — per-segment offset likely missing"
     );
     // Recognized text should contain CJK (the sample is Chinese).
     let joined: String = cues.iter().map(|c| c.text.clone()).collect();

@@ -219,12 +219,14 @@ const scheduleWindow = async (force: boolean): Promise<void> => {
     const cues = await runWindow(videoPath, start, end)
     const after = usePlayerStore.getState()
     if (after.media?.path !== videoPath) return
+    // Advance the watermark BEFORE going idle: setSttStatus('idle') fires the
+    // follow subscription synchronously, and an unset watermark made the
+    // scheduler immediately open an OVERLAPPING window (duplicate
+    // transcriptions of the same audio).
+    coveredUntil.set(videoPath, Math.max(after.playback.currentTime, end))
     after.setSttStatus('idle')
     if (cues) {
       ingest(videoPath, cues)
-      // Advance the watermark even for a silent span (no cues) so the
-      // scheduler walks FORWARD instead of re-running an empty window.
-      coveredUntil.set(videoPath, Math.max(after.playback.currentTime, end))
       mountTrack(videoPath)
       void saveSrt(videoPath, cueCache.get(videoPath) ?? [])
     }
