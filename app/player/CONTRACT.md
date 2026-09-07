@@ -852,3 +852,14 @@ Also fixed a watermark race: coveredUntil was advanced AFTER
 setSttStatus('idle'), whose subscription fired the scheduler synchronously
 and opened an OVERLAPPING window (duplicate transcriptions of the same
 audio). Watermark now advances before going idle.
+
+### Long-cue splitting (2026-09-07) — ≤30 chars per cue
+
+User report: cues of 50-80 chars (fast lecture speech fills the VAD's 10 s
+cap). asr.rs now splits over-long cue TEXT (never the audio) into ≤30-char
+parts — greedy cut at punctuation inside the window when available — and
+divides [start, end] proportionally by part char count (SenseVoice gives no
+word timestamps). First part keeps the lead-in, last keeps the tail-out,
+every part ≥0.8 s. Unit tests: split_tests::long_cue_splits_proportionally /
+short_cue_untouched_except_polish. If 30 still reads long, it's one constant:
+MAX_CUE_CHARS.

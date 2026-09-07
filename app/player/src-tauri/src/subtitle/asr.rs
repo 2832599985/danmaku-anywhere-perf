@@ -118,10 +118,92 @@ fn drain_vad(
         }
         let raw_end = start + seg_samples.len() as f64 / SAMPLE_RATE as f64;
         let (start, end) = polish_cue(start, raw_end);
-        let cue = Cue { start, end, text };
-        on_cues(vec![cue.clone()]);
-        cues.push(cue);
+        // Long-lecture speech fills the VAD's 10 s cap with 50-80 characters —
+        // unreadable as one subtitle. Split the TEXT (never the audio, which
+        // would corrupt words) into ≤30-char parts and divide the time span
+        // proportionally by character count.
+        for (cue_start, cue_end, part) in split_long_cue(start, end, &text) {
+            let cue = Cue {
+                start: cue_start,
+                end: cue_end,
+                text: part,
+            };
+            on_cues(vec![cue.clone()]);
+            cues.push(cue);
+        }
     }
+}
+
+/// Max characters (CJK ≈ 1 char each) allowed on screen per cue.
+const MAX_CUE_CHARS: usize = 30;
+
+/// Split an over-long cue into ≤MAX_CUE_CHARS parts, breaking at punctuation
+/// when one falls inside the window, and divide [start, end] proportionally
+/// by part length (SenseVoice gives no word timestamps — char proportion is
+/// the standard approximation). The first part keeps the lead-in, the last
+/// keeps the tail-out, and every part respects MIN_CUE_SECS.
+fn split_long_cue(start: f64, end: f64, text: &str) -> Vec<(f64, f64, String)> {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= MAX_CUE_CHARS {
+        let (s, e) = polish_cue(start, end);
+        return vec![(s, e, text.to_string())];
+    }
+
+    // Greedy cut: take up to max chars; prefer the last punctuation inside
+    // the second half of the window so breaks land between clauses.
+    const PUNCT: [char; 12] = [
+        '，', '。', '！', '？', '、', '；', '：', '…', ' ', ',', '.', '?',
+    ];
+    let mut parts: Vec<String> = Vec::new();
+    let mut i = 0usize;
+    while i < chars.len() {
+        let remaining = chars.len() - i;
+        if remaining <= MAX_CUE_CHARS {
+            parts.push(chars[i..].iter().collect());
+            break;
+        }
+        let window_end = i + MAX_CUE_CHARS;
+        let window_start = i + MAX_CUE_CHARS / 2;
+        let mut cut = window_end;
+        for j in (window_start..window_end).rev() {
+            if PUNCT.contains(&chars[j]) {
+                cut = j + 1;
+                break;
+            }
+        }
+        parts.push(chars[i..cut].iter().collect());
+        i = cut;
+    }
+
+    // Proportional time allocation across the raw span.
+    let total_chars: usize = parts.iter().map(|p| p.chars().count()).sum();
+    let span = end - start;
+    let mut out = Vec::with_capacity(parts.len());
+    let mut cursor = start;
+    let last = parts.len() - 1;
+    for (index, part) in parts.iter().enumerate() {
+        let part_start = cursor;
+        let part_end = if index == last {
+            end
+        } else {
+            (cursor + span * (part.chars().count() as f64 / total_chars as f64))
+                .max(part_start + MIN_CUE_SECS)
+        };
+        cursor = part_end;
+        // Lead-in only on the first part, tail-out only on the last.
+        let s = if index == 0 {
+            (part_start - LEAD_IN_SECS).max(0.0)
+        } else {
+            part_start
+        };
+        let e = if index == last {
+            part_end + TAIL_OUT_SECS
+        } else {
+            part_end
+        };
+        out.push((s, e.max(s + MIN_CUE_SECS), part.clone()));
+    }
+    out
 }
 
 /// Subtitle-tool-standard cue polish: lead-in, tail-out, minimum duration.
@@ -272,5 +354,44 @@ mod tests {
             assert!(!cue.text.is_empty());
         }
         println!("cues: {:#?}", cues);
+    }
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::*;
+
+    /// A 70-char lecture sentence splits into ≤30-char parts whose times tile
+    /// [start, end] contiguously (last part keeps the tail-out).
+    #[test]
+    fn long_cue_splits_proportionally() {
+        let text = "那么这道题的解题思路其实非常简单我们只需要先求出整体的平均值然后再用平均值去乘以对应的权重比例最后再把所有的结果相加就可以得到最终答案了";
+        assert!(text.chars().count() > 60);
+        let parts = split_long_cue(100.0, 112.0, text);
+        assert!(parts.len() >= 2, "expected a split");
+        let mut t = 100.0 - LEAD_IN_SECS;
+        for (i, (s, e, txt)) in parts.iter().enumerate() {
+            assert!(
+                txt.chars().count() <= MAX_CUE_CHARS,
+                "part {i} too long: {txt}"
+            );
+            assert!(!txt.is_empty());
+            assert!((s - t).abs() < 0.35, "part {i} gap: {s} vs {t}");
+            assert!(e > s);
+            t = *e;
+        }
+        // ends at end + tail-out
+        assert!((t - (112.0 + TAIL_OUT_SECS)).abs() < 0.35);
+    }
+
+    /// Short cues pass through with polish only.
+    #[test]
+    fn short_cue_untouched_except_polish() {
+        let parts = split_long_cue(10.0, 13.0, "你好世界");
+        assert_eq!(parts.len(), 1);
+        let (s, e, txt) = &parts[0];
+        assert!((s - (10.0 - LEAD_IN_SECS)).abs() < 1e-9);
+        assert!((e - (13.0 + TAIL_OUT_SECS)).abs() < 1e-9);
+        assert_eq!(txt, "你好世界");
     }
 }
