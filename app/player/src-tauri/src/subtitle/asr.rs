@@ -1,25 +1,20 @@
-//! SenseVoice ASR, segmented by Silero VAD — one VAD per extracted 30 s
-//! segment, flushed at the segment end.
+//! SenseVoice ASR with token-timestamp cue building, fed by Silero VAD.
 //!
-//! Timing comes from the VAD: every speech span becomes one cue. SenseVoice
-//! emits no timestamps, so VAD boundaries ARE cue boundaries — the same
-//! design as sherpa-onnx's own subtitle demos and CapsWriter-Offline's VAD
-//! mode.
+//! Timing hierarchy (probed 2026-09-08, tests/probe_timestamps.rs): SenseVoice
+//! DOES return per-token timestamps (~0.12 s granularity) via
+//! `OfflineStream::get_result()`. Cue boundaries therefore come from the
+//! TOKENS (sentence punctuation + inter-token gaps), and VAD segments only
+//! partition the audio for the recognizer's input budget. When the token
+//! timestamps are unavailable, the VAD segment span is the cue span
+//! ("vad" source) — the previous behavior, kept as fallback.
 //!
-//! Why per-SEGMENT VAD (a whole-window VAD was tried and reverted): a course
-//! lecture can run minutes without a 0.5 s pause, so a continuously-fed VAD
-//! buffers everything and only emits at flush — cues then arrive a whole
-//! window late and SenseVoice (30 s input capacity) truncates them into one
-//! mis-timed fragment (the "no subtitles appear" regression). Per segment,
-//! cues are PROMPT and always fit the model's input budget. The tradeoff is
-//! that speech spanning an extraction boundary may split into two cues; the
-//! 30 s segment length makes that rare and the polish below keeps either
-//! half readable.
+//! The VAD is fed in small aligned chunks (accepting a whole segment in one
+//! call overflows its 30 s circular buffer — its Overflow warning lies about
+//! "no data loss").
 //!
-//! Cue polish follows standard subtitle-tool post-processing (see
-//! VideoLingo/Buzz/subtitle-edit conventions): drop sub-0.25 s blips, pad the
-//! start slightly before speech begins, let the text linger ~0.3 s after it
-//! ends, and enforce a minimum on-screen duration.
+//! Measured speed (12 cores): model load ~1.1 s, decoding 60 s of audio
+//! ~0.7 s total. Inference is NOT the bottleneck; the pipeline is paced by
+//! ffmpeg extraction.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,9 +43,13 @@ const TAIL_OUT_SECS: f64 = 0.30;
 /// Minimum on-screen time — flashes shorter than this are unreadable.
 const MIN_CUE_SECS: f64 = 0.80;
 
-/// Transcribe ONE extracted 30 s WAV segment file, VAD-segmented and
-/// flushed at the file end. `on_cues` delivers the segment's cues for
-/// streaming display; the recognizer is created once per task and shared.
+/// Max characters (CJK ≈ 1 char each) allowed on screen per cue.
+pub const MAX_CUE_CHARS: usize = 30;
+
+/// Transcribe ONE extracted 30 s WAV segment file. Speech segments from the
+/// VAD are recognized immediately; each result's TOKEN timestamps are turned
+/// into cues (split at sentence punctuation / token gaps). `on_cues` delivers
+/// cues for streaming display; the recognizer is created once per task.
 pub fn transcribe_segment(
     wav_path: &Path,
     vad_model: &Path,
@@ -85,8 +84,7 @@ pub fn transcribe_segment(
     Ok(cues)
 }
 
-/// Transcribe every speech segment the VAD has queued, polish, and hand each
-/// batch to `on_cues` (which also accumulates into `cues`).
+/// Recognize every speech segment the VAD has queued and emit cues.
 fn drain_vad(
     vad: &VoiceActivityDetector,
     recognizer: &OfflineRecognizer,
@@ -100,7 +98,7 @@ fn drain_vad(
         }
         let Some(segment) = vad.front() else { break };
         let seg_samples: Vec<f32> = segment.samples().to_vec();
-        let start = segment.start() as f64 / SAMPLE_RATE as f64;
+        let seg_start = segment.start() as f64 / SAMPLE_RATE as f64;
         vad.pop();
         if seg_samples.is_empty() {
             continue;
@@ -116,32 +114,144 @@ fn drain_vad(
         if text.is_empty() || !text.chars().any(|c| c.is_alphanumeric()) {
             continue;
         }
-        let raw_end = start + seg_samples.len() as f64 / SAMPLE_RATE as f64;
-        let (start, end) = polish_cue(start, raw_end);
-        // Long-lecture speech fills the VAD's 10 s cap with 50-80 characters —
-        // unreadable as one subtitle. Split the TEXT (never the audio, which
-        // would corrupt words) into ≤30-char parts and divide the time span
-        // proportionally by character count.
-        for (cue_start, cue_end, part) in split_long_cue(start, end, &text) {
-            let cue = Cue {
-                start: cue_start,
-                end: cue_end,
-                text: part,
-            };
+
+        // Token timestamps are relative to this accept_waveform call, i.e.
+        // absolute = seg_start + ts. Tokens pair 1:1 with timestamps.
+        let built = match (&result.timestamps, result.tokens.is_empty()) {
+            (Some(ts), false) if ts.len() == result.tokens.len() => {
+                build_cues_from_tokens(
+                    seg_start,
+                    &result.tokens,
+                    ts,
+                    seg_samples.len() as f64 / SAMPLE_RATE as f64,
+                )
+            }
+            _ => {
+                // Fallback: no/pairing-broken timestamps — VAD span is the cue.
+                let raw_end =
+                    seg_start + seg_samples.len() as f64 / SAMPLE_RATE as f64;
+                let (start, end) = polish_cue(seg_start, raw_end);
+                split_long_cue(start, end, &text)
+                    .into_iter()
+                    .map(|(s, e, part)| Cue {
+                        start: s,
+                        end: e,
+                        text: part,
+                    })
+                    .collect()
+            }
+        };
+        for cue in built {
             on_cues(vec![cue.clone()]);
             cues.push(cue);
         }
     }
 }
 
-/// Max characters (CJK ≈ 1 char each) allowed on screen per cue.
-const MAX_CUE_CHARS: usize = 30;
+/// Sentence-ending characters: a cue break lands after one of these.
+const SENTENCE_END: [char; 6] = ['。', '！', '？', '；', '?', '!'];
+
+/// Clause-level separators: preferred break points inside long sentences.
+const CLAUSE_BREAK: [char; 5] = ['，', '、', '：', ',', ':'];
+
+/// True when the token is pure punctuation (no letter/digit/CJK).
+fn is_punct_token(token: &str) -> bool {
+    !token
+        .chars()
+        .any(|c| c.is_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(&c))
+}
+
+/// Build cues from SenseVoice tokens + their per-token timestamps.
+///
+/// Break rules (standard subtitle-tool segmentation):
+/// - after a sentence ender (。！？；): always break
+/// - at a clause separator (，、：) when the running cue ≥ half max chars
+/// - when the running cue exceeds MAX_CUE_CHARS (hard wrap)
+///
+/// Timing: a token's cue-time span is [t_i, t_{i+1}) — the last token's end
+/// is the next token's start, so the span end is accurate to ~0.12 s (the
+/// model's timestamp quantization), no proportional guessing. Punctuation
+/// tokens are kept in the text (they carry prosody) but extend the running
+/// span without forcing breaks unless they are sentence enders.
+fn build_cues_from_tokens(
+    seg_start: f64,
+    tokens: &[String],
+    timestamps: &[f32],
+    seg_len_secs: f64,
+) -> Vec<Cue> {
+    let abs = |i: usize| seg_start + timestamps[i] as f64;
+    // The final token's end: next token's start, or the speech-segment end.
+    let token_end = |i: usize| {
+        if i + 1 < timestamps.len() {
+            abs(i + 1)
+        } else {
+            seg_start + seg_len_secs
+        }
+    };
+
+    let mut cues: Vec<Cue> = Vec::new();
+    // Index of the first token in the running cue.
+    let mut start_i = 0usize;
+    let mut chars_in_cue = 0usize;
+    // True once the running cue has at least one non-punct token.
+    let mut has_content = false;
+
+    for i in 0..tokens.len() {
+        let token = &tokens[i];
+        chars_in_cue += token.chars().count();
+        if !is_punct_token(token) {
+            has_content = true;
+        }
+        let is_last = i + 1 == tokens.len();
+        let ends_sentence = token
+            .chars()
+            .last()
+            .is_some_and(|c| SENTENCE_END.contains(&c));
+        let is_clause_break = token
+            .chars()
+            .last()
+            .is_some_and(|c| CLAUSE_BREAK.contains(&c));
+
+        let should_break = is_last
+            || ends_sentence
+            || chars_in_cue >= MAX_CUE_CHARS
+            || (is_clause_break && chars_in_cue >= MAX_CUE_CHARS / 2);
+
+        if !should_break {
+            continue;
+        }
+        // Skip emitting an all-punctuation cue (sub-second tail fragments).
+        if has_content {
+            let s = abs(start_i);
+            let e = token_end(i);
+            if e > s {
+                let (s, e) = polish_cue(s, e);
+                // Merge overlap introduced by polish (lead-in of a new cue vs
+                // tail-out of the previous one is fine; ordering is preserved
+                // because token times are monotonic).
+                let text = tokens[start_i..=i].join("");
+                cues.push(Cue { start: s, end: e, text });
+            }
+        }
+        start_i = i + 1;
+        chars_in_cue = 0;
+        has_content = false;
+    }
+    // De-overlap: a cue's tail-out can extend past the next cue's lead-in
+    // start (0.30 + 0.08 s). The renderer resolves overlaps to the
+    // later-starting cue, so the tail-out would visually cut the previous
+    // line early — clamp instead.
+    for i in 1..cues.len() {
+        if cues[i].start < cues[i - 1].end {
+            cues[i - 1].end = cues[i].start.max(cues[i - 1].start);
+        }
+    }
+    cues
+}
 
 /// Split an over-long cue into ≤MAX_CUE_CHARS parts, breaking at punctuation
 /// when one falls inside the window, and divide [start, end] proportionally
-/// by part length (SenseVoice gives no word timestamps — char proportion is
-/// the standard approximation). The first part keeps the lead-in, the last
-/// keeps the tail-out, and every part respects MIN_CUE_SECS.
+/// by part length (fallback path only — the token path never needs this).
 fn split_long_cue(start: f64, end: f64, text: &str) -> Vec<(f64, f64, String)> {
     let chars: Vec<char> = text.chars().collect();
     if chars.len() <= MAX_CUE_CHARS {
@@ -393,5 +503,81 @@ mod split_tests {
         assert!((s - (10.0 - LEAD_IN_SECS)).abs() < 1e-9);
         assert!((e - (13.0 + TAIL_OUT_SECS)).abs() < 1e-9);
         assert_eq!(txt, "你好世界");
+    }
+}
+
+#[cfg(test)]
+mod token_cue_tests {
+    use super::*;
+
+    fn tok(s: &str) -> String {
+        s.to_string()
+    }
+
+    /// A sentence-ender always ends the cue, even when short.
+    #[test]
+    fn sentence_end_breaks() {
+        let tokens = vec![tok("你"), tok("好"), tok("。"), tok("再"), tok("见"), tok("！")];
+        let ts = [0.0, 0.12, 0.24, 0.36, 0.48, 0.6];
+        let cues = build_cues_from_tokens(100.0, &tokens, &ts, 1.0);
+        assert_eq!(cues.len(), 2, "{cues:?}");
+        assert_eq!(cues[0].text, "你好。");
+        assert_eq!(cues[1].text, "再见！");
+        // absolute times = seg_start + token ts; polish applies the lead-in
+        assert!((cues[0].start - (100.0 - LEAD_IN_SECS)).abs() < 1e-6, "{:?}", cues[0].start);
+        // second cue starts at token 3 (0.36), first ends there (tail-out may
+        // extend it — verify no ORDERING violation)
+        assert!(cues[0].end <= cues[1].end);
+        assert!((cues[1].end - (100.0 + 1.0 + TAIL_OUT_SECS)).abs() < 1e-6);
+    }
+
+    /// Clauses break at ，/、/： once the cue has ≥ half the max chars.
+    #[test]
+    fn clause_breaks_at_half_max() {
+        // 20 chars before the comma: below half (15) → no break at the comma,
+        // everything stays one cue up to the sentence end.
+        let mut text = String::new();
+        for _ in 0..20 {
+            text.push('字');
+        }
+        text.push('，');
+        let tokens: Vec<String> = text.chars().map(|c| tok(c.to_string().as_str())).collect();
+        let ts: Vec<f32> = (0..tokens.len()).map(|i| (i as f32) * 0.12).collect();
+        let cues = build_cues_from_tokens(0.0, &tokens, &ts, 5.0);
+        assert_eq!(cues.len(), 1, "{cues:?}");
+
+        // 16 chars before the comma: ≥ half (15) → break at the comma.
+        let mut text2 = String::new();
+        for _ in 0..16 {
+            text2.push('字');
+        }
+        text2.push('，');
+        text2.push_str("第二句。");
+        let tokens2: Vec<String> = text2.chars().map(|c| tok(c.to_string().as_str())).collect();
+        let ts2: Vec<f32> = (0..tokens2.len()).map(|i| (i as f32) * 0.12).collect();
+        let cues2 = build_cues_from_tokens(0.0, &tokens2, &ts2, 5.0);
+        assert_eq!(cues2.len(), 2, "{cues2:?}");
+    }
+
+    /// The hard MAX_CUE_CHARS wrap applies even with no punctuation.
+    #[test]
+    fn hard_wrap_at_max_chars() {
+        let text = "字".repeat(45);
+        let tokens: Vec<String> = text.chars().map(|c| tok(c.to_string().as_str())).collect();
+        let ts: Vec<f32> = (0..tokens.len()).map(|i| (i as f32) * 0.12).collect();
+        let cues = build_cues_from_tokens(0.0, &tokens, &ts, 8.0);
+        assert!(cues.len() >= 2, "{cues:?}");
+        for cue in &cues {
+            assert!(cue.text.chars().count() <= MAX_CUE_CHARS, "{cue:?}");
+        }
+    }
+
+    /// All-punctuation content emits nothing (sub-second tail fragments).
+    #[test]
+    fn punctuation_only_emits_nothing() {
+        let tokens = vec![tok("。"), tok("。")];
+        let ts = [0.0, 0.12];
+        let cues = build_cues_from_tokens(0.0, &tokens, &ts, 0.5);
+        assert!(cues.is_empty(), "{cues:?}");
     }
 }

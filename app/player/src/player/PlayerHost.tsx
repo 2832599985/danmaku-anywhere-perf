@@ -8,7 +8,7 @@ import { parseDanmakuText } from '@/danmaku/parse'
 import type { Platform } from '@/platform'
 import { type PlaylistItem, usePlayerStore } from '@/store/playerStore'
 import { parseSubtitleText } from '@/subtitle/format'
-import { onUserSeek } from '@/subtitle/generate'
+import { onUserSeek, resetGeneration } from '@/subtitle/generate'
 import { INK, PAPER, SANS } from '@/theme/theme'
 import { Controls } from '@/ui/Controls'
 import { DanmakuSourceDialog } from '@/ui/DanmakuSourceDialog'
@@ -436,6 +436,11 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   // Same identity-recheck discipline as the danmaku sibling loader above: an
   // explicit mount or a media switch mid-read must not be clobbered.
   useEffect(() => {
+    // Invalidate every pending window/timer of the generated-subtitle
+    // scheduler — the runWindow callbacks capture mediaSession and stop
+    // acting on a stale generation (a media switch mid-window otherwise
+    // still mounts the old video's cues when the window resolves).
+    resetGeneration()
     if (!platform.isTauri || !media?.path) return
     const videoPath = media.path
     const base = videoPath.replace(/\.[^./\\]+$/, '')

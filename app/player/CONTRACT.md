@@ -863,3 +863,42 @@ word timestamps). First part keeps the lead-in, last keeps the tail-out,
 every part ≥0.8 s. Unit tests: split_tests::long_cue_splits_proportionally /
 short_cue_untouched_except_polish. If 30 still reads long, it's one constant:
 MAX_CUE_CHARS.
+
+### Pipeline rewrite: token-timestamp cues (2026-09-08) — root cause of 断句差/时间轴怪
+
+Probe (`tests/probe_timestamps.rs`, real model + real 60 s lecture audio)
+proved the assumption behind the whole VAD-boundary design WRONG:
+`OfflineStream::get_result()` DOES return `timestamps: Option<Vec<f32>>`
+pairing 1:1 with `tokens` (~0.12 s granularity, relative to the
+`accept_waveform` call; `durations` is always empty). Speed was never the
+problem either: SenseVoice int8 loads in ~1.1 s and decodes 60 s of audio in
+~0.7 s on CPU (12 cores).
+
+What changed:
+
+- `asr.rs` rewritten. Cue boundaries now come from the TOKENS
+  (`build_cues_from_tokens`): break after sentence enders (。！？；), at
+  clause separators (，、：) once a cue has ≥ MAX_CUE_CHARS/2 chars, hard
+  wrap at MAX_CUE_CHARS (30). A token's time span is [t_i, t_{i+1}) — real
+  per-character timing, no char-proportional guessing. `split_long_cue`
+  survives only as the fallback when timestamps are missing/mismatched.
+  Adjacent cues are de-overlapped (tail-out vs next lead-in) because the
+  renderer resolves overlaps to the later cue, which visually truncated the
+  previous line.
+- Verified on the real lecture wav: cues now split semantically (15-22 chars,
+  clause-aligned) with token-accurate times, contiguous, no overlaps — vs the
+  old output's 45-char cues with invented proportional times. Unit tests: 7
+  (4 new token_cue_tests + the real-sample e2e).
+- `generate.ts` hardened: `mediaSession` counter captured by every async step
+  (runWindow callbacks, debounced seek timer, saveSrt) — a media switch (or
+  reopen of the same path) no longer lets a stale generation mount cues; the
+  watermark also clamps to the actual window end. `resetGeneration()` is
+  called by PlayerHost's sibling-subtitle effect on every media change.
+  Playhead-follow log lines throttled to once/15 s (the old log drowned real
+  events in `schedule skip` spam).
+- VAD params unchanged (min_silence 0.5 s now only partitions recognizer
+  input, cue shape no longer depends on it).
+
+Gates at rewrite time: cargo test 7/7 + real-audio e2e, tsc 0 errors, biome
+clean, vite build OK. Exe-level verification (verify-exe / manual run on a
+real lecture) still pending at the time of this note.

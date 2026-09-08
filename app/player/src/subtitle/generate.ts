@@ -18,8 +18,8 @@ import type { SubtitleCue } from './types'
  * (150 s of audio ≈ a ~2 s task) and stops. As playback nears the covered
  * end, the next window opens automatically; a seek into an uncovered spot
  * (debounced so a progress-bar drag doesn't storm cancels) re-anchors the
- * window to the new playhead. The model loads once per window but the CPU is
- * free between windows, so video playback never contends with it.
+ * window to the new playhead. Inference is cheap (measured: 60 s audio
+ * decodes in ~0.7 s on CPU), so the pipeline is paced by ffmpeg extraction.
  *
  * Coverage is tracked on a 30 s grid and cues MERGE across windows (dedup by
  * start|text). The durable artifact is <video>.srt, reloaded as a sibling on
@@ -31,17 +31,39 @@ const WINDOW_SECS = 150
 const TRIGGER_SECS = 60
 /** Seek restart is debounced by this much (progress-bar drag = many seeks). */
 const SEEK_DEBOUNCE_MS = 450
+/** Progress-log throttle: only log playhead advancement once per this many s. */
+const LOG_STEP_SECS = 15
 
 /** Seconds of covered audio ahead of the playhead per video path. */
 const coveredUntil = new Map<string, number>()
 /** Session cue cache per video path — merged across windows. */
 const cueCache = new Map<string, SubtitleCue[]>()
-
+/**
+ * Monotonic id of the CURRENT media. Every async step (window run, debounced
+ * timers, cancel waits) captures it and stops acting when it no longer
+ * matches — the path-based identity check reads the same initially but two
+ * windows of the SAME old path can both resolve after the user reopens that
+ * path; mediaSession disambiguates stale generations.
+ */
+let mediaSession = 0
 let followingStarted = false
 let seekTimer: number | null = null
+let lastLogPlayhead = Number.NEGATIVE_INFINITY
 
 export const isGenerating = (): boolean =>
   usePlayerStore.getState().sttStatus !== 'idle'
+
+/** Drop all session state for a media switch (called by PlayerHost). */
+export const resetGeneration = (): void => {
+  mediaSession += 1
+  coveredUntil.clear()
+  cueCache.clear()
+  if (seekTimer) {
+    window.clearTimeout(seekTimer)
+    seekTimer = null
+  }
+  lastLogPlayhead = Number.NEGATIVE_INFINITY
+}
 
 const mergeCues = (
   existing: SubtitleCue[],
@@ -54,9 +76,9 @@ const mergeCues = (
   return [...existing, ...fresh].sort((a, b) => a.start - b.start)
 }
 
-const mountTrack = (videoPath: string): void => {
+const mountTrack = (videoPath: string, session: number): void => {
   const store = usePlayerStore.getState()
-  if (store.media?.path !== videoPath) return
+  if (session !== mediaSession || store.media?.path !== videoPath) return
   const cues = cueCache.get(videoPath)
   if (!cues?.length) return
   subtitleLog(
@@ -69,19 +91,22 @@ const mountTrack = (videoPath: string): void => {
   })
 }
 
-const ingest = (videoPath: string, cues: SubtitleCue[]): void => {
+const ingest = (
+  videoPath: string,
+  cues: SubtitleCue[],
+  session: number
+): void => {
   if (!cues.length) return
+  if (session !== mediaSession) return
   const merged = mergeCues(cueCache.get(videoPath) ?? [], cues)
   cueCache.set(videoPath, merged)
-  subtitleLog(
-    `ingest +${cues.length} total=${merged.length} first=${merged[0]?.text?.slice(0, 12)}`
-  )
-  mountTrack(videoPath)
+  mountTrack(videoPath, session)
 }
 
 const saveSrt = async (
   videoPath: string,
-  cues: SubtitleCue[]
+  cues: SubtitleCue[],
+  session: number
 ): Promise<void> => {
   const base = videoPath.replace(/\.[^./\\]+$/, '')
   try {
@@ -95,14 +120,15 @@ const saveSrt = async (
 }
 
 /**
- * Run ONE window [start, end]. Resolves when the window finishes (null on
- * media-switch / cancel). Progress is per-window so the capsule never sits
- * "100% then keeps running".
+ * Run ONE window [start, end]. Resolves with the window's cues when it
+ * finishes (null on media-switch/cancel/stale). Progress is per-window so
+ * the capsule never sits "100% then keeps running".
  */
 const runWindow = (
   videoPath: string,
   start: number,
-  end: number
+  end: number,
+  session: number
 ): Promise<SubtitleCue[] | null> =>
   new Promise((resolve, reject) => {
     let settled = false
@@ -112,7 +138,10 @@ const runWindow = (
       fn()
     }
     void transcribe(videoPath, start, end, (event) => {
-      if (usePlayerStore.getState().media?.path !== videoPath) {
+      if (
+        session !== mediaSession ||
+        usePlayerStore.getState().media?.path !== videoPath
+      ) {
         void cancelTranscribe()
         finish(() => resolve(null))
         return
@@ -126,7 +155,7 @@ const runWindow = (
           s.setSttStatus('transcribing', event.percent)
           break
         case 'partial':
-          ingest(videoPath, event.cues)
+          ingest(videoPath, event.cues, session)
           break
         case 'done':
           finish(() => resolve(event.cues))
@@ -170,6 +199,7 @@ const ensureModel = async (): Promise<boolean> => {
  * following logic and the manual button share one path (no restart storms).
  */
 const scheduleWindow = async (force: boolean): Promise<void> => {
+  const session = mediaSession
   const store = usePlayerStore.getState()
   const videoPath = store.media?.path
   if (!videoPath) {
@@ -177,21 +207,25 @@ const scheduleWindow = async (force: boolean): Promise<void> => {
     return
   }
   if (store.sttStatus !== 'idle') {
-    subtitleLog('schedule skip: task already running')
     return
   }
   const playhead = store.playback.currentTime
   if (!Number.isFinite(playhead) || playhead < 0) {
-    subtitleLog(`schedule skip: bad playhead ${playhead}`)
     return
   }
+
+  // Log playhead-driven checks sparsely; the full log drowned real events.
+  const verbose = force || playhead - lastLogPlayhead >= LOG_STEP_SECS
+  if (playhead - lastLogPlayhead >= 3) lastLogPlayhead = playhead
 
   const until = coveredUntil.get(videoPath) ?? 0
   // Enough coverage already ahead and not a forced re-anchor → nothing to do.
   if (!force && playhead < until - TRIGGER_SECS) {
-    subtitleLog(
-      `schedule skip: covered ahead until=${until.toFixed(1)} playhead=${playhead.toFixed(1)}`
-    )
+    if (verbose) {
+      subtitleLog(
+        `schedule skip: covered ahead until=${until.toFixed(1)} playhead=${playhead.toFixed(1)}`
+      )
+    }
     return
   }
 
@@ -202,9 +236,6 @@ const scheduleWindow = async (force: boolean): Promise<void> => {
   const cap = Number.isFinite(duration) ? duration : start + WINDOW_SECS
   const end = Math.min(start + WINDOW_SECS, cap)
   if (end - start < 5) {
-    subtitleLog(
-      `schedule skip: window too short start=${start.toFixed(1)} end=${end.toFixed(1)}`
-    )
     return // at the very end / nothing left
   }
   subtitleLog(
@@ -212,31 +243,40 @@ const scheduleWindow = async (force: boolean): Promise<void> => {
   )
 
   if (!(await ensureModel())) return
+  if (session !== mediaSession) return
 
   store.setSttError(null)
   store.setSttStatus('extracting', 0)
+  let cues: SubtitleCue[] | null = null
+  let failed: string | null = null
   try {
-    const cues = await runWindow(videoPath, start, end)
-    const after = usePlayerStore.getState()
-    if (after.media?.path !== videoPath) return
-    // Advance the watermark BEFORE going idle: setSttStatus('idle') fires the
-    // follow subscription synchronously, and an unset watermark made the
-    // scheduler immediately open an OVERLAPPING window (duplicate
-    // transcriptions of the same audio).
-    coveredUntil.set(videoPath, Math.max(after.playback.currentTime, end))
-    after.setSttStatus('idle')
-    if (cues) {
-      ingest(videoPath, cues)
-      mountTrack(videoPath)
-      void saveSrt(videoPath, cueCache.get(videoPath) ?? [])
-    }
+    cues = await runWindow(videoPath, start, end, session)
   } catch (error) {
-    const s = usePlayerStore.getState()
-    if (s.media?.path !== videoPath) return
-    const message = errorMessage(error)
-    s.setSttError(message)
-    s.setSttStatus('idle')
-    s.showOsd(`字幕生成失败: ${message.slice(0, 60)}`, '⬇')
+    failed = errorMessage(error)
+  }
+  const after = usePlayerStore.getState()
+  if (session !== mediaSession || after.media?.path !== videoPath) return
+  // Advance the watermark BEFORE going idle: setSttStatus('idle') fires the
+  // follow subscription synchronously, and an unset watermark made the
+  // scheduler immediately open an OVERLAPPING window (duplicate
+  // transcriptions of the same audio). Clamp to the actual end so a window
+  // cancelled at the video tail doesn't claim silence it never checked.
+  coveredUntil.set(videoPath, Math.max(coveredUntil.get(videoPath) ?? 0, end))
+  after.setSttStatus('idle')
+  if (failed !== null) {
+    // A cancellation surfaces as an error through runWindow's reject path
+    // (cancel during extraction/inference); treat CANCELLED-ish messages as
+    // a quiet stop, not a user-facing failure.
+    if (!/cancel|取消/i.test(failed)) {
+      after.setSttError(failed)
+      after.showOsd(`字幕生成失败: ${failed.slice(0, 60)}`, '⬇')
+    }
+    return
+  }
+  if (cues) {
+    ingest(videoPath, cues, session)
+    mountTrack(videoPath, session)
+    void saveSrt(videoPath, cueCache.get(videoPath) ?? [], session)
   }
 }
 
@@ -304,8 +344,7 @@ export const cancelGeneration = async (): Promise<void> => {
   await cancelTranscribe()
 }
 
-/** Reset session state (media switch / tests). */
+/** Reset session state (tests). */
 export const resetCoverageForTests = (): void => {
-  coveredUntil.clear()
-  cueCache.clear()
+  resetGeneration()
 }
