@@ -2,6 +2,7 @@ import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
+import type { FilenameRule } from '@/danmaku/filenameRules'
 import type { PickedMedia } from '@/platform/types'
 import type { SubtitleCue, SubtitleSource } from '@/subtitle/types'
 import {
@@ -165,6 +166,14 @@ export interface PlayerStore {
   // --- resume history (persisted, keyed by absolute file path) ---
   progress: Record<string, ResumeEntry>
 
+  /**
+   * Learned file-name shapes (persisted, global): one entry per manual
+   * season/episode choice, replayed for the rest of the download batch. Unlike
+   * `danmakuSearchPrefill` this is knowledge, not per-media state, so it
+   * survives media switches.
+   */
+  filenameRules: FilenameRule[]
+
   // --- persisted settings ---
   upscale: UpscaleSettings
   danmakuSettings: DanmakuSettings
@@ -239,6 +248,18 @@ export interface PlayerStore {
   saveProgress: (path: string, time: number, duration: number) => void
   /** forget the resume point for a local file (e.g. watched to the end). */
   clearProgress: (path: string) => void
+
+  // --- learned file-name rule actions ---
+  /**
+   * Store a rule learned from a manual season/episode choice. An existing rule
+   * with the same pattern is UPDATED in place (the newest pick wins) — that is
+   * how a wrong rule gets corrected: pick the right episode once more.
+   */
+  addFilenameRule: (rule: FilenameRule) => void
+  removeFilenameRule: (id: string) => void
+  clearFilenameRules: () => void
+  /** count an automatic mount that used this rule (settings list + ranking). */
+  recordFilenameRuleHit: (id: string) => void
 }
 
 let osdSeq = 0
@@ -247,9 +268,51 @@ let osdSeq = 0
 const PLAYLIST_MAX = 200
 /** Upper bound on persisted resume points (least recently updated are dropped). */
 const PROGRESS_MAX = 500
+/** Upper bound on learned file-name rules (least recently used are dropped). */
+const RULES_MAX = 100
 
 /** Dedup key for a playlist item: absolute path when local, else the url. */
 const playlistKey = (item: PlaylistItem): string => item.path ?? item.url
+
+/**
+ * Rebuild one persisted learned rule, dropping anything malformed. Rules come
+ * from localStorage (hand-editable, and written by older builds), so nothing
+ * here may throw — a bad entry is skipped, not fatal.
+ */
+const normalizeFilenameRule = (value: unknown): FilenameRule | null => {
+  if (!value || typeof value !== 'object') return null
+  const rule = value as Partial<FilenameRule>
+  if (typeof rule.id !== 'string' || typeof rule.pattern !== 'string') {
+    return null
+  }
+  const season = rule.season
+  if (!season || typeof season.bangumiId !== 'string') return null
+  return {
+    id: rule.id,
+    pattern: rule.pattern,
+    sample: typeof rule.sample === 'string' ? rule.sample : '',
+    folder: typeof rule.folder === 'string' ? rule.folder : '',
+    season: {
+      bangumiId: season.bangumiId,
+      title: typeof season.title === 'string' ? season.title : '',
+      episodeCount:
+        typeof season.episodeCount === 'number' ? season.episodeCount : 0,
+    },
+    episode: typeof rule.episode === 'number' ? rule.episode : 0,
+    hits: typeof rule.hits === 'number' ? rule.hits : 0,
+    updatedAt: typeof rule.updatedAt === 'number' ? rule.updatedAt : 0,
+  }
+}
+
+const normalizeFilenameRules = (values: unknown): FilenameRule[] => {
+  if (!Array.isArray(values)) return []
+  const out: FilenameRule[] = []
+  for (const value of values) {
+    const rule = normalizeFilenameRule(value)
+    if (rule) out.push(rule)
+  }
+  return out
+}
 
 /**
  * Clamp a number between min and max (inclusive).
@@ -321,6 +384,8 @@ export const usePlayerStore = create<PlayerStore>()(
       playlistOpen: false,
 
       progress: {},
+
+      filenameRules: [],
 
       upscale: DEFAULT_UPSCALE,
       danmakuSettings: DEFAULT_DANMAKU,
@@ -634,6 +699,48 @@ export const usePlayerStore = create<PlayerStore>()(
         set((s) => {
           if (path in s.progress) delete s.progress[path]
         }),
+
+      addFilenameRule: (rule) =>
+        set((s) => {
+          const existing = s.filenameRules.find(
+            (r) => r.pattern === rule.pattern
+          )
+          if (existing) {
+            // The user just picked again for the same shape → newest wins.
+            existing.season = rule.season
+            existing.episode = rule.episode
+            existing.sample = rule.sample
+            existing.folder = rule.folder
+            existing.hits += 1
+            existing.updatedAt = Date.now()
+          } else {
+            s.filenameRules.push(rule)
+          }
+          // Bound the list so it cannot grow forever in localStorage.
+          if (s.filenameRules.length > RULES_MAX) {
+            s.filenameRules = [...s.filenameRules]
+              .sort((a, b) => a.updatedAt - b.updatedAt)
+              .slice(s.filenameRules.length - RULES_MAX)
+          }
+        }),
+
+      removeFilenameRule: (id) =>
+        set((s) => {
+          s.filenameRules = s.filenameRules.filter((r) => r.id !== id)
+        }),
+
+      clearFilenameRules: () =>
+        set((s) => {
+          s.filenameRules = []
+        }),
+
+      recordFilenameRuleHit: (id) =>
+        set((s) => {
+          const rule = s.filenameRules.find((r) => r.id === id)
+          if (!rule) return
+          rule.hits += 1
+          rule.updatedAt = Date.now()
+        }),
     })),
     {
       name: 'danmaku-player-settings',
@@ -648,6 +755,7 @@ export const usePlayerStore = create<PlayerStore>()(
         subtitleSettings: state.subtitleSettings,
         playlist: state.playlist.filter((i) => !!i.path),
         progress: state.progress,
+        filenameRules: state.filenameRules,
       }),
       // Deep-merge persisted settings over defaults so settings fields ADDED in
       // newer versions (e.g. playbackSettings.autoAdvance) keep their default
@@ -661,6 +769,7 @@ export const usePlayerStore = create<PlayerStore>()(
           subtitleSettings?: Partial<SubtitleSettings>
           playlist?: PlaylistItem[]
           progress?: Record<string, ResumeEntry>
+          filenameRules?: FilenameRule[]
         }
         return {
           ...current,
@@ -692,6 +801,11 @@ export const usePlayerStore = create<PlayerStore>()(
             p.progress && typeof p.progress === 'object'
               ? p.progress
               : current.progress,
+          // Learned knowledge has no defaults to merge — keep whatever is
+          // stored, minus anything malformed.
+          filenameRules: Array.isArray(p.filenameRules)
+            ? normalizeFilenameRules(p.filenameRules)
+            : current.filenameRules,
         }
       },
     }

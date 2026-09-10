@@ -90,9 +90,14 @@ export const searchSeasons = async (keyword: string): Promise<DdpSeason[]> => {
   }))
 }
 
-/** Fetch a season's episodes (with real episode numbers). */
+/**
+ * Fetch a season's episodes (with real episode numbers).
+ *
+ * Only `bangumiId` is used, so a learned `FilenameRule` can pass its own
+ * minimal season object instead of faking the search-result fields.
+ */
 export const fetchSeasonEpisodes = async (
-  season: DdpSeason
+  season: Pick<DdpSeason, 'bangumiId'>
 ): Promise<DdpEpisode[]> => {
   ensureConfigured()
   const result = await getBangumiAnime(season.bangumiId)

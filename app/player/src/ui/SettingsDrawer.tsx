@@ -11,6 +11,7 @@ import {
   VERMILION,
 } from '@/theme/theme'
 import { DanmakuSettings } from './DanmakuSettings'
+import { FilenameRulesSettings } from './FilenameRulesSettings'
 import { SubtitleSettings } from './SubtitleSettings'
 import { UpscaleSettings } from './UpscaleSettings'
 
@@ -18,6 +19,7 @@ type SettingsPage =
   | 'shortcuts'
   | 'playback'
   | 'danmaku'
+  | 'patterns'
   | 'upscale'
   | 'subtitle'
   | 'about'
@@ -501,6 +503,7 @@ export const SettingsDrawer = () => {
     { id: 'shortcuts', zh: '快捷键' },
     { id: 'playback', zh: '播放' },
     { id: 'danmaku', zh: '弹幕' },
+    { id: 'patterns', zh: '命名格式' },
     { id: 'upscale', zh: '画质增强' },
     { id: 'subtitle', zh: '字幕' },
     { id: 'about', zh: '关于' },
@@ -701,6 +704,7 @@ export const SettingsDrawer = () => {
             {page === 'shortcuts' && <ShortcutsPage />}
             {page === 'playback' && <PlaybackSettingsPage />}
             {page === 'danmaku' && <DanmakuSettings />}
+            {page === 'patterns' && <FilenameRulesSettings />}
             {page === 'upscale' && <UpscaleSettings />}
             {page === 'subtitle' && <SubtitleSettings />}
             {page === 'about' && <AboutPage />}

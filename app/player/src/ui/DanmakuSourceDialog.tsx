@@ -15,6 +15,7 @@ import {
   fetchSeasonEpisodes,
   searchSeasons,
 } from '@/danmaku/ddp'
+import { learnRule } from '@/danmaku/filenameRules'
 import { usePlayerCommands } from '@/player/commands'
 import { useFullscreenPortalContainer } from '@/player/fullscreenPortal'
 import { usePlayerStore } from '@/store/playerStore'
@@ -184,10 +185,30 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
     setError(null)
     try {
       const comments = await fetchEpisodeComments(ep.episodeId)
-      usePlayerStore.getState().setComments(comments, {
+      const store = usePlayerStore.getState()
+      store.setComments(comments, {
         label: `${season.title} · ${ep.title}`,
         count: comments.length,
       })
+      // This is the only place a human picks a season + episode by hand, so it
+      // is where the file-name shape becomes known. The next file of the same
+      // batch then mounts without asking (see `filenameRules`).
+      const path = store.media?.path
+      if (path && store.danmakuSettings.learnFilenamePatterns) {
+        const rule = learnRule({
+          filePath: path,
+          episode: Number(ep.episodeNumber),
+          season: {
+            bangumiId: season.bangumiId,
+            title: season.title,
+            episodeCount: season.episodeCount,
+          },
+        })
+        if (rule) {
+          store.addFilenameRule(rule)
+          store.showOsd('已记住此命名格式 · 下次自动匹配', '📐')
+        }
+      }
       onDone()
     } catch (e) {
       setError(errorMessage(e))

@@ -979,3 +979,89 @@ guards for `第11话 [1080p]` → 11 and "never silently use episode 1"), plus t
 shared package's 50 migrated tests and the extension suite (47 files / 360
 tests). Exe-level: `e2e/_verify-anime-match.mjs` (temporary) opens two
 anime-named fixtures via CDP.
+
+## 22. Learned file-name rules (2026-09-11 — DONE, verified in exe)
+
+**Reported need (user):** "when the user picks episode 10 by hand, we now know
+which digits are the episode — so next time this naming shape should just
+work." One download batch repeats a single shape and changes only the episode
+number, so one manual pick is enough information for the whole season.
+Confirmed choices: apply automatically + a settings page to review/delete;
+rules apply across folders (same folder ranked first).
+
+**Where the picker actually comes from.** The built-in AI is good at the
+episode number (see §21), so the picker mostly opens when the *search* fails —
+e.g. `BLEACH 千年血战篇-诀别谭-` has no DanDanPlay entry (DDP lists the show as
+`死神`, bangumiId 2369), so every derived keyword returns 0 results and the
+match ends as `notFound`. That is the case this section was verified against.
+
+**Model** (`src/danmaku/filenameRules.ts`, pure functions):
+
+```ts
+interface FilenameRule {
+  id, pattern, sample, folder,
+  season: { bangumiId, title, episodeCount },
+  episode, hits, updatedAt,
+}
+```
+
+- `learnRule({ filePath, episode, season })` — runs only from the picker's
+  episode click (`DanmakuSourceDialog.handlePickEpisode`), i.e. only from a
+  decision a human actually made on this file. Returns null (learn nothing)
+  when the choice cannot be expressed as a shape:
+  - the picked episode is not a positive integer (`SP1` specials),
+  - the number does not appear in the file name, or appears **more than once**
+    (`Bleach - 10 - 10`) — ambiguity is never resolved by guessing,
+  - the digit run is glued to a letter (`1080p`, `x264`, `10bit`, and also
+    `E10`/`S01E10`, which the shared parser already handles),
+  - the resulting pattern would keep fewer than 3 literal characters
+    (`10.mkv` → `^(\d{1,4})$` would match any bare-numbered file anywhere).
+- `pattern` = `^` + literal prefix + `(\d{1,4})` + a short literal tail (up to
+  the next digit run, max 6 chars). Every other digit run before the episode
+  becomes `\d+`, so per-file differences — resolution, a trailing CRC hash —
+  do not break the match. Anchoring at the start is what keeps the show name
+  (and usually the sub group) literal, which is why cross-folder matching is
+  safe. Matching is case-insensitive; corrupt persisted patterns are skipped,
+  never thrown.
+- No `episodeCount` check anywhere: DDP's search-level count is unreliable
+  (死神 reports 366 in search, 460 in the bangumi detail). The episode list from
+  `/v2/bangumi/{id}` is the only authority — `findEpisodeByNumber` decides.
+
+**Order of resolution in `PlayerHost`:** sibling file → **learned rules** → AI
+→ DanDanPlay search. Rules outrank the AI because they are user-confirmed, skip
+a model call and a search, and work offline. A rule hit that resolves a season
+but not that episode does not silently fall back: it opens the picker on the
+learned season with the number highlighted and the note
+`命名规则命中的集数不在这一季`. Transport failures fall through to the AI path.
+
+**Store:** `filenameRules` (persisted, capped at 100 by `updatedAt`, sanitized
+through `normalizeFilenameRules` on rehydrate). It is knowledge, not per-media
+state, so unlike `danmakuSearchPrefill` it is NOT cleared on a media switch.
+`addFilenameRule` updates in place when the pattern already exists — which is
+exactly how a wrong rule is corrected: pick the right episode once more.
+`recordFilenameRuleHit` counts automatic mounts (shown in the settings list).
+New setting `danmakuSettings.learnFilenamePatterns` (default on) disables both
+learning and applying.
+
+**Settings page:** `src/ui/FilenameRulesSettings.tsx` (nav `命名格式`, after
+弹幕) — toggle, the folder/sample/`→ season · 第N集 · 命中 h 次` per rule, per-rule
+delete, and 清空全部规则.
+
+**Verification (packaged exe, CDP, three phases).** Fixtures were three copies
+of `e2e/fixtures/test.mp4` named
+`[Sakurato] BLEACH 千年血战篇-诀别谭- [10|11|12][AVC AAC][1080p].mkv`:
+
+- learn — opening `[10]` opens the picker (`notFound`); searching 死神 by hand
+  and clicking 第10集 learned
+  `^\[Sakurato\] BLEACH 千年血战篇-诀别谭- \[(\d{1,4})\]\[AVC ` bound to
+  `{ bangumiId: '2369', title: '死神', episodeCount: 366 }`, episode 10, folder
+  recorded, OSD `已记住此命名格式 · 下次自动匹配`. 9/9 checks.
+- apply (after a page reload, so the rule was re-read through the persist
+  `merge`) — `[11]` mounted `死神 · 第11话 传说中的灭却师` (1196 comments) with
+  **no picker**, hits 1, OSD `按命名格式匹配 · 第11集 · 1196 条`.
+- restart (fresh exe process) — `[12]` mounted 第12话, hits 2, and the settings
+  page listed the rule. 6/6 checks.
+
+Unit tests: `src/danmaku/filenameRules.test.ts` (19 cases) — prefix/skeleton
+shapes, CRC and resolution variation, cross-show non-matches, every refusal
+above, corrupt-pattern tolerance, and the `orderRules` ranking.

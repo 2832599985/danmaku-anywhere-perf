@@ -1,3 +1,4 @@
+import { findEpisodeByNumber } from '@danmaku-anywhere/media-parser'
 import { Alert, Box, createTheme, ThemeProvider, useTheme } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { aiExtractTitle } from '@/danmaku/ai'
@@ -7,6 +8,7 @@ import {
   fetchSeasonEpisodes,
   searchSeasons,
 } from '@/danmaku/ddp'
+import { matchRule, REASON_RULE_EPISODE_MISSING } from '@/danmaku/filenameRules'
 import { filterComments } from '@/danmaku/filter'
 import { parseDanmakuText } from '@/danmaku/parse'
 import type { Platform } from '@/platform'
@@ -405,6 +407,52 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       ) {
         return
       }
+      // --- learned file-name rules (no sibling file, no AI yet) ---
+      // A rule is a shape the user already resolved BY HAND once; replaying it
+      // skips both the model call and the search, so it outranks the AI and
+      // works offline. (See `src/danmaku/filenameRules.ts`.)
+      if (s.danmakuSettings.learnFilenamePatterns) {
+        const hit = matchRule(s.filenameRules, videoPath)
+        if (hit) {
+          try {
+            const list = await fetchSeasonEpisodes(hit.rule.season)
+            s = usePlayerStore.getState()
+            if (stale || s.media?.path !== videoPath || s.danmakuSource) return
+
+            const episode = findEpisodeByNumber(list, hit.episode)
+            if (!episode) {
+              // The shape matched but that number is not in the learned season:
+              // ask, prefilled on the season we know — never guess.
+              s.setDanmakuDialogOpen(true, {
+                keyword: hit.rule.season.title,
+                targetEpisode: hit.episode,
+                note: REASON_RULE_EPISODE_MISSING,
+              })
+              s.showOsd(`${REASON_RULE_EPISODE_MISSING} · 请选择`, '❓')
+              return
+            }
+
+            const comments = await fetchEpisodeComments(episode.episodeId)
+            s = usePlayerStore.getState()
+            if (stale || s.media?.path !== videoPath || s.danmakuSource) return
+            if (!comments.length) return
+            s.setComments(comments, {
+              label: `${hit.rule.season.title} · ${episode.title}`,
+              count: comments.length,
+            })
+            s.recordFilenameRuleHit(hit.rule.id)
+            s.showOsd(
+              `按命名格式匹配 · 第${hit.episode}集 · ${comments.length} 条`,
+              '📐'
+            )
+            return
+          } catch {
+            // Season gone / offline: fall through to the AI path, which ends in
+            // the picker rather than in nothing.
+          }
+        }
+      }
+
       const info = await aiExtractTitle(basename(videoPath))
       if (!info) return
       s = usePlayerStore.getState()

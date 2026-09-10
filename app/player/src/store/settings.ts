@@ -91,6 +91,12 @@ export interface DanmakuSettings {
    * danmaku. Tauri only; silent no-op on network/parse failure.
    */
   autoOnlineMatch: boolean
+  /**
+   * Remember the file-name shape behind a manual season/episode choice and
+   * replay it for later files of the same batch (learned rules run before the
+   * AI). Off = neither learn nor apply; rules already learned are kept.
+   */
+  learnFilenamePatterns: boolean
 }
 
 /** How the player handles detected OP/ED segments. */
@@ -162,6 +168,7 @@ export const DEFAULT_DANMAKU: DanmakuSettings = {
   mergeDuplicates: false,
   filters: [],
   autoOnlineMatch: true,
+  learnFilenamePatterns: true,
 }
 
 export const DEFAULT_PLAYBACK: PlaybackSettings = {
