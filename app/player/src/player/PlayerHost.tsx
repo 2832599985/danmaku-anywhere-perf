@@ -435,7 +435,13 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             const comments = await fetchEpisodeComments(episode.episodeId)
             s = usePlayerStore.getState()
             if (stale || s.media?.path !== videoPath || s.danmakuSource) return
-            if (!comments.length) return
+            if (!comments.length) {
+              // The rule resolved the episode correctly — DanDanPlay just has
+              // nothing for it (a freshly aired episode). Say so instead of
+              // looking stuck.
+              s.showOsd(`第${hit.episode}集暂无弹幕`, '💬')
+              return
+            }
             s.setComments(comments, {
               label: `${hit.rule.season.title} · ${episode.title}`,
               count: comments.length,
@@ -483,9 +489,12 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       } catch {
         return
       }
-      if (!comments.length) return
       s = usePlayerStore.getState()
       if (stale || s.media?.path !== videoPath || s.danmakuSource) return
+      if (!comments.length) {
+        s.showOsd(`${outcome.episode.title || '该集'}暂无弹幕`, '💬')
+        return
+      }
       s.setComments(comments, {
         label: `${outcome.season.title} · ${outcome.episode.title}`,
         count: comments.length,

@@ -1010,12 +1010,22 @@ interface FilenameRule {
   decision a human actually made on this file. Returns null (learn nothing)
   when the choice cannot be expressed as a shape:
   - the picked episode is not a positive integer (`SP1` specials),
-  - the number does not appear in the file name, or appears **more than once**
-    (`Bleach - 10 - 10`) — ambiguity is never resolved by guessing,
+  - no digit run in the name equals it,
   - the digit run is glued to a letter (`1080p`, `x264`, `10bit`, and also
     `E10`/`S01E10`, which the shared parser already handles),
   - the resulting pattern would keep fewer than 3 literal characters
-    (`10.mkv` → `^(\d{1,4})$` would match any bare-numbered file anywhere).
+    (`10.mkv` → `^(\d{1,4})$` would match any bare-numbered file anywhere),
+  - the pattern does not read the picked episode back out of its own sample
+    (a self-check on the construction above; numeric compare, so a zero-padded
+    copy still passes).
+- A number MAY legitimately appear more than once — scraped download names
+  repeat it (`幼女战记 第二季 第 10 集：第10集 · 稀饭动漫 Next.mp4`), and both
+  copies always move together, so the first becomes the capture and the other
+  is a wildcard. Requiring uniqueness here (the first cut did) made the whole
+  feature silently no-op on that entire library. The one duplicate that does
+  NOT move with the episode is a **season** number (`第2季 第2集`), so runs
+  followed by 季/部/期/`st|nd|rd|th` (or preceded by `Season`/`Part`) are
+  dropped from the candidates instead of being captured.
 - `pattern` = `^` + literal prefix + `(\d{1,4})` + a short literal tail (up to
   the next digit run, max 6 chars). Every other digit run before the episode
   becomes `\d+`, so per-file differences — resolution, a trailing CRC hash —
@@ -1033,6 +1043,9 @@ a model call and a search, and work offline. A rule hit that resolves a season
 but not that episode does not silently fall back: it opens the picker on the
 learned season with the number highlighted and the note
 `命名规则命中的集数不在这一季`. Transport failures fall through to the AI path.
+An episode that resolves but has **zero comments on DanDanPlay** (normal for a
+just-aired episode) now says `第N集暂无弹幕` instead of looking stuck — silence
+there sent the user hunting for a bug that was not there.
 
 **Store:** `filenameRules` (persisted, capped at 100 by `updatedAt`, sanitized
 through `normalizeFilenameRules` on rehydrate). It is knowledge, not per-media
@@ -1047,21 +1060,32 @@ learning and applying.
 弹幕) — toggle, the folder/sample/`→ season · 第N集 · 命中 h 次` per rule, per-rule
 delete, and 清空全部规则.
 
-**Verification (packaged exe, CDP, three phases).** Fixtures were three copies
-of `e2e/fixtures/test.mp4` named
-`[Sakurato] BLEACH 千年血战篇-诀别谭- [10|11|12][AVC AAC][1080p].mkv`:
+**Verification (packaged exe, CDP).** First pass used BLEACH-shaped fixtures and
+passed 9/9 + 5/5 + 6/6, but the user reported the feature doing nothing on their
+own files — the naming there repeats the episode number, which the first cut
+refused. Re-verified with their real convention
+(`幼女战记 第二季 第 N 集：第N集 · 稀饭动漫 Next`, DDP lists the show as
+`幼女战记Ⅱ` / bangumiId 16392, and its episodes 11-12 have **zero** comments):
 
-- learn — opening `[10]` opens the picker (`notFound`); searching 死神 by hand
-  and clicking 第10集 learned
-  `^\[Sakurato\] BLEACH 千年血战篇-诀别谭- \[(\d{1,4})\]\[AVC ` bound to
-  `{ bangumiId: '2369', title: '死神', episodeCount: 366 }`, episode 10, folder
-  recorded, OSD `已记住此命名格式 · 下次自动匹配`. 9/9 checks.
-- apply (after a page reload, so the rule was re-read through the persist
-  `merge`) — `[11]` mounted `死神 · 第11话 传说中的灭却师` (1196 comments) with
-  **no picker**, hits 1, OSD `按命名格式匹配 · 第11集 · 1196 条`.
-- restart (fresh exe process) — `[12]` mounted 第12话, hits 2, and the settings
-  page listed the rule. 6/6 checks.
+- learn — opening `第 5 集` opens the picker (the AI's `幼女战记 第二季` matches
+  no DDP title exactly, and `chooseSeason` returns null rather than picking a
+  wrong season), expanding 幼女战记Ⅱ and clicking 第5集 learns
+  `^幼女战记 第二季 第 (\d{1,4}) 集：第` bound to 16392. 9/9 checks.
+- apply (after a store reload, so the rule came back through the persist
+  `merge`) — `第 6 集` mounts `幼女战记Ⅱ · 第6话 诱饵` with no picker, hits 1.
+  5/5.
+- restart (fresh exe process) — `第 7 集` mounts, hits 2; `第 11 集` (0 DDP
+  comments) shows `第11集暂无弹幕` and does **not** open the picker. 5/5.
 
-Unit tests: `src/danmaku/filenameRules.test.ts` (19 cases) — prefix/skeleton
-shapes, CRC and resolution variation, cross-show non-matches, every refusal
-above, corrupt-pattern tolerance, and the `orderRules` ranking.
+Unit tests: `src/danmaku/filenameRules.test.ts` (22 cases) — prefix/skeleton
+shapes, CRC and resolution variation, cross-show non-matches, repeated and
+zero-padded episode numbers, the season-slot guard, corrupt-pattern tolerance,
+and the `orderRules` ranking.
+
+**Verification hygiene (learned the hard way):** the exe keeps localStorage in
+the shared WebView2 profile (`%LOCALAPPDATA%/app.danmaku.player`), so a harness
+that clears `danmaku-player-settings` to get a clean boot wipes the real user's
+playlist, resume history and settings. Launch the exe with
+`WEBVIEW2_USER_DATA_FOLDER=<temp dir>` when verifying, or capture and restore
+the key around the run. Persistence across a relaunch still works inside that
+temp folder.

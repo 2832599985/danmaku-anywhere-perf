@@ -49,8 +49,47 @@ describe('learnRule', () => {
     expect(rule?.pattern).toBe('^葬送的芙莉莲 - 第(\\d{1,4})话')
   })
 
-  it('refuses when the episode number appears more than once', () => {
-    expect(learn('Bleach - 10 - 10.mkv', 10)).toBeNull()
+  it('learns a repeated episode number (scraped page titles)', () => {
+    // The 稀饭动漫 download names spell the episode twice; both copies move
+    // together, so the first one becomes the capture.
+    const rule = learn(
+      '幼女战记 第二季 第 10 集：第10集 · 稀饭动漫 Next.mp4',
+      10
+    )
+    expect(rule).not.toBeNull()
+    expect(rule?.pattern).toBe('^幼女战记 第二季 第 (\\d{1,4}) 集：第')
+    expect(
+      matchRule(
+        [rule as FilenameRule],
+        '幼女战记 第二季 第 11 集：第11集 · 稀饭动漫 Next.mp4'
+      )?.episode
+    ).toBe(11)
+  })
+
+  it('handles the zero-padded copy of the same name', () => {
+    const rule = learn(
+      '恶女不才，请多关照 ～雏宫蝶鼠换身传～ 第 9 集：第09集 · 稀饭动漫 Next.mp4',
+      9
+    )
+    expect(rule).not.toBeNull()
+    expect(
+      matchRule(
+        [rule as FilenameRule],
+        '恶女不才，请多关照 ～雏宫蝶鼠换身传～ 第 10 集：第10集 · 稀饭动漫 Next.mp4'
+      )?.episode
+    ).toBe(10)
+  })
+
+  it('never captures a season number that equals the episode', () => {
+    const rule = learn('Show 第2季 第2集.mkv', 2)
+    expect(rule?.pattern).toBe('^Show 第\\d+季 第(\\d{1,4})集')
+    expect(
+      matchRule([rule as FilenameRule], 'Show 第2季 第5集.mkv')?.episode
+    ).toBe(5)
+  })
+
+  it('refuses when every occurrence is a season number', () => {
+    expect(learn('Show 第2季 Part2.mkv', 2)).toBeNull()
   })
 
   it('refuses when no digit run equals the picked episode', () => {

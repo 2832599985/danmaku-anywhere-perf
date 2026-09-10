@@ -98,6 +98,22 @@ const candidateRuns = (base: string): DigitRun[] =>
     return !/[A-Za-z]/.test(before) && !/[A-Za-z]/.test(after)
   })
 
+/**
+ * True when the run is really a SEASON number (`第2季`, `Season 2`, `Part 2`),
+ * which must never be mistaken for the episode even when the two values
+ * coincide — that is the one duplicate that does NOT move with the episode
+ * (`第2季 第2集` → next file is `第2季 第3集`).
+ */
+const isSeasonSlot = (base: string, run: DigitRun): boolean => {
+  const after = base.slice(
+    run.index + run.text.length,
+    run.index + run.text.length + 4
+  )
+  if (/^\s*(季|部|期|st|nd|rd|th)/i.test(after)) return true
+  const before = base.slice(Math.max(0, run.index - 8), run.index)
+  return /(season|part)\s*$/i.test(before)
+}
+
 export interface LearnRuleInput {
   /** Absolute path of the file the user just matched by hand. */
   filePath: string
@@ -116,12 +132,15 @@ export function learnRule(input: LearnRuleInput): FilenameRule | null {
   if (!Number.isInteger(episode) || episode <= 0) return null
 
   const base = basenameWithoutExt(input.filePath)
-  // Ambiguous (the number appears twice, e.g. "Bleach - 10 - 10") or absent
-  // (the user typed a number that is not in the name at all) — do not learn.
+  // A number can legitimately appear more than once: scraped episode titles
+  // repeat it ("第 10 集：第10集 · 稀饭动漫 Next"), and both copies always move
+  // together, so either one identifies the episode. The exception is a run that
+  // is really a season number (`第2季 第2集`) — that one does NOT move with the
+  // episode, so it is dropped from the candidates instead of being captured.
   const candidates = candidateRuns(base).filter(
-    (run) => Number(run.text) === episode
+    (run) => Number(run.text) === episode && !isSeasonSlot(base, run)
   )
-  if (candidates.length !== 1) return null
+  if (candidates.length === 0) return null
   const slot = candidates[0]
 
   const runs = digitRuns(base)
@@ -154,9 +173,14 @@ export function learnRule(input: LearnRuleInput): FilenameRule | null {
   // anywhere on disk — refuse to learn from names with no other content.
   if (literalChars < MIN_LITERAL_CHARS) return null
 
+  const pattern = `${prefix.join('')}${escapeRegExp(tail)}`
+  // Self-check: the pattern must read the picked episode back out of the very
+  // file it was built from (numeric compare — the name may zero-pad, "第09集").
+  if (Number(new RegExp(pattern, 'i').exec(base)?.[1]) !== episode) return null
+
   return {
     id: crypto.randomUUID(),
-    pattern: `${prefix.join('')}${escapeRegExp(tail)}`,
+    pattern,
     sample: base,
     folder: dirname(input.filePath),
     season: input.season,
