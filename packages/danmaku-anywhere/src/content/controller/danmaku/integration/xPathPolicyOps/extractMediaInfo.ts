@@ -1,8 +1,7 @@
+import { MediaParser, sortSelectors } from '@danmaku-anywhere/media-parser'
 import type { IntegrationPolicy } from '@/common/options/integrationPolicyStore/schema'
 import { MediaInfo } from '@/content/controller/danmaku/integration/models/MediaInfo'
-import { sortSelectors } from '@/content/controller/danmaku/integration/xPathPolicyOps/mediaRegexMatcher'
 import type { MediaElements } from '../observers/MediaObserver'
-import { MediaParser } from './MediaParser'
 
 type MediaExtractionResult =
   | {

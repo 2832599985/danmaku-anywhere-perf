@@ -47,6 +47,7 @@
     "@danmaku-anywhere/danmaku-provider": "workspace:*",
     "@danmaku-anywhere/upscale-engine": "workspace:*",
     "@danmaku-anywhere/integration-policy": "workspace:*",
+    "@danmaku-anywhere/media-parser": "workspace:*",
     "@danmaku-anywhere/result": "workspace:*",
     "@danmaku-anywhere/web-scraper": "workspace:*",
     "@dnd-kit/core": "^6.3.1",

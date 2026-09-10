@@ -9,6 +9,7 @@ const config: KnipConfig = {
     },
     'packages/result': {},
     'packages/integration-policy': {},
+    'packages/media-parser': {},
     'packages/bangumi-api': {},
     'packages/danmaku-converter': {},
     'packages/danmaku-engine': {},

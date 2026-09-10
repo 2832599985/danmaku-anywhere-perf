@@ -1,9 +1,9 @@
+import { sortSelectors } from '@danmaku-anywhere/media-parser'
 import type {
   IntegrationPolicy,
   IntegrationPolicySelector,
 } from '@/common/options/integrationPolicyStore/schema'
 import { getElementByXpath } from '@/common/utils/utils'
-import { sortSelectors } from '@/content/controller/danmaku/integration/xPathPolicyOps/mediaRegexMatcher'
 import type { MediaElements } from '../observers/MediaObserver'
 
 function matchFirstNode(

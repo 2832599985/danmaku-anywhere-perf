@@ -40,6 +40,9 @@ importers:
       '@danmaku-anywhere/danmaku-provider':
         specifier: workspace:*
         version: link:../../packages/danmaku-provider
+      '@danmaku-anywhere/media-parser':
+        specifier: workspace:*
+        version: link:../../packages/media-parser
       '@danmaku-anywhere/result':
         specifier: workspace:*
         version: link:../../packages/result
@@ -107,6 +110,9 @@ importers:
       vite:
         specifier: ^7.2.4
         version: 7.3.1(@types/node@25.5.0)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.97.3)(tsx@4.22.4)(yaml@2.8.2)
+      vitest:
+        specifier: ^4.0.13
+        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(jsdom@28.1.0(@noble/hashes@2.0.1))(vite@7.3.1(@types/node@25.5.0)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.97.3)(tsx@4.22.4)(yaml@2.8.2))
 
   app/web:
     dependencies:
@@ -378,6 +384,9 @@ importers:
       '@danmaku-anywhere/integration-policy':
         specifier: workspace:*
         version: link:../integration-policy
+      '@danmaku-anywhere/media-parser':
+        specifier: workspace:*
+        version: link:../media-parser
       '@danmaku-anywhere/result':
         specifier: workspace:*
         version: link:../result
@@ -628,6 +637,12 @@ importers:
       zod:
         specifier: ^4.3.5
         version: 4.3.6
+    devDependencies:
+      vitest:
+        specifier: ^4.0.13
+        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(jsdom@28.1.0(@noble/hashes@2.0.1))(vite@7.3.1(@types/node@25.5.0)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.97.3)(tsx@4.22.4)(yaml@2.8.2))
+
+  packages/media-parser:
     devDependencies:
       vitest:
         specifier: ^4.0.13

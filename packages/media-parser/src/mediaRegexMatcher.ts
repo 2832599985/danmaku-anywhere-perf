@@ -1,5 +1,5 @@
-import { PATTERNS } from './mediaRegexPatterns'
-import type { ExtractorMatch } from './types'
+import { PATTERNS } from './mediaRegexPatterns.js'
+import type { ExtractorMatch } from './types.js'
 
 export const mediaRegexMatcher = {
   // for running user-provided regexes

@@ -1,4 +1,5 @@
 import type { Season } from '@danmaku-anywhere/danmaku-converter'
+import { findBestMatchingSeason } from '@danmaku-anywhere/media-parser'
 import { inject, injectable } from 'inversify'
 import { SeasonService } from '@/background/services/persistence/SeasonService'
 import { TitleMappingService } from '@/background/services/persistence/TitleMappingService'
@@ -14,7 +15,6 @@ import {
 } from '../../providers/ProviderFactory'
 import { EpisodeResolutionService } from '../EpisodeResolutionService'
 import type { IMatchingStrategy } from './IMatchingStrategy'
-import { findBestMatchingSeason } from './titleMatch'
 
 @injectable()
 export class MediaServerMatchingStrategy implements IMatchingStrategy {

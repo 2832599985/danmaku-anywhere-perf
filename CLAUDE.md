@@ -98,6 +98,7 @@ danmaku-anywhere/
 │   ├── upscale-engine/     # Anime4K WebGPU super-resolution engine (fork)
 │   ├── bangumi-api/        # Bangumi API client with auto-generated schemas
 │   ├── integration-policy/ # XPath/AI integration policy types
+│   ├── media-parser/       # Shared season/episode parsing + matching (extension + player)
 │   ├── result/             # Result<T, E> type (@danmaku-anywhere/result)
 │   └── web-scraper/        # Web scraping utilities
 ├── app/player/             # Local Tauri v2 desktop danmaku player (fork)
@@ -344,10 +345,12 @@ Tauri v2 + React 19 desktop player (fork feature) that reuses the workspace engi
 - `UpscaleController` 的 renderer 回调（`onDiagnostics`/`onFirstFrameRendered`/`onError` 等）必须用**渲染器身份** `this.renderer === renderer` 守卫，**不能**用操作 `epoch`：`update()` 会 `++epoch` 丢弃过期异步结果但不换渲染器，epoch 守卫会在第一次设置更新后让闭包捕获的旧 epoch 永远失配，静默丢弃所有诊断 → HUD 冻住/消失直到换视频重建闭包。
 - `UpscaleController.apply()` 必须串行化（挂在 promise 链后），`disable()` 同步不进链。否则持久化 `upscale.enabled=true` 时打开视频，open effect 与异步 HDR-detect effect 会在 `this.renderer` 仍为 null 时并发跑两个 `Renderer.create()`；canvas 的 WebGPU context 是单例，输家的 `destroy()`→`context.unconfigure()` 会废掉赢家活着的 context → 呈现循环 `getCurrentTexture` 抛 `context is not configured` → onError → HUD 归 null。串行后第二个 apply 总能看到第一个的渲染器已装好而走 in-place update。
 - 长按 → 临时倍速（`playbackSettings.holdSpeed`）：用浏览器 key auto-repeat 区分长短按（首次非 repeat keydown 不动作，keyup 时没 repeat 过=短按 seek、repeat 过=恢复倍速），**不用**固定毫秒阈值（慢短按不会被吞）。进倍速前**快照**全局倍速——`setPlaybackRate` 触发 ratechange 把 `store.playbackRate` 也改成 held 值，松手读 store 就拿不到原全局倍速（全局 1.5 长按 3 松手会错回 3 而非 1.5）。失焦（blur）与卸载也要恢复，防倍速卡住。
+- 弹幕匹配**不许猜**：`episodeFromFilename`/`findEpisodeByNumber`/`chooseSeason` 解析不出时一律返回空，**绝不**退回"第一集"或"第一个搜索结果"（旧的"取标题里最后一个数字 + `episodes[0]` 兜底"就是"11 集挂成第 1 集"的根因；注意 `第11话 [1080p]` 的最后一个数字是 1080）。解析不确定时打开 `DanmakuSourceDialog` 并带 `danmakuSearchPrefill` 让用户选。季/集/集标题的解析在 `packages/media-parser`（与插件共享）——要改就改那里，不要在播放器里再抄一份。
+- 播放器查 DanDanPlay 必须和插件一样走两步：先 `/v2/search/anime` 拿季，再 `/v2/bangumi/{id}` 拿集——搜索接口返回的集列表**没有 `episodeNumber`**（只有标题），而集匹配正是靠这个字段。
 
 **Manga ink theme + new features (post-redesign):**
 - Design tokens: `INK`/`PAPER`/`VERMILION`/`GOLD`/`GREEN`; atoms in `src/ui/ink.tsx` (InkToggleGroup/InkSwitch/InkSlider/InkStamp/InkSection/InkBlinkDot/InkPanelHeader/InkLabel); keyframes in `public/app.css`.
-- AI auto-match: `src/danmaku/ai.ts` (free built-in AI via `@danmaku-anywhere/danmaku-provider/genAi`) + `src/danmaku/autoMatch.ts` (pickSeason/pickEpisode heuristics). Runs after sibling-file autoload; gated on `danmakuSettings.autoOnlineMatch`.
+- AI auto-match: `src/danmaku/ai.ts` (free built-in AI via `@danmaku-anywhere/danmaku-provider/genAi`, tagged `inputType: 'filename'`) + `src/danmaku/autoMatch.ts`. Season/episode resolution runs through `@danmaku-anywhere/media-parser` — the SAME helpers the extension uses — and never guesses (see hard rules). Runs after sibling-file autoload; gated on `danmakuSettings.autoOnlineMatch`. When it cannot decide, it opens the danmaku dialog pre-searched (`danmakuSearchPrefill`) instead of mounting a wrong episode.
 - Danmaku filter chain: `src/danmaku/filter.ts` (blocked words plain+regex + merge-duplicates, applied before render).
 - OP/ED inference: `src/player/useOpEdMarks.ts` (danmaku density heuristic, shared by ProgressBar gold ticks + skip-OP button). Skip mode `playbackSettings.skipOpEd` (auto/ask/off).
 - A/B compare: canvas `clip-path` via `compareRatio` store field; keyboard C. Upscale toggle keyboard U.

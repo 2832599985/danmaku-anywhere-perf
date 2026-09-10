@@ -8,6 +8,7 @@ import type {
 } from '@danmaku-anywhere/danmaku-converter'
 import type { DanmakuProviderError } from '@danmaku-anywhere/danmaku-provider'
 import * as danDanPlay from '@danmaku-anywhere/danmaku-provider/ddp'
+import { findEpisodeByNumber } from '@danmaku-anywhere/media-parser'
 import type { Result } from '@danmaku-anywhere/result'
 import type { DanmakuFetchByMeta } from '@/common/danmaku/dto'
 import { DanmakuSourceType } from '@/common/danmaku/enums'
@@ -15,7 +16,6 @@ import { assertProviderType, isProvider } from '@/common/danmaku/utils'
 import type { ILogger } from '@/common/Logger'
 import type { DanDanPlayProviderConfig } from '@/common/options/providerConfig/schema'
 import { tryCatch } from '@/common/utils/tryCatch'
-import { findEpisodeByNumber } from '../common/findEpisodeByNumber'
 import type {
   IDanmakuProvider,
   OmitSeasonId,

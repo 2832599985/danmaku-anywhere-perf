@@ -32,6 +32,9 @@
       "@danmaku-anywhere/danmaku-engine": [
         "../../packages/danmaku-engine/src/index.ts"
       ],
+      "@danmaku-anywhere/media-parser": [
+        "../../packages/media-parser/src/index.ts"
+      ],
       "@danmaku-anywhere/upscale-engine": [
         "../../packages/upscale-engine/src/index.ts"
       ],

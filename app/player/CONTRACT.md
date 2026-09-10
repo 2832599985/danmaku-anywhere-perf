@@ -902,3 +902,80 @@ What changed:
 Gates at rewrite time: cargo test 7/7 + real-audio e2e, tsc 0 errors, biome
 clean, vite build OK. Exe-level verification (verify-exe / manual run on a
 real lecture) still pending at the time of this note.
+
+## 21. Danmaku auto-match: shared parser + episode picker (2026-09-10)
+
+**Reported problem:** the player kept matching the wrong episode ("episode 11
+becomes episode 1"), or matched nothing at all, with no way for the user to
+correct it.
+
+**The AI was not the problem.** Probing the built-in endpoint with nine
+realistically-named anime files returned the correct episode for 9/9
+(`第11话 [1080p]` → 11, `Frieren - 07 [WebRip 1080p]` → 7, and a lecture
+recording correctly rejected as "not a show"). The AI also returns
+`altTitles`. It does occasionally mis-transcribe CJK characters (title
+garbling), which the fallbacks below absorb.
+
+**What was actually wrong** (`src/danmaku/autoMatch.ts`, all removed):
+
+1. `episodeFromTitle` took the **last number in a title** as the episode, so
+   `第11话 [1080p]` parsed as **1080** — the extension's `PATTERNS.EPISODE`
+   regexes (`E11` / `Episode 11` / `第11话` / `S01E11` + Chinese numerals) were
+   never ported. (The extension already documents this exact trap in
+   `MacCmsProviderService.extractEpisodeNumber`.)
+2. `pickEpisode` silently returned `episodes[0]` — **episode 1** — whenever the
+   number could not be resolved. This is the reported symptom.
+3. `pickSeason` silently returned `animes[0]`.
+4. `altTitles` from the AI were discarded.
+5. The player searched `/v2/search/episodes` (episode lists carry titles only);
+   the extension searches `/v2/search/anime` and then fetches
+   `/v2/bangumi/{id}`, which carries a real `episodeNumber`.
+6. Every failure path was silent — nothing mounted and nothing told the user.
+
+**Mechanism is now literally shared with the extension.** New workspace package
+`packages/media-parser` (`@danmaku-anywhere/media-parser`) holds the migrated
+helpers: `mediaRegexPatterns`/`mediaRegexMatcher`/`chineseToNumber`/`MediaParser`
+(from the extension's `xPathPolicyOps`), `titleMatch`
+(`findBestMatchingSeason`/`extractSeasonHint`/`normalizeTitle`) and
+`findEpisodeByNumber`. The extension now imports them instead of its local
+copies (11 files deleted there; its suite stays green).
+
+**New flow** (`autoMatch.ts` → `PlayerHost` → picker):
+
+- Keywords tried in order until one returns results: the AI title, its
+  `altTitles`, `cleanFilenameTitle(filename)`, the shared parser's
+  `searchTitle`, then the raw basename. `cleanFilenameTitle` strips release
+  metadata (`[WebRip 1080p]`, `AVC AAC`, `★10月新番`, sub-group tags), unwraps
+  brackets that hold the title, and drops the episode marker — it is what saves
+  the match when the AI garbles the title.
+- Target episode: the filename's explicit marker first (cannot be
+  hallucinated), the AI's answer as the fallback.
+- Season: `chooseSeason` mirrors `SearchMatchingStrategy` — a single search
+  result wins; otherwise `findBestMatchingSeason` with a season hint
+  (`第二季`/`S2`/`Season 2`); otherwise **null**.
+- Episode: `findEpisodeByNumber` (real `episodeNumber`, else the title regexes).
+  **No fallback to `episodes[0]`** — that is the bug this exists to kill.
+- Any indecision (`ambiguous`/`notFound`) opens `DanmakuSourceDialog` on the
+  online tab, pre-searched on the keyword that actually had results, with the
+  season expanded, its episodes lazy-loaded from the bangumi endpoint and the
+  guessed episode highlighted. A filename the AI does not recognise as a show
+  stays silent (no picker on lecture recordings).
+- Store: `danmakuSearchPrefill` (session-only, cleared on media switch);
+  `setDanmakuDialogOpen(open, prefill?)`.
+
+**Provider client (`ddp.ts`) now matches the extension:** `searchSeasons`
+(`/v2/search/anime`) + `fetchSeasonEpisodes` (`/v2/bangumi/{id}`) +
+`fetchEpisodeComments`. Types renamed to the canonical `title` field so the
+shared matchers apply without adapters.
+
+**Prompt note:** the proxy's prompt is written for page HTML while the player
+sends a filename, so the client now sends `inputType: 'filename'`
+(`@danmaku-anywhere/danmaku-provider/genAi`). The deployed proxy is upstream's
+and ignores the field; this is forward-compatible only — no deploy was made and
+none is required.
+
+**Verification:** 18 unit tests in `src/danmaku/autoMatch.test.ts` (regression
+guards for `第11话 [1080p]` → 11 and "never silently use episode 1"), plus the
+shared package's 50 migrated tests and the extension suite (47 files / 360
+tests). Exe-level: `e2e/_verify-anime-match.mjs` (temporary) opens two
+anime-named fixtures via CDP.

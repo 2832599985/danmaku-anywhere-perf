@@ -57,6 +57,20 @@ export interface DanmakuSource {
   count: number
 }
 
+/**
+ * Opening state for the danmaku source dialog. The automatic matcher fills
+ * this in when it cannot pick a season/episode on its own, so the dialog opens
+ * pre-searched with the episode we believe we want already highlighted.
+ */
+export interface DanmakuSearchPrefill {
+  /** Search keyword (the show title we parsed out of the file name). */
+  keyword: string
+  /** Episode number to highlight; 0/undefined = unknown, let the user pick. */
+  targetEpisode?: number
+  /** Short reason line shown above the results ("未能确定是第几集"). */
+  note?: string
+}
+
 /** Live renderer statistics for the HUD (session-only, ~1s cadence). */
 export interface UpscaleStats {
   /** presented frames per second over the report window. */
@@ -136,6 +150,12 @@ export interface PlayerStore {
   /** which page the settings window shows (also used to deep-link into it). */
   settingsSection: string
   danmakuDialogOpen: boolean
+  /**
+   * What the danmaku source dialog should open with. Set by the automatic
+   * matcher when it cannot decide on its own (prefilled keyword + the episode
+   * number it believes it wants, highlighted in the list). Session-only.
+   */
+  danmakuSearchPrefill: DanmakuSearchPrefill | null
 
   // --- playlist (session-only) ---
   playlist: PlaylistItem[]
@@ -182,7 +202,15 @@ export interface PlayerStore {
   setSettingsSection: (section: string) => void
   /** open the settings window directly on a given page. */
   openSettingsAt: (section: string) => void
-  setDanmakuDialogOpen: (open: boolean) => void
+  /**
+   * Open/close the danmaku source dialog. Pass a prefill to have it open on
+   * the online tab with the search box filled in and (optionally) an episode
+   * highlighted; pass nothing for the plain manual entry point.
+   */
+  setDanmakuDialogOpen: (
+    open: boolean,
+    prefill?: DanmakuSearchPrefill | null
+  ) => void
 
   updateUpscale: (partial: UpscaleSettingsPatch) => void
   updateDanmakuSettings: (partial: Partial<DanmakuSettings>) => void
@@ -245,6 +273,9 @@ function resetPlaybackForNewMedia(s: PlayerStore): void {
   s.sttStatus = 'idle'
   s.sttProgress = 0
   s.sttError = null
+  // The prefill describes the PREVIOUS file's show; a stale one would open the
+  // picker on the wrong title after a media switch.
+  s.danmakuSearchPrefill = null
   s.playback = {
     ...INITIAL_PLAYBACK,
     volume: s.playback.volume,
@@ -283,6 +314,7 @@ export const usePlayerStore = create<PlayerStore>()(
       settingsOpen: false,
       settingsSection: 'shortcuts',
       danmakuDialogOpen: false,
+      danmakuSearchPrefill: null,
 
       playlist: [],
       playlistIndex: -1,
@@ -415,9 +447,14 @@ export const usePlayerStore = create<PlayerStore>()(
           s.settingsOpen = true
         }),
 
-      setDanmakuDialogOpen: (open) =>
+      setDanmakuDialogOpen: (open, prefill) =>
         set((s) => {
           s.danmakuDialogOpen = open
+          // An explicit `undefined` keeps whatever was there (re-opening the
+          // dialog from the toolbar shouldn't wipe an active prefill); an
+          // explicit null clears it.
+          if (prefill !== undefined) s.danmakuSearchPrefill = prefill
+          if (!open) s.danmakuSearchPrefill = null
         }),
 
       updateUpscale: (partial) =>

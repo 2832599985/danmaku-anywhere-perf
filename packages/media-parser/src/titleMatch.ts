@@ -1,3 +1,5 @@
+import { chineseToNumber } from './chineseToNumber.js'
+
 export function normalizeTitle(title: string): string {
   return title
     .toLowerCase()
@@ -12,7 +14,7 @@ const seasonPatterns: {
   // Chinese: 第一季, 第二季, ..., 第十季
   {
     pattern: /第([一二三四五六七八九十百千]+)季/,
-    extract: (m) => chineseToNumber(m[1]),
+    extract: (m) => chineseToNumber(m[1]) ?? 0,
   },
   // Chinese: 第1季, 第2季
   { pattern: /第(\d+)季/, extract: (m) => Number.parseInt(m[1], 10) },
@@ -26,35 +28,6 @@ const seasonPatterns: {
     extract: (m) => romanToNumber(m[1]),
   },
 ]
-
-const chineseNumberMap: Record<string, number> = {
-  一: 1,
-  二: 2,
-  三: 3,
-  四: 4,
-  五: 5,
-  六: 6,
-  七: 7,
-  八: 8,
-  九: 9,
-  十: 10,
-}
-
-function chineseToNumber(str: string): number {
-  if (str.length === 1) return chineseNumberMap[str] ?? 0
-  // Handle 十一 = 11, 二十 = 20, 二十三 = 23
-  let result = 0
-  if (str.startsWith('十')) {
-    result = 10 + (chineseNumberMap[str[1]] ?? 0)
-  } else if (str.includes('十')) {
-    const parts = str.split('十')
-    result =
-      (chineseNumberMap[parts[0]] ?? 0) * 10 + (chineseNumberMap[parts[1]] ?? 0)
-  } else {
-    result = chineseNumberMap[str] ?? 0
-  }
-  return result
-}
 
 const romanMap: Record<string, number> = {
   I: 1,

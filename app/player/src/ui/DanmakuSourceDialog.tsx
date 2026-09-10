@@ -7,13 +7,19 @@ import {
   Typography,
 } from '@mui/material'
 import { alpha } from '@mui/material/styles'
-import { useState } from 'react'
-import type { DdpAnime, DdpEpisode } from '@/danmaku/ddp'
-import { fetchEpisodeComments, searchDanmaku } from '@/danmaku/ddp'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { chooseSeason } from '@/danmaku/autoMatch'
+import type { DdpEpisode, DdpSeason } from '@/danmaku/ddp'
+import {
+  fetchEpisodeComments,
+  fetchSeasonEpisodes,
+  searchSeasons,
+} from '@/danmaku/ddp'
 import { usePlayerCommands } from '@/player/commands'
 import { useFullscreenPortalContainer } from '@/player/fullscreenPortal'
 import { usePlayerStore } from '@/store/playerStore'
 import {
+  GOLD,
   GREEN,
   hardShadow,
   hatchSx,
@@ -101,43 +107,85 @@ const LocalTab = ({ onDone }: { onDone: () => void }) => {
 }
 
 const OnlineTab = ({ onDone }: { onDone: () => void }) => {
+  const prefill = usePlayerStore((s) => s.danmakuSearchPrefill)
+  const dialogOpen = usePlayerStore((s) => s.danmakuDialogOpen)
   const [keyword, setKeyword] = useState('')
   const [searching, setSearching] = useState(false)
-  const [results, setResults] = useState<DdpAnime[]>([])
+  const [results, setResults] = useState<DdpSeason[]>([])
   const [searched, setSearched] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<number | null>(
-    results.length === 1 ? results[0]?.animeId : null
-  )
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [episodes, setEpisodes] = useState<Record<string, DdpEpisode[]>>({})
+  const [loadingSeason, setLoadingSeason] = useState<string | null>(null)
   const [fetchingId, setFetchingId] = useState<number | null>(null)
 
-  const handleSearch = async () => {
-    const trimmed = keyword.trim()
-    if (!trimmed || searching) return
-    setSearching(true)
-    setError(null)
+  const searchingRef = useRef(false)
+  // The prefill we have already acted on — the dialog stays mounted between
+  // opens, so this is what stops a re-search storm on every re-render.
+  const handledRef = useRef<string | null>(null)
+  const episodesRef = useRef(episodes)
+  episodesRef.current = episodes
+
+  const loadEpisodes = useCallback(async (season: DdpSeason) => {
+    if (episodesRef.current[season.bangumiId]) return
+    setLoadingSeason(season.bangumiId)
     try {
-      const animes = await searchDanmaku(trimmed)
-      setResults(animes)
-      setSearched(true)
-      setExpanded(animes.length === 1 ? animes[0].animeId : null)
+      const list = await fetchSeasonEpisodes(season)
+      setEpisodes((prev) => ({ ...prev, [season.bangumiId]: list }))
     } catch (e) {
       setError(errorMessage(e))
-      setResults([])
-      setSearched(true)
     } finally {
-      setSearching(false)
+      setLoadingSeason(null)
     }
-  }
+  }, [])
 
-  const handlePickEpisode = async (anime: DdpAnime, ep: DdpEpisode) => {
+  const runSearch = useCallback(
+    async (raw: string) => {
+      const trimmed = raw.trim()
+      if (!trimmed || searchingRef.current) return
+      searchingRef.current = true
+      setSearching(true)
+      setError(null)
+      try {
+        const seasons = await searchSeasons(trimmed)
+        setResults(seasons)
+        setSearched(true)
+        // Expand the season the shared matcher would have chosen, so the
+        // episode grid for the likely show is on screen immediately.
+        const best = chooseSeason(seasons, trimmed, trimmed)
+        setExpanded(best ? best.bangumiId : null)
+        if (best) void loadEpisodes(best)
+      } catch (e) {
+        setError(errorMessage(e))
+        setResults([])
+        setSearched(true)
+      } finally {
+        setSearching(false)
+        searchingRef.current = false
+      }
+    },
+    [loadEpisodes]
+  )
+
+  // The automatic matcher hands us a keyword + the episode it wanted; open
+  // pre-searched so the user only has to click the right episode.
+  useEffect(() => {
+    if (!dialogOpen || !prefill) return
+    const key = `${prefill.keyword}|${prefill.targetEpisode ?? 0}`
+    if (handledRef.current === key) return
+    handledRef.current = key
+    setKeyword(prefill.keyword)
+    void runSearch(prefill.keyword)
+  }, [dialogOpen, prefill, runSearch])
+
+  const handlePickEpisode = async (season: DdpSeason, ep: DdpEpisode) => {
     if (fetchingId !== null) return
     setFetchingId(ep.episodeId)
     setError(null)
     try {
       const comments = await fetchEpisodeComments(ep.episodeId)
       usePlayerStore.getState().setComments(comments, {
-        label: `${anime.animeTitle} ${ep.episodeTitle}`,
+        label: `${season.title} · ${ep.title}`,
         count: comments.length,
       })
       onDone()
@@ -148,8 +196,38 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
     }
   }
 
+  // Which season the shared matcher considers the best title match.
+  const bestSeasonId = useMemo(() => {
+    if (results.length === 0) return null
+    const probe = keyword.trim() || prefill?.keyword || ''
+    return chooseSeason(results, probe, probe)?.bangumiId ?? null
+  }, [results, keyword, prefill])
+
+  const target = prefill?.targetEpisode ?? 0
+
+  const episodeLabel = (ep: DdpEpisode): string =>
+    typeof ep.episodeNumber === 'number'
+      ? `第${ep.episodeNumber}集`
+      : ep.title || String(ep.episodeNumber)
+
   return (
     <Stack spacing={2}>
+      {prefill?.note && (
+        <Box
+          sx={{
+            border: `2px solid ${GOLD}`,
+            background: alpha(GOLD, 0.08),
+            color: GOLD,
+            fontSize: 12,
+            fontWeight: 700,
+            padding: '8px 10px',
+          }}
+        >
+          {prefill.note}
+          {target > 0 ? ` · 猜测第 ${target} 集` : ''}
+        </Box>
+      )}
+
       {/* Search row — bordered input box + button as siblings (per design). */}
       <Box sx={{ display: 'flex', gap: '8px' }}>
         <Box
@@ -183,7 +261,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void handleSearch()
+              if (e.key === 'Enter') void runSearch(keyword)
             }}
             variant="standard"
             slotProps={{
@@ -219,7 +297,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
         <Box
           component="button"
           type="button"
-          onClick={() => void handleSearch()}
+          onClick={() => void runSearch(keyword)}
           disabled={searching || !keyword.trim()}
           sx={{
             appearance: 'none',
@@ -282,14 +360,16 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
 
       {!searching && results.length > 0 && (
         <Stack spacing={1} sx={{ maxHeight: 360, overflowY: 'auto' }}>
-          {results.map((anime, idx) => {
-            const isExpanded = expanded === anime.animeId
-            const isBest = idx === 0
+          {results.map((season) => {
+            const isExpanded = expanded === season.bangumiId
+            const isBest = season.bangumiId === bestSeasonId
+            const list = episodes[season.bangumiId]
+            const loading = loadingSeason === season.bangumiId
 
             return isExpanded ? (
               // Expanded card
               <Box
-                key={anime.animeId}
+                key={season.bangumiId}
                 sx={{
                   border: `3px solid ${isBest ? GREEN : PAPER}`,
                   padding: '12px',
@@ -344,7 +424,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                         WebkitBoxOrient: 'vertical',
                       }}
                     >
-                      {anime.animeTitle}
+                      {season.title}
                     </Typography>
 
                     <Stack direction="row" gap={1} sx={{ flexWrap: 'wrap' }}>
@@ -355,8 +435,20 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                           color: alpha(PAPER, 0.6),
                         }}
                       >
-                        {anime.typeDescription || anime.type}
+                        {season.typeDescription || season.type}
                       </Typography>
+                      {Number.isFinite(season.year) && (
+                        <Typography
+                          sx={{
+                            fontFamily: MONO,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: alpha(PAPER, 0.5),
+                          }}
+                        >
+                          {season.year}
+                        </Typography>
+                      )}
                       <Typography
                         sx={{
                           fontFamily: MONO,
@@ -365,68 +457,85 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                           color: alpha(PAPER, 0.5),
                         }}
                       >
-                        animeId {anime.animeId}
+                        {season.episodeCount} 集
                       </Typography>
                     </Stack>
                   </Stack>
                 </Stack>
 
-                {/* Episodes grid */}
-                <Box
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(4, 1fr)',
-                    gap: '6px',
-                  }}
-                >
-                  {anime.episodes.map((ep) => (
-                    <Box
-                      key={ep.episodeId}
-                      component="button"
-                      type="button"
-                      onClick={() => void handlePickEpisode(anime, ep)}
-                      disabled={fetchingId !== null}
-                      title={ep.episodeTitle}
-                      sx={{
-                        appearance: 'none',
-                        cursor: 'pointer',
-                        padding: '7px 4px',
-                        border: LINE_WEAK,
-                        background:
-                          fetchingId === ep.episodeId
-                            ? VERMILION
-                            : 'transparent',
-                        color:
-                          fetchingId === ep.episodeId
-                            ? PAPER
-                            : alpha(PAPER, 0.8),
-                        fontSize: 11,
-                        fontWeight: 700,
-                        transition: 'all 100ms steps(1)',
-                        boxShadow:
-                          fetchingId === ep.episodeId ? hardShadow(3) : 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        minHeight: 28,
-                        '&:hover:not(:disabled)': {
-                          border: LINE_STRONG,
-                          background: PAPER,
-                          color: INK,
-                        },
-                        '&:disabled': {
-                          opacity: 0.5,
-                        },
-                      }}
-                    >
-                      {fetchingId === ep.episodeId ? (
-                        <CircularProgress size={12} color="inherit" />
-                      ) : (
-                        ep.episodeTitle
-                      )}
-                    </Box>
-                  ))}
-                </Box>
+                {/* Episodes grid — loaded on demand for this season */}
+                {loading && (
+                  <Stack alignItems="center" sx={{ py: 2 }}>
+                    <CircularProgress size={20} />
+                  </Stack>
+                )}
+
+                {!loading && list && (
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(4, 1fr)',
+                      gap: '6px',
+                    }}
+                  >
+                    {list.map((ep) => {
+                      const isTarget =
+                        target > 0 &&
+                        String(ep.episodeNumber) === String(target)
+                      const isFetching = fetchingId === ep.episodeId
+                      return (
+                        <Box
+                          key={ep.episodeId}
+                          component="button"
+                          type="button"
+                          onClick={() => void handlePickEpisode(season, ep)}
+                          disabled={fetchingId !== null}
+                          title={ep.title}
+                          sx={{
+                            appearance: 'none',
+                            cursor: 'pointer',
+                            padding: '7px 4px',
+                            border: isTarget
+                              ? `3px solid ${VERMILION}`
+                              : LINE_WEAK,
+                            background: isFetching
+                              ? VERMILION
+                              : isTarget
+                                ? alpha(VERMILION, 0.18)
+                                : 'transparent',
+                            color: isFetching
+                              ? PAPER
+                              : isTarget
+                                ? VERMILION
+                                : alpha(PAPER, 0.8),
+                            fontSize: 11,
+                            fontWeight: 700,
+                            transition: 'all 100ms steps(1)',
+                            boxShadow: isFetching ? hardShadow(3) : 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            minHeight: 28,
+                            '&:hover:not(:disabled)': {
+                              border: `3px solid ${PAPER}`,
+                              background: PAPER,
+                              color: INK,
+                            },
+                            '&:disabled': {
+                              opacity: 0.5,
+                            },
+                          }}
+                        >
+                          {isFetching ? (
+                            <CircularProgress size={12} color="inherit" />
+                          ) : (
+                            episodeLabel(ep)
+                          )}
+                        </Box>
+                      )
+                    })}
+                  </Box>
+                )}
 
                 {/* Collapse button */}
                 <Box
@@ -457,15 +566,18 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
             ) : (
               // Collapsed row
               <Box
-                key={anime.animeId}
+                key={season.bangumiId}
                 component="button"
                 type="button"
-                onClick={() => setExpanded(anime.animeId)}
+                onClick={() => {
+                  setExpanded(season.bangumiId)
+                  void loadEpisodes(season)
+                }}
                 sx={{
                   appearance: 'none',
                   cursor: 'pointer',
                   padding: '9px 11px',
-                  border: LINE_WEAK,
+                  border: isBest ? `3px solid ${GREEN}` : LINE_WEAK,
                   background: 'transparent',
                   color: alpha(PAPER, 0.8),
                   fontSize: 12,
@@ -502,7 +614,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {anime.animeTitle}
+                    {season.title}
                   </Typography>
                   <Typography
                     sx={{
@@ -512,9 +624,9 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                       color: alpha(PAPER, 0.5),
                     }}
                   >
-                    {anime.typeDescription || anime.type}
+                    {season.typeDescription || season.type}
                     {' · '}
-                    ID {anime.animeId}
+                    {season.episodeCount} 集
                   </Typography>
                 </Stack>
 
@@ -535,12 +647,18 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
     </Stack>
   )
 }
-
 export const DanmakuSourceDialog = () => {
   const open = usePlayerStore((s) => s.danmakuDialogOpen)
   const setDanmakuDialogOpen = usePlayerStore((s) => s.setDanmakuDialogOpen)
+  const prefill = usePlayerStore((s) => s.danmakuSearchPrefill)
   const container = useFullscreenPortalContainer()
   const [tab, setTab] = useState<0 | 1>(1)
+
+  // Opened by the automatic matcher → always land on the online tab, which is
+  // where the pre-searched results are.
+  useEffect(() => {
+    if (open && prefill) setTab(1)
+  }, [open, prefill])
 
   const close = () => setDanmakuDialogOpen(false)
 

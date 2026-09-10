@@ -8,6 +8,7 @@ import type {
 } from '@danmaku-anywhere/danmaku-converter'
 import type { TencentEpisodeListItem } from '@danmaku-anywhere/danmaku-provider/tencent'
 import * as tencent from '@danmaku-anywhere/danmaku-provider/tencent'
+import { findEpisodeByNumber } from '@danmaku-anywhere/media-parser'
 import type { DnrRuleSpec } from '@/background/netRequest/dnrTemplate'
 import { runWithDnr } from '@/background/netRequest/runWithDnr'
 import type { DanmakuFetchByMeta } from '@/common/danmaku/dto'
@@ -15,7 +16,6 @@ import { DanmakuSourceType } from '@/common/danmaku/enums'
 import { assertProviderType } from '@/common/danmaku/utils'
 import type { ILogger } from '@/common/Logger'
 import type { BuiltInTencentProvider } from '@/common/options/providerConfig/schema'
-import { findEpisodeByNumber } from '../common/findEpisodeByNumber'
 import type {
   IDanmakuProvider,
   OmitSeasonId,

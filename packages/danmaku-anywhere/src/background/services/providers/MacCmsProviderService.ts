@@ -11,6 +11,7 @@ import {
   fetchDanmuIcuComments,
   searchMacCmsVod,
 } from '@danmaku-anywhere/danmaku-provider/maccms'
+import { findEpisodeByNumber } from '@danmaku-anywhere/media-parser'
 import type { DanmakuService } from '@/background/services/persistence/DanmakuService'
 import type { DanmakuFetchByMeta } from '@/common/danmaku/dto'
 import { DanmakuSourceType } from '@/common/danmaku/enums'
@@ -19,7 +20,6 @@ import type { ILogger } from '@/common/Logger'
 import type { CustomMacCmsProvider } from '@/common/options/providerConfig/schema'
 import type { ProviderConfigService } from '@/common/options/providerConfig/service'
 import { invariant, isServiceWorker } from '@/common/utils/utils'
-import { findEpisodeByNumber } from './common/findEpisodeByNumber'
 import type {
   IDanmakuProvider,
   OmitSeasonId,

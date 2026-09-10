@@ -62,6 +62,10 @@ export default defineConfig({
         replacement: pkg('danmaku-engine/src/index.ts'),
       },
       {
+        find: '@danmaku-anywhere/media-parser',
+        replacement: pkg('media-parser/src/index.ts'),
+      },
+      {
         find: '@danmaku-anywhere/upscale-engine',
         replacement: pkg('upscale-engine/src/index.ts'),
       },

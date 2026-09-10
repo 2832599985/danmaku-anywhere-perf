@@ -1,6 +1,6 @@
-import { chineseToNumber } from './chineseToNumber'
-import { mediaRegexMatcher } from './mediaRegexMatcher'
-import type { ExtractorMatch, MediaInfoParseResult } from './types'
+import { chineseToNumber } from './chineseToNumber.js'
+import { mediaRegexMatcher } from './mediaRegexMatcher.js'
+import type { ExtractorMatch, MediaInfoParseResult } from './types.js'
 
 interface ParserInputField {
   value: string

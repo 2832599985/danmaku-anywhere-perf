@@ -1,8 +1,12 @@
 import { Alert, Box, createTheme, ThemeProvider, useTheme } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { aiExtractTitle } from '@/danmaku/ai'
-import { pickEpisode, pickSeason } from '@/danmaku/autoMatch'
-import { fetchEpisodeComments, searchDanmaku } from '@/danmaku/ddp'
+import { autoMatch } from '@/danmaku/autoMatch'
+import {
+  fetchEpisodeComments,
+  fetchSeasonEpisodes,
+  searchSeasons,
+} from '@/danmaku/ddp'
 import { filterComments } from '@/danmaku/filter'
 import { parseDanmakuText } from '@/danmaku/parse'
 import type { Platform } from '@/platform'
@@ -381,13 +385,17 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       }
 
       // --- AI auto-match fallback (no sibling file was mounted) ---
-      // Parse the filename with the free built-in AI, search DanDanPlay, pick
-      // the best season + episode, and mount. Runs ONLY inside this IIFE so it
-      // inherits the sibling effect's `stale` guard and ordering (sibling wins;
-      // this fires only when the loop above mounted nothing). Every await
-      // boundary re-reads the store and re-checks identity so a media switch or
-      // an explicit load mid-flight can't be clobbered. All failures are
-      // silent — a miss just leaves the player without danmaku.
+      // Parse the filename, search DanDanPlay, resolve season + episode with
+      // the SAME helpers the extension uses, and mount. Runs ONLY inside this
+      // IIFE so it inherits the sibling effect's `stale` guard and ordering
+      // (sibling wins; this fires only when the loop above mounted nothing).
+      // Every await boundary re-reads the store and re-checks identity so a
+      // media switch or an explicit load mid-flight can't be clobbered.
+      //
+      // When the match is not decisive we OPEN THE PICKER instead of guessing:
+      // the dialog comes up pre-searched on the parsed title with the episode
+      // we believe we want highlighted. A filename the AI does not recognise as
+      // a show (a lecture recording, say) stays silent — no picker for those.
       let s = usePlayerStore.getState()
       if (
         stale ||
@@ -401,20 +409,29 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       if (!info) return
       s = usePlayerStore.getState()
       if (stale || s.media?.path !== videoPath || s.danmakuSource) return
-      let animes
-      try {
-        animes = await searchDanmaku(info.title)
-      } catch {
-        return
-      }
-      const season = pickSeason(animes, info.title)
-      const ep = season ? pickEpisode(season.episodes, info.episode) : null
-      if (!season || !ep) return
+
+      const outcome = await autoMatch(basename(videoPath), info, {
+        search: searchSeasons,
+        episodes: fetchSeasonEpisodes,
+      })
       s = usePlayerStore.getState()
       if (stale || s.media?.path !== videoPath || s.danmakuSource) return
+
+      if (outcome.status !== 'matched') {
+        if (!outcome.keyword) return
+        s.setDanmakuDialogOpen(true, {
+          keyword: outcome.keyword,
+          targetEpisode:
+            outcome.status === 'ambiguous' ? outcome.targetEpisode : 0,
+          note: outcome.reason,
+        })
+        s.showOsd(`${outcome.reason} · 请选择`, '❓')
+        return
+      }
+
       let comments
       try {
-        comments = await fetchEpisodeComments(ep.episodeId)
+        comments = await fetchEpisodeComments(outcome.episode.episodeId)
       } catch {
         return
       }
@@ -422,7 +439,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       s = usePlayerStore.getState()
       if (stale || s.media?.path !== videoPath || s.danmakuSource) return
       s.setComments(comments, {
-        label: `${season.animeTitle} · ${ep.episodeTitle}`,
+        label: `${outcome.season.title} · ${outcome.episode.title}`,
         count: comments.length,
       })
       s.showOsd(`AI 匹配弹幕 · ${comments.length} 条`, '🤖')
