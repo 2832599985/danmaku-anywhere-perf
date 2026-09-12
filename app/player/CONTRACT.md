@@ -1192,7 +1192,21 @@ learned rule can supply the number for shapes the heuristic cannot read.
 plugin's `readDir` (capability `fs:allow-read-dir` added); the browser adapter
 returns `[]`, because a page cannot read a directory. The scan is a Tauri
 convenience, never a correctness dependency. Video extensions now live once, in
-`platform/types.ts`, shared by both pickers, drag-drop and the scan.
+`platform/types.ts`, shared by both pickers, drag-drop and the scan, together
+with `joinPath(dir, name)` — the ONE way a listed entry name becomes a path.
+
+**The join that made the feature a no-op (2026-09-13).** `readDir` reports bare
+names, so the first version built each path inline as `` `${base}\${entry.name}` ``.
+In a template literal `\$` is an ESCAPE, not a separator followed by an
+interpolation: every file in the folder collapsed to the same literal string
+`C:\…\Videos${entry.name}`. No digits in it, so `selectSiblings` recognised no
+episode and returned `[]` for every file — the effect then hit its
+`siblings.length === 0` early return and added nothing, silently, for every
+episode (not just the later ones). tsc, biome and all 68 tests passed, because
+nothing exercised the listing→path seam: the existing tests hand-built paths.
+`joinPath` is now a named, unit-tested helper and `siblingEpisodes.test.ts`
+feeds `selectSiblings` the output of `joinPath`, which is the shape the platform
+actually produces.
 
 **Store.** `insertAfterCurrent(items)` moves rather than duplicates (an episode
 already queued ends up in order, not twice), never moves the playing entry, and

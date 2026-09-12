@@ -1,5 +1,6 @@
 import {
   extOf,
+  joinPath,
   type PickedMedia,
   type PickedText,
   type Platform,
@@ -138,12 +139,11 @@ export const tauriPlatform: Platform = {
     const { readDir } = await import('@tauri-apps/plugin-fs')
     try {
       const entries = await readDir(dir)
-      const base = dir.replace(/[\/]+$/, '')
       return entries
         .filter(
           (entry) => entry.isFile && VIDEO_EXTENSIONS.has(extOf(entry.name))
         )
-        .map((entry) => `${base}\${entry.name}`)
+        .map((entry) => joinPath(dir, entry.name))
     } catch {
       // Unreadable folder (permissions, a disconnected drive, a network share):
       // the scan simply finds nothing — opening the video must not fail because

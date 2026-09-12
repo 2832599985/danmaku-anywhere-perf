@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { joinPath } from '@/platform/types'
 import { locateEpisode, selectSiblings } from './siblingEpisodes'
 
 /** The user's real Desktop batch (one season, consecutive episodes). */
@@ -103,5 +104,22 @@ describe('selectSiblings', () => {
   it('keeps a whole season in order and drops duplicates', () => {
     const paths = [EP1, EP2, EP1]
     expect(selectSiblings(EP1, paths).map((s) => s.episode)).toEqual([2])
+  })
+
+  it('works on the paths the platform lists for a folder', () => {
+    // The real end of the pipe: `listVideoFiles` hands over `joinPath(dir,
+    // entry.name)` for BARE names, and that join was silently broken (see
+    // types.test.ts) — every entry collapsed to one literal string, so the scan
+    // found no episode in any of them and the feature never added anything.
+    const dir = VIDEOS
+    const names = [
+      '无用圣女的异世界美食之旅 凭借隐藏技能召唤露营车 第 7 集：第07集 · 稀饭动漫 Next.mp4',
+      '无用圣女的异世界美食之旅 凭借隐藏技能召唤露营车 第 8 集：第08集 · 稀饭动漫 Next.mp4',
+      '无用圣女的异世界美食之旅 凭借隐藏技能召唤露营车 第 9 集：第09集 · 稀饭动漫 Next.mp4',
+    ]
+    const paths = names.map((name) => joinPath(dir, name))
+    const siblings = selectSiblings(paths[0], paths)
+    expect(siblings.map((s) => s.episode)).toEqual([8, 9])
+    expect(siblings[0].path).toBe(paths[1])
   })
 })

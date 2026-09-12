@@ -34,6 +34,20 @@ export const VIDEO_EXTENSIONS: ReadonlySet<string> = new Set(
 export const extOf = (name: string): string =>
   name.split('.').pop()?.toLowerCase() ?? ''
 
+/**
+ * Absolute path of `name` inside `dir` (directory listings report bare names).
+ *
+ * A named helper, and unit-tested, because the inline version shipped a bug
+ * that turned the whole sibling-episode scan into a silent no-op: written as
+ * `` `${dir}\${name}` `` the `\$` is an ESCAPE, not a separator plus an
+ * interpolation, so every entry in the folder collapsed to the literal string
+ * `${dir}${entry.name}` — no digits in it, so `selectSiblings` recognised no
+ * episode and returned an empty list. Type-checking and the sibling tests both
+ * passed, because nothing covered this join.
+ */
+export const joinPath = (dir: string, name: string): string =>
+  `${dir.replace(/[\\/]+$/, '')}\\${name}`
+
 export interface PickedMedia {
   /** A URL the <video> element can load (blob: in browser, stream:// in Tauri). */
   url: string
