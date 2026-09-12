@@ -287,6 +287,15 @@ export const prefixOnly = (pattern: string): string | null => {
 export const ruleShape = (pattern: string): string =>
   prefixOnly(pattern) ?? pattern
 
+/** True when the number a match captured is really a SEASON number. */
+const captureIsSeasonSlot = (
+  base: string,
+  matched: RegExpExecArray
+): boolean => {
+  const start = (matched.index ?? 0) + matched[0].length - matched[1].length
+  return isSeasonSlot(base, { index: start, text: matched[1] })
+}
+
 /**
  * First learned rule whose pattern matches `filePath`, with the episode number
  * it read out of the name. Corrupt persisted patterns are skipped rather than
@@ -317,6 +326,12 @@ export function matchRule(
       if (!matched) continue
       const episode = Number(matched[1])
       if (!Number.isInteger(episode) || episode <= 0) continue
+      // The loose tier has no literal tail, so a season marker can sit exactly
+      // where the episode is expected: `… 第 2 季 第 1 集` would be read as
+      // episode 2 and a second-season file would be mounted as the first
+      // season's episode 2. `isSeasonSlot` filtered this at LEARN time; the
+      // tail used to filter it at match time, so the loose tier must check.
+      if (!exact && captureIsSeasonSlot(base, matched)) continue
       // The episode list is the authority on whether this number exists; the
       // season's `episodeCount` is often wrong for split cours, so it is not
       // consulted here.
@@ -347,9 +362,15 @@ const commonPrefixLength = (a: string, b: string): number => {
  * worth showing. A shared FOLDER is not evidence: users keep a whole library in
  * one directory (`Videos\`), so without this gate the note would claim "it
  * learned a shape but this file did not match" while the rule belongs to a
- * completely different show. Show names are ≥ 4 characters in practice.
+ * completely different show.
+ *
+ * 6, not 4: scraped libraries share site boilerplate at the head of almost
+ * every name (`在线播放<show>…`), which satisfies a 4-character test for shows
+ * that have nothing in common. For a real batch the shared run is the whole
+ * show name plus the ` 第 ` marker (≥ 7 characters in practice), so 6 keeps
+ * every genuine hint and drops the boilerplate ones.
  */
-const MIN_HINT_PREFIX = 4
+const MIN_HINT_PREFIX = 6
 
 /**
  * One-line hint for the picker when a rule for THIS batch could have applied

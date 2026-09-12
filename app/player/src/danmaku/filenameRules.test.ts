@@ -338,3 +338,55 @@ describe('unmatchedRuleHint', () => {
     ).toBeNull()
   })
 })
+
+describe('a season number is never read as the episode (independent review #1)', () => {
+  const EP1 =
+    '魔法光源股份有限公司 第 1 集：欢迎加入魔法光源股份有限公司 · 稀饭动漫 Next'
+  const rule = learn(`D:/桌面/${EP1}.mp4`, 1) as FilenameRule
+
+  it('rejects the loose-tier capture when a season marker follows it', () => {
+    // Without the guard the loose tier reads `第 2` as episode 2 and a SECOND
+    // season file gets mounted as the first season's episode 2.
+    expect(
+      matchRule([rule], '魔法光源股份有限公司 第 2 季 第 1 集：新季首集.mp4')
+    ).toBeNull()
+    expect(
+      matchRule([rule], '魔法光源股份有限公司 第 2 部 第 1 集：某集.mp4')
+    ).toBeNull()
+    // Spaced-out forms with no space at all are safe either way.
+    expect(
+      matchRule([rule], '魔法光源股份有限公司 第2季 第 1 集：某集.mp4')
+    ).toBeNull()
+  })
+
+  it('still reads the real sibling episode', () => {
+    expect(
+      matchRule([rule], '魔法光源股份有限公司 第 2 集：骑扫帚是小菜一碟.mp4')
+        ?.episode
+    ).toBe(2)
+  })
+})
+
+describe('hint ignores site boilerplate (independent review #2)', () => {
+  const scraper = learn(
+    'D:/Videos/在线播放最强废渣皇子暗中活跃于帝位之争 第08集-高清在线观看.mp4',
+    8
+  ) as FilenameRule
+
+  it('does not fire for another show that only shares the scraper prefix', () => {
+    expect(
+      unmatchedRuleHint(
+        [scraper],
+        'D:/Videos/在线播放转学后班上的清纯可爱美少女 第07集-高清在线观看.mp4'
+      )
+    ).toBeNull()
+  })
+
+  it('still fires for the same show', () => {
+    const hint = unmatchedRuleHint(
+      [scraper],
+      'D:/Videos/在线播放最强废渣皇子暗中活跃于帝位之争 第09集-高清在线观看.mp4'
+    )
+    expect(hint).toContain('没匹配上')
+  })
+})

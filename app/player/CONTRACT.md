@@ -1138,3 +1138,28 @@ appends `unmatchedRuleHint()` — "本目录学过命名格式但没匹配上这
 Unit tests: `src/danmaku/filenameRules.test.ts` grew to 31 cases (the real
 file names above, the legacy-pattern-keeps-working case, tier preference,
 another-season non-match, tail shapes, `unmatchedRuleHint`).
+
+### Independent review of the matching fix (2026-09-12) — two defects found & fixed
+
+An independent verifier (separate agent, executed — not traced) reproduced the original failure on
+the old module and confirmed the fix, then found two issues the author had not:
+
+1. **The loose tier could read a SEASON number as the episode.** `isSeasonSlot` was applied at LEARN
+   time only; the literal tail used to filter the season case at MATCH time, and the loose tier drops
+   that tail. `… 第 2 季 第 1 集：新季首集.mp4` against a rule learned from `… 第 1 集：…` returned
+   `{episode: 2}` → a second-season file would be mounted as the first season's episode 2.
+   Fixed: `captureIsSeasonSlot()` re-checks the captured run in the loose tier (`matchRule`).
+   Spaced forms (`第2季`, `第二季`) were already safe — the literal ` 第 ` includes its trailing space.
+2. **The picker hint fired on scraper boilerplate.** `MIN_HINT_PREFIX = 4` was satisfied by the
+   `在线播放` prefix that every MuneFun-scraped name shares, so opening an unrelated show claimed
+   "本目录学过命名格式但没匹配上这个文件". Raised to 6: a real batch shares the whole show name plus
+   ` 第 ` (≥7 characters), so genuine hints survive and boilerplate ones do not.
+
+Verified safe by the same review: strict-over-all-rules tier order (a 999-hit loose rule loses to a
+lower-ranked exact match), no-capture-group and corrupt patterns skipped without throwing, the
+season really comes from `hit.rule.season` in `PlayerHost`, no caller left on the old `RuleMatch`
+shape, and a 40-file sweep of the user's real library with no cross-show match.
+
+Still open (accepted): a batch that mixes spellings (`第 3 集` in one file, `第3集` in the next) does
+not match — the literal contains the space; and a same-title file in another folder matches by
+design.
