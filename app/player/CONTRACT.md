@@ -1089,3 +1089,52 @@ playlist, resume history and settings. Launch the exe with
 `WEBVIEW2_USER_DATA_FOLDER=<temp dir>` when verifying, or capture and restore
 the key around the run. Persistence across a relaunch still works inside that
 temp folder.
+
+### The rule only matched its own sample (2026-09-12) — tail ate the episode title
+
+Reported on real files (同一季的第 1、2 集):
+
+```
+魔法光源股份有限公司 第 1 集：欢迎加入魔法光源股份有限公司 · 稀饭动漫 Next.mp4
+魔法光源股份有限公司 第 2 集：骑扫帚是小菜一碟 · 稀饭动漫 Next.mp4
+```
+
+Ep 1 matched season 2 via the AI, the user corrected it to season 1 (rule
+learned), and ep 2 then went straight back to season 2 — the rule never fired
+again. Learned rules were therefore **only ever able to match the file they
+were learned from**, which is exactly how the user described it ("他最后只能
+学习到一集").
+
+**Root cause.** `learnRule` took a blind 6-character literal tail after the
+episode number. With the `第 N 集：<episode title>` naming style the tail IS the
+episode title, so the pattern was
+`^魔法光源股份有限公司 第 (\d{1,4}) 集：欢迎加` — unmatchable by any sibling. The
+self-check could not catch it (it only verifies the pattern reads the episode
+back out of the sample). The 2026-09-11 exe verification passed by luck: the
+幼女战记 names (`第 N 集：第NN集`) put ` 集：第` in the tail, which the sibling
+files happen to share.
+
+**Fix (two parts).**
+1. `markerTail()`: the tail may only contain the convention's own markers
+   (`集话話回章編编期部巻卷`) and separators (whitespace/punctuation/brackets). A
+   digit restarts the `\d+` wildcard; a letter or a non-marker CJK character
+   ENDS the tail. The 幼女战记 pattern is now `… 第 (\d{1,4}) 集：` (the `第` of
+   the repeated number is free text), and every tail shape the test suite
+   covers (` 集：`, `][`, ` (` , `话`) is unchanged from before.
+2. `matchRule()` now runs two tiers, strict over ALL rules before the loose
+   tier starts, so a precise match from a lower-ranked rule still wins: tier 1
+   the stored pattern; tier 2 `prefixOnly(pattern)` — the pattern truncated
+   right after the capture group, anchored only on the show name + `第 N`.
+   Tier 2 **fixes the rules already persisted on the user's machine** (their
+   tail still holds a title) with no store migration, and it cannot leak across
+   shows or seasons because the prefix is pure literal text (`第二季 第 3 集`
+   does not contain the literal `…股份有限公司 第 ` sequence). Matches carry
+   `exact: boolean`; the OSD says `按命名格式匹配（宽松）` for tier 2.
+
+**Visibility.** When the picker opens because nothing matched, the note now
+appends `unmatchedRuleHint()` — "本目录学过命名格式但没匹配上这个文件（规则：…）"
+— so a too-strict rule can no longer masquerade as "it never learned anything".
+
+Unit tests: `src/danmaku/filenameRules.test.ts` grew to 31 cases (the real
+file names above, the legacy-pattern-keeps-working case, tier preference,
+another-season non-match, tail shapes, `unmatchedRuleHint`).

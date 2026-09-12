@@ -48,6 +48,16 @@ export interface FilenameRule {
 export interface RuleMatch {
   rule: FilenameRule
   episode: number
+  /**
+   * True when the rule's full pattern matched (markers included). False means
+   * the match came from the loose tier — the pattern with its literal tail
+   * dropped, anchored only on the show name plus the `第 N` position. Both
+   * tiers carry the same confidence about the SEASON (the user chose it) and
+   * the EPISODE (read out of this file name); the difference is only how much
+   * of the surrounding text was verified, so the UI says "宽松" instead of
+   * pretending it was an exact hit.
+   */
+  exact: boolean
 }
 
 /** Picker note shown when a rule matched but the season lacks that episode. */
@@ -57,8 +67,53 @@ export const REASON_RULE_EPISODE_MISSING = '命名规则命中的集数不在这
 const MAX_EPISODE_DIGITS = 4
 /** Literal characters the pattern must keep, or it matches far too much. */
 const MIN_LITERAL_CHARS = 3
-/** How much of the text after the episode stays literal (up to the next number). */
+/** How much of the text after the episode stays literal. */
 const TAIL_CHARS = 6
+
+/**
+ * Characters that may follow the episode number as a STABLE marker: the
+ * counter suffix of the naming convention (`第10集` / `第10话`) — Japanese
+ * spellings included, since the audio may be Japanese while the file name is
+ * not.
+ */
+const TAIL_MARKERS = new Set([
+  '集',
+  '话',
+  '話',
+  '回',
+  '章',
+  '編',
+  '编',
+  '期',
+  '部',
+  '巻',
+  '卷',
+])
+
+/** CJK ideographs + kana (a run of these is almost always free text). */
+const CJK = /[㐀-鿿぀-ヿ]/
+
+/**
+ * The literal tail that follows the episode number, or "" when the number is
+ * immediately followed by free text.
+ *
+ * Every character must be a marker or a separator (whitespace, punctuation,
+ * brackets). A digit restarts the `\d+` wildcard; a letter or a CJK character
+ * that is not a marker ENDS the tail. That stop condition is the fix for the
+ * "a rule only ever matches the file it was learned from" bug: taking a fixed
+ * number of characters ate the EPISODE TITLE (`第 1 集：欢迎加入…` → tail
+ * ` 集：欢迎加`), which changes from episode to episode, so the learned regex
+ * could never fire again — and the AI silently answered instead.
+ */
+const markerTail = (base: string, slotEnd: number): string => {
+  let tail = ''
+  for (const char of base.slice(slotEnd, slotEnd + TAIL_CHARS)) {
+    if (/[0-9A-Za-z]/.test(char)) break
+    if (CJK.test(char) && !TAIL_MARKERS.has(char)) break
+    tail += char
+  }
+  return tail
+}
 
 const escapeRegExp = (value: string): string =>
   value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -158,15 +213,10 @@ export function learnRule(input: LearnRuleInput): FilenameRule | null {
   prefix.push(escapeRegExp(headLiteral), '(\\d{1,4})')
   literalChars += headLiteral.length
 
-  // Short literal tail: up to the next digit run (so a trailing CRC or
-  // resolution is left unconstrained) and at most TAIL_CHARS long.
+  // Literal tail: only the naming convention's own markers and separators, so
+  // a per-episode title never becomes part of the pattern (see `markerTail`).
   const slotEnd = slot.index + slot.text.length
-  const nextRun = runs.find((run) => run.index >= slotEnd)
-  const tailEnd = Math.min(
-    nextRun ? nextRun.index : base.length,
-    slotEnd + TAIL_CHARS
-  )
-  const tail = base.slice(slotEnd, tailEnd)
+  const tail = markerTail(base, slotEnd)
   literalChars += tail.length
 
   // "10" alone would become `^(\d{1,4})$` and match any bare-numbered file
@@ -205,10 +255,34 @@ export const orderRules = (
       b.updatedAt - a.updatedAt
   )
 
+/** The single capture group every learned pattern contains. */
+const EPISODE_GROUP = '(\\d{1,4})'
+
+/**
+ * The same pattern with its literal tail dropped: anchored only on the show
+ * name and the `第 N` position. Null when the source is not a learned pattern
+ * (no capture group).
+ *
+ * Needed because a tail can only ever be as stable as the text it was taken
+ * from: rules stored by an earlier version may carry part of an EPISODE TITLE
+ * (`… 第 (\d{1,4}) 集：欢迎加`), and even a correct tail makes the pattern
+ * stricter than it needs to be. The prefix is pure literal text, so dropping
+ * the tail cannot make a rule match a different show — `第二季 第 N 集` still
+ * fails, because the literal "第二季" is not in the prefix.
+ */
+export const prefixOnly = (pattern: string): string | null => {
+  const index = pattern.indexOf(EPISODE_GROUP)
+  if (index < 0) return null
+  return pattern.slice(0, index + EPISODE_GROUP.length)
+}
+
 /**
  * First learned rule whose pattern matches `filePath`, with the episode number
  * it read out of the name. Corrupt persisted patterns are skipped rather than
  * thrown — this runs on every video open.
+ *
+ * Two tiers, strict first over ALL rules before the loose tier runs, so a
+ * precise match from a lower-ranked rule still wins over a loose one.
  */
 export function matchRule(
   rules: FilenameRule[],
@@ -218,20 +292,42 @@ export function matchRule(
   if (rules.length === 0) return null
   const base = basenameWithoutExt(filePath)
   const dir = folder ?? dirname(filePath)
-  for (const rule of orderRules(rules, dir)) {
-    let matched: RegExpExecArray | null = null
-    try {
-      matched = new RegExp(rule.pattern, 'i').exec(base)
-    } catch {
-      continue // corrupt rule from an older/edited store
+  const ordered = orderRules(rules, dir)
+  for (const exact of [true, false]) {
+    for (const rule of ordered) {
+      const source = exact ? rule.pattern : prefixOnly(rule.pattern)
+      if (!source) continue
+      let matched: RegExpExecArray | null = null
+      try {
+        matched = new RegExp(source, 'i').exec(base)
+      } catch {
+        continue // corrupt rule from an older/edited store
+      }
+      if (!matched) continue
+      const episode = Number(matched[1])
+      if (!Number.isInteger(episode) || episode <= 0) continue
+      // The episode list is the authority on whether this number exists; the
+      // season's `episodeCount` is often wrong for split cours, so it is not
+      // consulted here.
+      return { rule, episode, exact }
     }
-    if (!matched) continue
-    const episode = Number(matched[1])
-    if (!Number.isInteger(episode) || episode <= 0) continue
-    // The episode list is the authority on whether this number exists; the
-    // season's `episodeCount` is often wrong for split cours, so it is not
-    // consulted here.
-    return { rule, episode }
   }
   return null
+}
+
+/**
+ * One-line hint for the picker when this folder HAS learned rules but none of
+ * them matched the file that just failed to auto-match. Without it the only
+ * conclusion a user can reach is "it never learned anything" — which is
+ * exactly what a too-strict pattern looks like from the outside.
+ */
+export function unmatchedRuleHint(
+  rules: FilenameRule[],
+  filePath: string
+): string | null {
+  const dir = dirname(filePath)
+  const same = rules.filter((rule) => rule.folder === dir)
+  if (same.length === 0) return null
+  const newest = same.reduce((a, b) => (b.updatedAt > a.updatedAt ? b : a))
+  return `本目录学过命名格式但没匹配上这个文件（规则：${newest.pattern}）`
 }

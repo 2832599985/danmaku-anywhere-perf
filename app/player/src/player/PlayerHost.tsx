@@ -8,7 +8,11 @@ import {
   fetchSeasonEpisodes,
   searchSeasons,
 } from '@/danmaku/ddp'
-import { matchRule, REASON_RULE_EPISODE_MISSING } from '@/danmaku/filenameRules'
+import {
+  matchRule,
+  REASON_RULE_EPISODE_MISSING,
+  unmatchedRuleHint,
+} from '@/danmaku/filenameRules'
 import { filterComments } from '@/danmaku/filter'
 import { parseDanmakuText } from '@/danmaku/parse'
 import type { Platform } from '@/platform'
@@ -448,7 +452,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             })
             s.recordFilenameRuleHit(hit.rule.id)
             s.showOsd(
-              `按命名格式匹配 · 第${hit.episode}集 · ${comments.length} 条`,
+              `${hit.exact ? '按命名格式匹配' : '按命名格式匹配（宽松）'} · 第${hit.episode}集 · ${comments.length} 条`,
               '📐'
             )
             return
@@ -473,11 +477,15 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
 
       if (outcome.status !== 'matched') {
         if (!outcome.keyword) return
+        // If this folder HAS learned rules and none matched, that is almost
+        // certainly why we are asking — say so, or "it never learned" is the
+        // only thing the user can conclude.
+        const hint = unmatchedRuleHint(s.filenameRules, videoPath)
         s.setDanmakuDialogOpen(true, {
           keyword: outcome.keyword,
           targetEpisode:
             outcome.status === 'ambiguous' ? outcome.targetEpisode : 0,
-          note: outcome.reason,
+          note: hint ? `${outcome.reason} · ${hint}` : outcome.reason,
         })
         s.showOsd(`${outcome.reason} · 请选择`, '❓')
         return

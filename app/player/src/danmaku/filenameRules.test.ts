@@ -5,6 +5,7 @@ import {
   learnRule,
   matchRule,
   orderRules,
+  unmatchedRuleHint,
 } from './filenameRules'
 
 const SEASON = {
@@ -51,13 +52,14 @@ describe('learnRule', () => {
 
   it('learns a repeated episode number (scraped page titles)', () => {
     // The 稀饭动漫 download names spell the episode twice; both copies move
-    // together, so the first one becomes the capture.
+    // together, so the first one becomes the capture. The tail stops at the
+    // second `第` (free text), keeping only the ` 集：` marker.
     const rule = learn(
       '幼女战记 第二季 第 10 集：第10集 · 稀饭动漫 Next.mp4',
       10
     )
     expect(rule).not.toBeNull()
-    expect(rule?.pattern).toBe('^幼女战记 第二季 第 (\\d{1,4}) 集：第')
+    expect(rule?.pattern).toBe('^幼女战记 第二季 第 (\\d{1,4}) 集：')
     expect(
       matchRule(
         [rule as FilenameRule],
@@ -200,5 +202,101 @@ describe('orderRules', () => {
       'a',
       'd',
     ])
+  })
+})
+
+describe('the literal tail never eats the episode title', () => {
+  // Real user files: one season, consecutive episodes, identical shape — only
+  // the episode number and the EPISODE TITLE differ. The first implementation
+  // took a fixed 6-character tail after the number, which swallowed the title
+  // (" 集：欢迎加"), so the learned rule could only ever match the very file it
+  // was learned from and the AI silently answered for every other episode.
+  const EP1 =
+    '魔法光源股份有限公司 第 1 集：欢迎加入魔法光源股份有限公司 · 稀饭动漫 Next'
+  const EP2 = '魔法光源股份有限公司 第 2 集：骑扫帚是小菜一碟 · 稀饭动漫 Next'
+
+  it('keeps only the marker as the tail', () => {
+    const rule = learn(`D:\\桌面\\${EP1}.mp4`, 1)
+    expect(rule).not.toBeNull()
+    expect(rule?.pattern).toBe('^魔法光源股份有限公司 第 (\\d{1,4}) 集：')
+  })
+
+  it('matches the next episode of the same batch, exactly', () => {
+    const rule = learn(`D:\\桌面\\${EP1}.mp4`, 1) as FilenameRule
+    const hit = matchRule([rule], `D:\\桌面\\${EP2}.mp4`)
+    expect(hit?.episode).toBe(2)
+    expect(hit?.exact).toBe(true)
+  })
+
+  it('still fires for rules stored by the previous version', () => {
+    // Exactly what is persisted on the user's machine today: the tail ate the
+    // first episode's title. The loose tier drops the tail, so no re-teaching
+    // (and no store migration) is needed.
+    const legacy: FilenameRule = {
+      ...(learn(`D:\\桌面\\${EP1}.mp4`, 1) as FilenameRule),
+      pattern: '^魔法光源股份有限公司 第 (\\d{1,4}) 集：欢迎加',
+    }
+    const hit = matchRule([legacy], `D:\\桌面\\${EP2}.mp4`)
+    expect(hit?.episode).toBe(2)
+    expect(hit?.exact).toBe(false)
+  })
+
+  it('does not fire on another season of the same show', () => {
+    const rule = learn(`D:\\桌面\\${EP1}.mp4`, 1) as FilenameRule
+    expect(
+      matchRule(
+        [rule],
+        '魔法光源股份有限公司 第二季 第 3 集：某集 · 稀饭动漫 Next.mp4'
+      )
+    ).toBeNull()
+  })
+
+  it('prefers an exact match over a higher-ranked loose one', () => {
+    const base = learn(`D:\\桌面\\${EP1}.mp4`, 1) as FilenameRule
+    // Same folder, but the legacy rule ranks first (99 hits) and its tail only
+    // fits the file it was learned from — the strict tier must still win with
+    // the properly learned pattern further down the list.
+    const legacy: FilenameRule = {
+      ...base,
+      id: 'legacy',
+      pattern: '^魔法光源股份有限公司 第 (\\d{1,4}) 集：欢迎加',
+      hits: 99,
+    }
+    const exact: FilenameRule = { ...base, id: 'exact' }
+    const hit = matchRule([legacy, exact], `${EP2}.mp4`)
+    expect(hit?.rule.id).toBe('exact')
+    expect(hit?.exact).toBe(true)
+  })
+
+  it('leaves a non-learned pattern alone in the loose tier', () => {
+    // No capture group → nothing to fall back to (`prefixOnly` returns null).
+    const broken: FilenameRule = {
+      ...(learn(`D:\\桌面\\${EP1}.mp4`, 1) as FilenameRule),
+      pattern: '^魔法光源股份有限公司 第 \\d+ 集：',
+    }
+    expect(matchRule([broken], `${EP2}.mp4`)).toBeNull()
+  })
+})
+
+describe('unmatchedRuleHint', () => {
+  const rule = learn('D:\\动漫\\BLEACH\\BLEACH 第 10 集：某集.mp4', 10)
+
+  it('explains that a same-folder rule exists but did not match', () => {
+    const hint = unmatchedRuleHint(
+      [rule as FilenameRule],
+      'D:\\动漫\\BLEACH\\BLEACH 第 11 集：另一集.mp4'
+    )
+    expect(hint).toContain('没匹配上')
+    expect(hint).toContain((rule as FilenameRule).pattern)
+  })
+
+  it('stays silent for a folder with no learned rules', () => {
+    expect(
+      unmatchedRuleHint([rule as FilenameRule], 'E:\\别的\\第 1 集.mp4')
+    ).toBeNull()
+  })
+
+  it('ignores rules from other folders', () => {
+    expect(unmatchedRuleHint([], 'D:\\动漫\\BLEACH\\第 11 集.mp4')).toBeNull()
   })
 })
