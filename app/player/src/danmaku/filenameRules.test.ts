@@ -5,6 +5,7 @@ import {
   learnRule,
   matchRule,
   orderRules,
+  ruleShape,
   unmatchedRuleHint,
 } from './filenameRules'
 
@@ -275,6 +276,30 @@ describe('the literal tail never eats the episode title', () => {
       pattern: '^魔法光源股份有限公司 第 \\d+ 集：',
     }
     expect(matchRule([broken], `${EP2}.mp4`)).toBeNull()
+  })
+})
+
+describe('ruleShape', () => {
+  it('counts a legacy tail and a clean tail as the same shape', () => {
+    // The user's stored rule vs one learned after the marker-tail fix: they
+    // must collapse into a single entry, or a correction could be outranked by
+    // the stale rule it was meant to replace.
+    expect(ruleShape('^魔法光源股份有限公司 第 (\\d{1,4}) 集：欢迎加')).toBe(
+      ruleShape('^魔法光源股份有限公司 第 (\\d{1,4}) 集：')
+    )
+  })
+
+  it('keeps genuinely different formats apart', () => {
+    expect(ruleShape('^Show - (\\d{1,4}) (1080p)')).not.toBe(
+      ruleShape('^Show\\[(\\d{1,4})\\]')
+    )
+    expect(ruleShape('^A 第(\\d{1,4})集')).not.toBe(
+      ruleShape('^B 第(\\d{1,4})集')
+    )
+  })
+
+  it('falls back to the raw pattern when there is no capture group', () => {
+    expect(ruleShape('^Show (\\d+)')).toBe('^Show (\\d+)')
   })
 })
 

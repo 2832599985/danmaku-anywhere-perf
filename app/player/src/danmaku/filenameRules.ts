@@ -277,6 +277,17 @@ export const prefixOnly = (pattern: string): string | null => {
 }
 
 /**
+ * What makes two rules "the same shape": everything up to and including the
+ * episode capture. Two rules of one batch may carry different tails — a rule
+ * stored before the marker-tail fix (` 集：欢迎加`) and a freshly learned one
+ * (` 集：`) — and they must still count as ONE shape, or the correction path
+ * ("pick again and the newest choice wins") breaks: the stale rule would
+ * survive as a second entry and outrank the correction on `hits`.
+ */
+export const ruleShape = (pattern: string): string =>
+  prefixOnly(pattern) ?? pattern
+
+/**
  * First learned rule whose pattern matches `filePath`, with the episode number
  * it read out of the name. Corrupt persisted patterns are skipped rather than
  * thrown — this runs on every video open.

@@ -2,7 +2,7 @@ import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
-import type { FilenameRule } from '@/danmaku/filenameRules'
+import { type FilenameRule, ruleShape } from '@/danmaku/filenameRules'
 import type { PickedMedia } from '@/platform/types'
 import type { SubtitleCue, SubtitleSource } from '@/subtitle/types'
 import {
@@ -702,11 +702,19 @@ export const usePlayerStore = create<PlayerStore>()(
 
       addFilenameRule: (rule) =>
         set((s) => {
+          // Dedupe by SHAPE, not by exact pattern: a rule stored before the
+          // marker-tail fix carries part of an episode title in its tail
+          // (` 集：欢迎加`), so matching on the full pattern would keep it as a
+          // second entry — and being higher-ranked on `hits`, it would then
+          // outrank the user's correction. Same shape ⇒ newest choice wins,
+          // and the pattern is refreshed to the newly learned (cleaner) one.
+          const shape = ruleShape(rule.pattern)
           const existing = s.filenameRules.find(
-            (r) => r.pattern === rule.pattern
+            (r) => ruleShape(r.pattern) === shape
           )
           if (existing) {
             // The user just picked again for the same shape → newest wins.
+            existing.pattern = rule.pattern
             existing.season = rule.season
             existing.episode = rule.episode
             existing.sample = rule.sample
