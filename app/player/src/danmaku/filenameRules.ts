@@ -326,10 +326,35 @@ export function matchRule(
   return null
 }
 
+/** Literal characters at the START of a pattern: `^` plus everything up to the
+ *  first wildcard/capture group. */
+const patternLiteralStart = (pattern: string): string => {
+  const body = pattern.startsWith('^') ? pattern.slice(1) : pattern
+  const stop = body.search(/\\d|\(/)
+  return stop < 0 ? body : body.slice(0, stop)
+}
+
+/** Length of the common prefix of two strings (case-insensitive). */
+const commonPrefixLength = (a: string, b: string): number => {
+  const max = Math.min(a.length, b.length)
+  let i = 0
+  while (i < max && a[i].toLowerCase() === b[i].toLowerCase()) i += 1
+  return i
+}
+
 /**
- * One-line hint for the picker when this folder HAS learned rules but none of
- * them matched the file that just failed to auto-match. Without it the only
- * conclusion a user can reach is "it never learned anything" — which is
+ * How much of a rule's literal prefix a file name must share before the hint is
+ * worth showing. A shared FOLDER is not evidence: users keep a whole library in
+ * one directory (`Videos\`), so without this gate the note would claim "it
+ * learned a shape but this file did not match" while the rule belongs to a
+ * completely different show. Show names are ≥ 4 characters in practice.
+ */
+const MIN_HINT_PREFIX = 4
+
+/**
+ * One-line hint for the picker when a rule for THIS batch could have applied
+ * but did not match the file that just failed to auto-match. Without it the
+ * only conclusion a user can reach is "it never learned anything" — which is
  * exactly what a too-strict pattern looks like from the outside.
  */
 export function unmatchedRuleHint(
@@ -337,8 +362,14 @@ export function unmatchedRuleHint(
   filePath: string
 ): string | null {
   const dir = dirname(filePath)
-  const same = rules.filter((rule) => rule.folder === dir)
-  if (same.length === 0) return null
-  const newest = same.reduce((a, b) => (b.updatedAt > a.updatedAt ? b : a))
+  const base = basenameWithoutExt(filePath)
+  const related = rules.filter(
+    (rule) =>
+      rule.folder === dir &&
+      commonPrefixLength(patternLiteralStart(rule.pattern), base) >=
+        MIN_HINT_PREFIX
+  )
+  if (related.length === 0) return null
+  const newest = related.reduce((a, b) => (b.updatedAt > a.updatedAt ? b : a))
   return `本目录学过命名格式但没匹配上这个文件（规则：${newest.pattern}）`
 }

@@ -324,4 +324,17 @@ describe('unmatchedRuleHint', () => {
   it('ignores rules from other folders', () => {
     expect(unmatchedRuleHint([], 'D:\\动漫\\BLEACH\\第 11 集.mp4')).toBeNull()
   })
+
+  it('stays silent for a different show in the same folder', () => {
+    // Real libraries keep every show in one directory, so a shared folder is
+    // not evidence: claiming "learned a shape but this file did not match"
+    // about another show would be actively misleading.
+    const bleach = learn('D:\\动漫\\BLEACH 第 10 集：某集.mp4', 10)
+    expect(
+      unmatchedRuleHint(
+        [bleach as FilenameRule],
+        'D:\\动漫\\咒术回战 第 3 集：某集.mp4'
+      )
+    ).toBeNull()
+  })
 })
