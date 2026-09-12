@@ -124,13 +124,15 @@ export const dirname = (path: string): string => {
   return dir === path ? '' : dir
 }
 
-interface DigitRun {
+export interface DigitRun {
   index: number
   text: string
 }
 
-/** Every digit run in `base`, in order. */
-const digitRuns = (base: string): DigitRun[] => {
+/** Every digit run in `base`, in order. Shared with the sibling-episode scan
+ *  (`@/player/siblingEpisodes`), which needs the same notion of "a number in a
+ *  file name" — keep one implementation. */
+export const digitRuns = (base: string): DigitRun[] => {
   const out: DigitRun[] = []
   for (const match of base.matchAll(/\d+/g)) {
     if (match.index === undefined) continue
@@ -145,7 +147,7 @@ const digitRuns = (base: string): DigitRun[] => {
  * `E10` / `S01E10` are markers the shared parser already handles, so there is
  * nothing to learn for them either.
  */
-const candidateRuns = (base: string): DigitRun[] =>
+export const candidateRuns = (base: string): DigitRun[] =>
   digitRuns(base).filter((run) => {
     if (run.text.length > MAX_EPISODE_DIGITS) return false
     const before = run.index > 0 ? base[run.index - 1] : ''

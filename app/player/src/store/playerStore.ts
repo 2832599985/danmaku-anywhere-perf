@@ -238,6 +238,12 @@ export interface PlayerStore {
    */
   openMedia: (items: PlaylistItem[]) => void
   appendToPlaylist: (items: PlaylistItem[]) => void
+  /**
+   * Put `items` in order immediately AFTER the playing entry (the sibling
+   * episodes of the file that was just opened). Entries already queued are
+   * MOVED rather than duplicated, and the playing entry itself never moves.
+   */
+  insertAfterCurrent: (items: PlaylistItem[]) => void
   playPlaylistIndex: (index: number) => void
   removePlaylistIndex: (index: number) => void
   clearPlaylist: () => void
@@ -634,6 +640,40 @@ export const usePlayerStore = create<PlayerStore>()(
             s.danmakuSource = null
             resetPlaybackForNewMedia(s)
           }
+        }),
+
+      insertAfterCurrent: (items) =>
+        set((s) => {
+          if (items.length === 0) return
+          const current = s.playlist[s.playlistIndex]
+          if (!current) return
+          const currentKey = playlistKey(current)
+          // Move instead of duplicate: an episode of this batch that is already
+          // elsewhere in the list (the user played it earlier) must end up in
+          // episode order behind the current file, not appear twice.
+          const incoming = new Map(
+            items.map((item) => [playlistKey(item), item])
+          )
+          const kept = s.playlist.filter((item) => {
+            const key = playlistKey(item)
+            return key === currentKey || !incoming.has(key)
+          })
+          const index = kept.findIndex(
+            (item) => playlistKey(item) === currentKey
+          )
+          if (index < 0) return
+          kept.splice(index + 1, 0, ...incoming.values())
+          // Bound the persisted list; the playing entry is never dropped.
+          const overflow = kept.length - PLAYLIST_MAX
+          let shift = 0
+          if (overflow > 0) {
+            shift = Math.min(overflow, index)
+            if (shift > 0) kept.splice(0, shift)
+            const rest = overflow - shift
+            if (rest > 0) kept.splice(kept.length - rest, rest)
+          }
+          s.playlist = kept
+          s.playlistIndex = index - shift
         }),
 
       playPlaylistIndex: (index) =>

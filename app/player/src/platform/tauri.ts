@@ -1,4 +1,10 @@
-import type { PickedMedia, PickedText, Platform } from './types'
+import {
+  extOf,
+  type PickedMedia,
+  type PickedText,
+  type Platform,
+  VIDEO_EXTENSIONS,
+} from './types'
 
 const basename = (p: string): string => {
   const parts = p.split(/[\\/]/)
@@ -126,6 +132,24 @@ export const tauriPlatform: Platform = {
   async readTextFile(path: string): Promise<string> {
     const { readTextFile } = await import('@tauri-apps/plugin-fs')
     return readTextFile(path)
+  },
+
+  async listVideoFiles(dir: string): Promise<string[]> {
+    const { readDir } = await import('@tauri-apps/plugin-fs')
+    try {
+      const entries = await readDir(dir)
+      const base = dir.replace(/[\/]+$/, '')
+      return entries
+        .filter(
+          (entry) => entry.isFile && VIDEO_EXTENSIONS.has(extOf(entry.name))
+        )
+        .map((entry) => `${base}\${entry.name}`)
+    } catch {
+      // Unreadable folder (permissions, a disconnected drive, a network share):
+      // the scan simply finds nothing — opening the video must not fail because
+      // its neighbours could not be listed.
+      return []
+    }
   },
 
   minimizeWindow(): void {

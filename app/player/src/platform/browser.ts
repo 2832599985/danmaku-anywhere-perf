@@ -87,6 +87,12 @@ export const browserPlatform: Platform = {
     throw new Error('readTextFile is not available in the browser')
   },
 
+  async listVideoFiles(): Promise<string[]> {
+    // A page cannot read a directory. The sibling-episode scan is Tauri-only;
+    // in the browser the playlist grows the way it always did (drop/pick files).
+    return []
+  },
+
   onFileDrop(): () => void {
     // Browser drag-drop is handled with the DataTransfer API on the drop zone.
     return () => undefined

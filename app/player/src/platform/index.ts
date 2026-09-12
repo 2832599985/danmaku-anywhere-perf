@@ -32,4 +32,11 @@ export const initPlatform = async (): Promise<Platform> => {
   return cached
 }
 
-export type { PickedMedia, PickedText, Platform } from './types'
+export {
+  extOf,
+  type PickedMedia,
+  type PickedText,
+  type Platform,
+  VIDEO_EXTENSION_LIST,
+  VIDEO_EXTENSIONS,
+} from './types'

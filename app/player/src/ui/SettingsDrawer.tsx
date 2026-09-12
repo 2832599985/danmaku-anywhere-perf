@@ -181,6 +181,69 @@ const StepperCard = ({
   </Box>
 )
 
+/** One bordered row: label (+ optional hint) and an ON/OFF pill. */
+const ToggleRow = ({
+  label,
+  hint,
+  on,
+  onToggle,
+}: {
+  label: string
+  hint?: string
+  on: boolean
+  onToggle: () => void
+}) => (
+  <Box sx={{ border: LINE_STRONG, padding: '16px 12px' }}>
+    <Stack
+      direction="row"
+      alignItems="center"
+      justifyContent="space-between"
+      spacing={2}
+    >
+      <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <Typography sx={{ fontSize: 12, fontWeight: 700, color: PAPER }}>
+          {label}
+        </Typography>
+        {hint && (
+          <Typography
+            sx={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: alpha(PAPER, 0.5),
+              mt: '3px',
+              lineHeight: 1.4,
+            }}
+          >
+            {hint}
+          </Typography>
+        )}
+      </Box>
+      <Box
+        component="button"
+        type="button"
+        onClick={onToggle}
+        sx={{
+          appearance: 'none',
+          cursor: 'pointer',
+          padding: '4px 9px',
+          border: LINE_STRONG,
+          background: on ? VERMILION : 'transparent',
+          color: on ? PAPER : alpha(PAPER, 0.4),
+          fontFamily: MONO,
+          fontSize: 11,
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          transition: 'all 100ms steps(1)',
+          '&:hover': { borderColor: PAPER },
+        }}
+      >
+        {on ? 'ON' : 'OFF'}
+      </Box>
+    </Stack>
+  </Box>
+)
+
 const PlaybackSettingsPage = () => {
   const playback = usePlayerStore((s) => s.playbackSettings)
   const updatePlaybackSettings = usePlayerStore((s) => s.updatePlaybackSettings)
@@ -215,51 +278,23 @@ const PlaybackSettingsPage = () => {
         />
       </Stack>
 
-      <Box sx={{ border: LINE_STRONG, padding: '16px 12px' }}>
-        <Stack
-          direction="row"
-          alignItems="center"
-          justifyContent="space-between"
-        >
-          <Typography
-            sx={{
-              fontSize: 12,
-              fontWeight: 700,
-              color: PAPER,
-            }}
-          >
-            自动连播
-          </Typography>
-          <Box
-            component="button"
-            type="button"
-            onClick={() =>
-              updatePlaybackSettings({
-                autoAdvance: !playback.autoAdvance,
-              })
-            }
-            sx={{
-              appearance: 'none',
-              cursor: 'pointer',
-              padding: '4px 9px',
-              border: LINE_STRONG,
-              background: playback.autoAdvance ? VERMILION : 'transparent',
-              color: playback.autoAdvance ? PAPER : alpha(PAPER, 0.4),
-              fontFamily: MONO,
-              fontSize: 11,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-              transition: 'all 100ms steps(1)',
-              '&:hover': {
-                borderColor: PAPER,
-              },
-            }}
-          >
-            {playback.autoAdvance ? 'ON' : 'OFF'}
-          </Box>
-        </Stack>
-      </Box>
+      <ToggleRow
+        label="自动连播"
+        on={playback.autoAdvance}
+        onToggle={() =>
+          updatePlaybackSettings({ autoAdvance: !playback.autoAdvance })
+        }
+      />
+      <ToggleRow
+        label="自动加入同系列剧集"
+        hint="打开一集时，把同目录里同一批的其它集按集数排到它后面（按文件名前缀判定；认不出集数的文件不动）"
+        on={playback.autoAddSiblings}
+        onToggle={() =>
+          updatePlaybackSettings({
+            autoAddSiblings: !playback.autoAddSiblings,
+          })
+        }
+      />
     </Stack>
   )
 }

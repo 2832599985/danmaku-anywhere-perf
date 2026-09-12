@@ -9,6 +9,31 @@
  * else in the app needs to know which host it's running in.
  */
 
+/**
+ * Video container extensions the player accepts, WITHOUT the leading dot.
+ * Single source of truth: the two pickers, the drag-drop filter and the
+ * sibling-episode scan all derive from it (they used to keep their own copies).
+ */
+export const VIDEO_EXTENSION_LIST: readonly string[] = [
+  'mp4',
+  'm4v',
+  'webm',
+  'mkv',
+  'mov',
+  'avi',
+  'ts',
+  'flv',
+  'ogv',
+]
+
+export const VIDEO_EXTENSIONS: ReadonlySet<string> = new Set(
+  VIDEO_EXTENSION_LIST
+)
+
+/** Lower-case extension (no dot) of a file name, or '' when it has none. */
+export const extOf = (name: string): string =>
+  name.split('.').pop()?.toLowerCase() ?? ''
+
 export interface PickedMedia {
   /** A URL the <video> element can load (blob: in browser, stream:// in Tauri). */
   url: string
@@ -50,6 +75,15 @@ export interface Platform {
 
   /** Read a text file by absolute path (Tauri drag-drop). */
   readTextFile(path: string): Promise<string>
+
+  /**
+   * Absolute paths of the VIDEO files directly inside `dir` (no recursion).
+   * Powers the sibling-episode scan (add the rest of the batch to the playlist
+   * when one episode is opened). Returns [] in the browser, where a page cannot
+   * read a directory — the scan is a Tauri convenience, never a correctness
+   * dependency.
+   */
+  listVideoFiles(dir: string): Promise<string[]>
 
   /**
    * Subscribe to native OS drag-and-drop of files onto the window (Tauri).

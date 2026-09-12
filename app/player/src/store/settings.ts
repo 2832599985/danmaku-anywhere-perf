@@ -120,6 +120,13 @@ export interface SubtitleSettings {
 export interface PlaybackSettings {
   /** seconds moved by ArrowLeft / ArrowRight. */
   seekStepSec: number
+  /**
+   * When a video is opened, scan its own folder for the other episodes of the
+   * same batch (same literal file-name head) and queue them right after it, so
+   * autoplay can carry on into the next episode. Tauri only — a page cannot
+   * read a directory.
+   */
+  autoAddSiblings: boolean
   /** volume delta (0..1) moved by ArrowUp / ArrowDown. */
   volumeStep: number
   /** when the current video ends, automatically play the next playlist item. */
@@ -173,6 +180,7 @@ export const DEFAULT_DANMAKU: DanmakuSettings = {
 
 export const DEFAULT_PLAYBACK: PlaybackSettings = {
   seekStepSec: 5,
+  autoAddSiblings: true,
   volumeStep: 0.05,
   autoAdvance: true,
   skipOpEd: 'ask',

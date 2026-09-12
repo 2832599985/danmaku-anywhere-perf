@@ -9,13 +9,14 @@ import {
   searchSeasons,
 } from '@/danmaku/ddp'
 import {
+  dirname,
   matchRule,
   REASON_RULE_EPISODE_MISSING,
   unmatchedRuleHint,
 } from '@/danmaku/filenameRules'
 import { filterComments } from '@/danmaku/filter'
 import { parseDanmakuText } from '@/danmaku/parse'
-import type { Platform } from '@/platform'
+import { extOf, type Platform, VIDEO_EXTENSIONS } from '@/platform'
 import { type PlaylistItem, usePlayerStore } from '@/store/playerStore'
 import { parseSubtitleText } from '@/subtitle/format'
 import { onUserSeek, resetGeneration } from '@/subtitle/generate'
@@ -31,28 +32,16 @@ import { type PlayerCommands, PlayerCommandsContext } from './commands'
 import { DanmakuController } from './danmaku/DanmakuController'
 import { detectHdrTransfer } from './detectHdr'
 import { FullscreenPortalContext } from './fullscreenPortal'
+import { selectSiblings } from './siblingEpisodes'
 import { SubtitleController } from './subtitle/SubtitleController'
 import { UpscaleController } from './upscale/UpscaleController'
 import { useKeyboardControls } from './useKeyboardControls'
 import { useVideoElement } from './useVideoElement'
 
-const VIDEO_EXTENSIONS = new Set([
-  'mp4',
-  'm4v',
-  'webm',
-  'mkv',
-  'mov',
-  'avi',
-  'ts',
-  'flv',
-  'ogv',
-])
 const DANMAKU_EXTENSIONS = new Set(['xml', 'json', 'txt'])
 const SUBTITLE_EXTENSIONS = new Set(['srt', 'ass', 'vtt'])
 
 const basename = (p: string): string => p.split(/[\\/]/).pop() || p
-const extOf = (name: string): string =>
-  name.split('.').pop()?.toLowerCase() ?? ''
 const formatClock = (input: number): string => {
   const sec = Number.isFinite(input) && input > 0 ? input : 0
   const s = Math.floor(sec % 60)
@@ -118,6 +107,9 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   const isHdr = usePlayerStore((s) => s.isHdr)
   const playing = usePlayerStore((s) => s.playback.playing)
   const compareRatio = usePlayerStore((s) => s.compareRatio)
+  const autoAddSiblings = usePlayerStore(
+    (s) => s.playbackSettings.autoAddSiblings
+  )
 
   // Blocked words + duplicate merging run BEFORE the renderer; the unfiltered
   // list stays in the store so loosening a rule brings comments back.
@@ -513,6 +505,50 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       stale = true
     }
   }, [media, platform])
+
+  // --- sibling episodes -> playlist (Tauri; same folder; rules-aware) ---
+  // Opening one episode of a downloaded batch should not mean playing ONE
+  // episode: find the rest of the batch next to it and queue it right behind
+  // the current file, so autoplay carries on into the next episode. The batch
+  // is identified by the file name's literal head (see siblingEpisodes.ts), so
+  // a folder holding many shows contributes only its own episodes. Files whose
+  // episode number cannot be determined are skipped, never guessed.
+  useEffect(() => {
+    if (!platform.isTauri || !media?.path || !autoAddSiblings) return
+    const videoPath = media.path
+    let stale = false
+    void (async () => {
+      const paths = await platform.listVideoFiles(dirname(videoPath))
+      if (stale) return
+      const siblings = selectSiblings(
+        videoPath,
+        paths,
+        (path) =>
+          matchRule(usePlayerStore.getState().filenameRules, path)?.episode ??
+          null
+      )
+      if (siblings.length === 0) return
+      const store = usePlayerStore.getState()
+      if (store.media?.path !== videoPath) return
+      const known = new Set(store.playlist.map((item) => item.path))
+      const fresh = siblings.filter((sibling) => !known.has(sibling.path))
+      store.insertAfterCurrent(
+        siblings.map((sibling) => ({
+          url: platform.mediaUrlForPath(sibling.path),
+          name: sibling.name,
+          path: sibling.path,
+        }))
+      )
+      if (fresh.length > 0) {
+        usePlayerStore
+          .getState()
+          .showOsd(`已加入 ${fresh.length} 集到播放列表`, '📃')
+      }
+    })()
+    return () => {
+      stale = true
+    }
+  }, [media, platform, autoAddSiblings])
 
   // --- auto-load a sibling subtitle file (video.srt / video.ass) on Tauri ---
   // Same identity-recheck discipline as the danmaku sibling loader above: an

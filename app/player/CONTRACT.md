@@ -1163,3 +1163,45 @@ shape, and a 40-file sweep of the user's real library with no cross-show match.
 Still open (accepted): a batch that mixes spellings (`第 3 集` in one file, `第3集` in the next) does
 not match — the literal contains the space; and a same-title file in another folder matches by
 design.
+
+## 24. Sibling episodes: auto-fill the playlist from the folder (2026-09-12)
+
+Opening one file used to mean a playlist of exactly ONE entry, so `autoAdvance`
+had nothing to advance to — for a downloaded 12-episode season the user had to
+pick every file by hand.
+
+**Behaviour.** When a video is opened (Tauri, and only while
+`playbackSettings.autoAddSiblings` is on, default on) the player lists its own
+folder, keeps the files that belong to the same batch, and inserts them in
+episode order right behind the current entry. Autoplay then continues into the
+next episode. The OSD reports `已加入 N 集到播放列表` only when something was
+actually new.
+
+**Same batch = same literal head.** `siblingEpisodes.ts` (pure, unit-tested)
+identifies a batch by everything in the file name BEFORE the episode number
+(`魔法光源股份有限公司 第 `, `[Sakurato] BLEACH … [`). That head is what keeps a
+folder holding an entire scraped library from mixing shows: 幼女战记 next to
+乡下大叔成为剑圣 next to a screen recording contributes nothing to each other.
+The episode number is read from `第 N 集/话`-style markers, or from a single
+unambiguous number (`Show - 10.mkv`, `[Group] Show [10][1080p].mkv`); a name
+whose episode cannot be determined (a date, an id, a bare `05.mp4` with no head)
+is skipped, never guessed — the same discipline as the danmaku matching. A
+learned rule can supply the number for shapes the heuristic cannot read.
+
+**Platform.** `Platform.listVideoFiles(dir)` — Tauri implements it with the fs
+plugin's `readDir` (capability `fs:allow-read-dir` added); the browser adapter
+returns `[]`, because a page cannot read a directory. The scan is a Tauri
+convenience, never a correctness dependency. Video extensions now live once, in
+`platform/types.ts`, shared by both pickers, drag-drop and the scan.
+
+**Store.** `insertAfterCurrent(items)` moves rather than duplicates (an episode
+already queued ends up in order, not twice), never moves the playing entry, and
+keeps `PLAYLIST_MAX` enforced without dropping the entry being watched.
+
+**Settings.** 设置 → 播放 → 「自动加入同系列剧集」with a one-line hint; both
+playback toggles now share a `ToggleRow` component.
+
+**Known limits (by design).** Same directory only (no recursion — opening a file
+must not depend on the size of the library); a batch whose files mix spellings
+(`第 3 集` in one file, `第3集` in the next) is not recognised; and files whose
+names carry no usable episode number are left alone rather than sorted by name.
