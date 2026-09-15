@@ -2,6 +2,7 @@ import { Box, Button, Stack } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import { useEffect, useState } from 'react'
 import { usePlayerStore } from '@/store/playerStore'
+import { mountEmbeddedTrack, trackLabel } from '@/subtitle/embedded'
 import {
   cancelGeneration,
   isGenerating,
@@ -17,10 +18,38 @@ export const SubtitleSettings = () => {
   const sttStatus = usePlayerStore((s) => s.sttStatus)
   const sttProgress = usePlayerStore((s) => s.sttProgress)
   const sttError = usePlayerStore((s) => s.sttError)
+  const media = usePlayerStore((s) => s.media)
+  const subtitleSource = usePlayerStore((s) => s.subtitleSource)
+  const embeddedTracks = usePlayerStore((s) => s.embeddedTracks)
+  const activeEmbeddedTrack = usePlayerStore((s) => s.activeEmbeddedTrack)
+  const embeddedError = usePlayerStore((s) => s.embeddedError)
 
   const [models, setModels] = useState<ModelStatus[]>([])
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [downloadPercent, setDownloadPercent] = useState(0)
+  /** Failure of a manual track pick (conversion error, empty track). */
+  const [pickError, setPickError] = useState<string | null>(null)
+  /** Stream index being extracted right now (0 is a valid index → null = idle). */
+  const [pickBusy, setPickBusy] = useState<number | null>(null)
+
+  /**
+   * Switch to an embedded track: extract it and mount it over what is shown.
+   * Extraction is a sub-second ffmpeg run on a local file but can take seconds
+   * on a network share — the row says so instead of looking dead.
+   */
+  const selectTrack = (index: number) => {
+    if (pickBusy !== null) return
+    setPickError(null)
+    setPickBusy(index)
+    void mountEmbeddedTrack(index)
+      .then((mounted) => {
+        if (!mounted) setPickError('这条字幕轨没有可用内容')
+      })
+      .catch((error: unknown) =>
+        setPickError(error instanceof Error ? error.message : String(error))
+      )
+      .finally(() => setPickBusy(null))
+  }
 
   useEffect(() => {
     void modelStatus()
@@ -95,6 +124,124 @@ export const SubtitleSettings = () => {
             onChange={(checked) => update({ outline: checked })}
             label="墨色描边"
           />
+        </Stack>
+      </InkSection>
+
+      <InkSection zh="内封字幕" en="EMBEDDED">
+        <Stack spacing={1}>
+          {subtitleSource && (
+            <Box
+              component="span"
+              sx={{
+                fontFamily: MONO,
+                fontSize: 11,
+                fontWeight: 700,
+                color: GREEN,
+              }}
+            >
+              当前字幕 · {subtitleSource.label} · {subtitleSource.count} 条
+            </Box>
+          )}
+          {embeddedError ? (
+            <Box
+              sx={{
+                border: `2px solid ${VERMILION}`,
+                background: alpha(VERMILION, 0.08),
+                color: VERMILION,
+                fontSize: 12,
+                fontWeight: 700,
+                padding: '8px 10px',
+              }}
+            >
+              无法读取内封字幕 · {embeddedError}
+            </Box>
+          ) : embeddedTracks.length === 0 ? (
+            <Box
+              sx={{
+                border: LINE_STRONG,
+                background: alpha(INK, 0.4),
+                padding: '10px 12px',
+                fontSize: 12,
+                fontWeight: 700,
+                color: alpha(PAPER, 0.6),
+              }}
+            >
+              {media?.path
+                ? '此视频没有内封字幕（可把 .srt/.ass 放在视频同目录）'
+                : '内封字幕只对本地视频有效'}
+            </Box>
+          ) : (
+            embeddedTracks.map((track) => {
+              const active = track.index === activeEmbeddedTrack
+              const busy = track.index === pickBusy
+              // While one track is being extracted everything is inert: two
+              // concurrent ffmpeg runs would race for which one mounts last.
+              const disabled = !track.text || (pickBusy !== null && !busy)
+              return (
+                <Box
+                  key={track.index}
+                  component="button"
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => selectTrack(track.index)}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1.5,
+                    width: '100%',
+                    textAlign: 'left',
+                    border: active ? `2px solid ${VERMILION}` : LINE_STRONG,
+                    background: active
+                      ? alpha(VERMILION, 0.15)
+                      : alpha(INK, 0.4),
+                    color: disabled ? alpha(PAPER, 0.45) : PAPER,
+                    padding: '8px 12px',
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                    fontFamily: MONO,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    '&:hover': disabled
+                      ? undefined
+                      : { background: alpha(VERMILION, 0.2) },
+                  }}
+                >
+                  <Box
+                    component="span"
+                    sx={{
+                      width: 8,
+                      height: 8,
+                      flex: '0 0 auto',
+                      background: active ? VERMILION : alpha(PAPER, 0.3),
+                    }}
+                  />
+                  <Box component="span" sx={{ flex: 1 }}>
+                    {trackLabel(track)}
+                  </Box>
+                  {!track.text && (
+                    <Box component="span" sx={{ color: VERMILION }}>
+                      图形字幕 · 不支持
+                    </Box>
+                  )}
+                  {busy && <Box component="span">提取中…</Box>}
+                  {active && !busy && <Box component="span">正在使用</Box>}
+                </Box>
+              )
+            })
+          )}
+          {pickError && (
+            <Box
+              sx={{
+                border: `2px solid ${VERMILION}`,
+                background: alpha(VERMILION, 0.08),
+                color: VERMILION,
+                fontSize: 12,
+                fontWeight: 700,
+                padding: '8px 10px',
+              }}
+            >
+              {pickError}
+            </Box>
+          )}
         </Stack>
       </InkSection>
 

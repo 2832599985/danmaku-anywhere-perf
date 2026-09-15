@@ -18,6 +18,12 @@ import { filterComments } from '@/danmaku/filter'
 import { parseDanmakuText } from '@/danmaku/parse'
 import { extOf, type Platform, VIDEO_EXTENSIONS } from '@/platform'
 import { type PlaylistItem, usePlayerStore } from '@/store/playerStore'
+import {
+  loadEmbeddedTracks,
+  mountEmbeddedTrack,
+  pickDefaultTrack,
+  trackName,
+} from '@/subtitle/embedded'
 import { parseSubtitleText } from '@/subtitle/format'
 import { onUserSeek, resetGeneration } from '@/subtitle/generate'
 import { INK, PAPER, SANS } from '@/theme/theme'
@@ -550,7 +556,11 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     }
   }, [media, platform, autoAddSiblings])
 
-  // --- auto-load a sibling subtitle file (video.srt / video.ass) on Tauri ---
+  // --- auto-load subtitles: sibling file first, then the container's own ---
+  // Two sources, in that order. A `.srt`/`.ass`/`.vtt` next to the video is the
+  // more explicit choice, so it wins; otherwise the best track INSIDE the
+  // container is mounted (fansub MKVs carry 简体/繁體 streams, and the webview
+  // can never see them — Rust demuxes them, see `subtitle/embedded.ts`).
   // Same identity-recheck discipline as the danmaku sibling loader above: an
   // explicit mount or a media switch mid-read must not be clobbered.
   useEffect(() => {
@@ -565,6 +575,11 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     const suffixOrder = ['.srt', '.ass', '.vtt']
     let stale = false
     void (async () => {
+      // Probe the embedded tracks FIRST, whatever ends up mounted: the picker
+      // in 设置 → 字幕 must be able to offer them even when a sibling file wins,
+      // and "没有内封字幕" has to mean "we looked", not "we never tried".
+      const tracks = await loadEmbeddedTracks(videoPath)
+      if (stale) return
       for (const suffix of suffixOrder) {
         const candidate = `${base}${suffix}`
         let text: string
@@ -590,6 +605,30 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
           // unparsable sibling — try the next extension
         }
       }
+      const pick = pickDefaultTrack(tracks)
+      if (!pick) return
+      let mounted = false
+      try {
+        mounted = await mountEmbeddedTrack(pick.index)
+      } catch (error) {
+        // ffmpeg missing, or the stream could not be converted: say so once on
+        // screen, and keep the detail for 设置 → 字幕. Same media-identity guard
+        // as every other hop in this effect — a switch mid-extraction must not
+        // staple the failure onto the NEXT file.
+        const store = usePlayerStore.getState()
+        if (stale || store.media?.path !== videoPath) return
+        store.setEmbeddedError(
+          error instanceof Error ? error.message : String(error)
+        )
+        store.showOsd('内封字幕加载失败', '🎬')
+        return
+      }
+      if (stale || !mounted) return
+      const source = usePlayerStore.getState().subtitleSource
+      if (!source) return
+      usePlayerStore
+        .getState()
+        .showOsd(`内封字幕 · ${trackName(pick)} · ${source.count} 条`, '🎬')
     })()
     return () => {
       stale = true

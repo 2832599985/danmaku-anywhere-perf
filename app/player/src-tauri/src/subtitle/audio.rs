@@ -25,9 +25,10 @@ use std::os::windows::process::CommandExt;
 
 /// Suppresses the console window ffmpeg would open in release builds
 /// (`windows_subsystem = "windows"` keeps the app windowless, but spawned
-/// children do not inherit that).
+/// children do not inherit that). Shared with `tracks.rs`, which spawns the
+/// same binaries.
 #[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+pub(crate) const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Segment length in seconds. Small enough that the first segment finishes
 /// extracting in a couple of seconds, large enough that per-segment ffmpeg

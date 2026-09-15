@@ -1219,3 +1219,63 @@ playback toggles now share a `ToggleRow` component.
 must not depend on the size of the library); a batch whose files mix spellings
 (`第 3 集` in one file, `第3集` in the next) is not recognised; and files whose
 names carry no usable episode number are left alone rather than sorted by name.
+
+## 25. Embedded subtitle tracks (2026-09-14 — DONE)
+
+**Why.** Fansub releases ship subtitles INSIDE the container — the user's
+`[Nix-Raws] … S01E11 [CATCHPLAY WEB-DL 1080p AVC AAC][SC_TC].mkv` carries two
+SubRip streams (Chinese Simplified #2 / Chinese Traditional #3). The player
+showed none of them and offered no way to pick one, because the webview cannot
+see them at all: `<video>` only ever exposes WebVTT text tracks that were
+mounted as a sidecar `<track>` element, so a subtitle stream inside Matroska (or
+MP4 `mov_text`, or WebM) is invisible in every Chromium-based host. The tracks
+must be demuxed OUTSIDE the webview and handed to the cue pipeline that already
+exists (`parseSubtitleText` → `SubtitleController`).
+
+**Shape.** ffmpeg/ffprobe do the demuxing — the same binaries `audio.rs` already
+resolves (next to the executable, then PATH; `resolve_ffprobe` additionally
+looks in the resolved ffmpeg's own directory, since builds ship the pair
+together). Nothing new is bundled, the `stream://` protocol is untouched, and
+every container ffmpeg can read is covered by the same code path (requirement
+"other formats too").
+
+**Rust — `src-tauri/src/subtitle/tracks.rs`**
+- `subtitle_list_tracks(path) -> Vec<SubtitleTrack>`, via `ffprobe
+  -select_streams s -show_entries
+  stream=index,codec_name,disposition:stream_tags=language,title -of json`.
+  `SubtitleTrack { index, codec, language, title, text, default, forced }` —
+  `text: false` marks BITMAP codecs (PGS/VobSub/DVB): they are listed so the UI
+  can say "图形字幕，暂不支持" rather than pretending the file has no subtitles.
+  Bounded in-memory cache (8 files).
+- `subtitle_extract_track(path, index) -> String`, via `ffmpeg -v error
+  -nostdin -i <path> -map 0:<index> -f srt -` (stdout) — SRT text, which the
+  frontend parser already understands. Bounded cache (4 entries). A bitmap
+  track errors out instead of mounting nothing. Both commands run off the UI
+  thread (`spawn_blocking`) and hide the console window.
+
+**Frontend**
+- `src/subtitle/native.ts` — `EmbeddedTrack` type + `listEmbeddedTracks` /
+  `extractEmbeddedTrack` wrappers.
+- `src/subtitle/embedded.ts` — pure, unit-tested half: `pickDefaultTrack`
+  (text tracks only → Chinese-ish language → 简体 over 繁體 when the file
+  carries both, whatever order the muxer used → `default` disposition → first;
+  `forced` tracks are used only when nothing else exists) and `trackLabel`
+  (title/语言 · codec · 强制). Imperative half: `mountEmbeddedTrack(index)` =
+  extract → `parseSubtitleText` → `setSubtitles(cues, { kind: 'file', label })`,
+  with the media-identity recheck the other loaders use; `loadEmbeddedTracks()`
+  probes and publishes the list, stashing the failure reason in `embeddedError`.
+- Auto-mount order on open is unchanged in spirit: **sibling file → embedded
+  track → (manual) ASR**. The embedded step runs only when the sibling loop
+  mounted nothing, so a user's own `.srt` next to the video still wins.
+- Store (session-only, cleared with the cues on a media switch):
+  `embeddedTracks`, `activeEmbeddedTrack`.
+- UI: 设置 → 字幕 → 「内封字幕 / EMBEDDED」 lists the tracks with language,
+  title and codec; clicking one mounts it. No tracks → `此视频没有内封字幕`;
+  bitmap tracks are shown disabled with the reason.
+
+**Known limits.** Bitmap subtitles (PGS/VobSub) need OCR — not supported, said
+out loud in the UI. ffmpeg's SRT conversion drops ASS styling and positioning,
+so karaoke/moving signs render as plain bottom-centered lines (the same limit
+the existing ASS parser has). ffmpeg/ffprobe must be present — exactly the
+requirement the ASR pipeline already has; without them the settings section
+reports it instead of failing silently.

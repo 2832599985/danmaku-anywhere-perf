@@ -4,6 +4,7 @@ import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import { type FilenameRule, ruleShape } from '@/danmaku/filenameRules'
 import type { PickedMedia } from '@/platform/types'
+import type { EmbeddedTrack } from '@/subtitle/native'
 import type { SubtitleCue, SubtitleSource } from '@/subtitle/types'
 import {
   type DanmakuSettings,
@@ -120,6 +121,12 @@ export interface PlayerStore {
   subtitleSource: SubtitleSource | null
   /** cue currently on screen (set by SubtitleController), -1 = none. */
   subtitleCueIndex: number
+  /** Subtitle streams INSIDE the current file (mkv/mp4/webm); empty = none. */
+  embeddedTracks: EmbeddedTrack[]
+  /** Stream index of the mounted embedded track, null when none is mounted. */
+  activeEmbeddedTrack: number | null
+  /** Why the probe failed (no ffprobe, unreadable file) — null when it worked. */
+  embeddedError: string | null
 
   // --- speech-to-text generation (session-only) ---
   /** pipeline stage; 'idle' = nothing running, no error. */
@@ -189,6 +196,12 @@ export interface PlayerStore {
   /** mount a subtitle track (external file or generated cues). */
   setSubtitles: (cues: SubtitleCue[], source: SubtitleSource) => void
   clearSubtitles: () => void
+  /** record the subtitle streams found inside the current file. */
+  setEmbeddedTracks: (tracks: EmbeddedTrack[]) => void
+  /** remember which embedded track is mounted (picker highlight). */
+  setActiveEmbeddedTrack: (index: number | null) => void
+  /** record why the probe failed (cleared on the next successful one). */
+  setEmbeddedError: (message: string | null) => void
   /** called by SubtitleController when the on-screen cue changes. */
   setSubtitleCueIndex: (index: number) => void
   setSttStatus: (status: SttStatus, progress?: number) => void
@@ -339,6 +352,9 @@ function resetPlaybackForNewMedia(s: PlayerStore): void {
   s.subtitleCues = []
   s.subtitleSource = null
   s.subtitleCueIndex = -1
+  s.embeddedTracks = []
+  s.activeEmbeddedTrack = null
+  s.embeddedError = null
   s.sttStatus = 'idle'
   s.sttProgress = 0
   s.sttError = null
@@ -363,6 +379,9 @@ export const usePlayerStore = create<PlayerStore>()(
       subtitleCues: [],
       subtitleSource: null,
       subtitleCueIndex: -1,
+      embeddedTracks: [],
+      activeEmbeddedTrack: null,
+      embeddedError: null,
 
       sttStatus: 'idle',
       sttProgress: 0,
@@ -435,11 +454,29 @@ export const usePlayerStore = create<PlayerStore>()(
           s.subtitleCues = []
           s.subtitleSource = null
           s.subtitleCueIndex = -1
+          // The embedded track list stays (the file did not change); only the
+          // "which one is mounted" highlight is dropped.
+          s.activeEmbeddedTrack = null
         }),
 
       setSubtitleCueIndex: (index) =>
         set((s) => {
           s.subtitleCueIndex = index
+        }),
+
+      setEmbeddedTracks: (tracks) =>
+        set((s) => {
+          s.embeddedTracks = tracks
+        }),
+
+      setActiveEmbeddedTrack: (index) =>
+        set((s) => {
+          s.activeEmbeddedTrack = index
+        }),
+
+      setEmbeddedError: (message) =>
+        set((s) => {
+          s.embeddedError = message
         }),
 
       setSttStatus: (status, progress = 0) =>
