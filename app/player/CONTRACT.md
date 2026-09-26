@@ -1383,3 +1383,67 @@ density strip appears the bar grows 142 → 201 px and the lift follows to 201 p
   construction). `setControlBarHeight` drops repeat values, so the per-commit
   measurement stays free.
 
+## 27. HUD frame rate was the display refresh, not the frame rate (2026-09-27 — DONE)
+
+**Reported as** "我怎么感觉我的补帧功能失效了呢…不对啊我看着这像是有补帧的效果，只是肯定没有右上角显示那个帧数那么高". The user was right on both counts: interpolation works, and the number in the corner was not a frame rate.
+
+**What the number was.** `UpscaleStats.fps` came from the engine's
+`presentedFrames` counter, which `2ca4b867` had introduced deliberately
+("HUD OUT FPS now shows the true presented rate, not source rate"). The
+reasoning there was that the presentation loop "presents real + generated
+sub-frames", so counting canvas swaps would measure the interpolated output.
+It does not: `presentationLoop` runs on **every rAF turn** and calls
+`presentLatestProcessedFrame()`, which re-submits the *same latest texture* to
+the canvas whenever the generation has not changed (`presentedFrameGeneration
+=== processedFrameGeneration` only gates the paused case). So the counter
+increments at the **display refresh rate** — 170 here — no matter how many
+distinct frames exist. Measured on the packaged exe:
+
+| config | old HUD | interpolated | true visible |
+|---|---|---|---|
+| fi off (Anime4K only) | **175** | 0/s | ~24/s |
+| fi 2x @1080p | **176** | 23.3/s | ~47/s |
+| fi 2x @720p | **176** | 23.5/s | ~48/s |
+
+Interpolation fully off still read 175. The only honest number in the UI was
+`GENERATING x F/S` (from the engine's `...FrameInterpolationGenerated`
+attribute), which is why it sat in the settings page — but it was displayed
+next to a number 7× larger, so the larger one won.
+
+**The fix.** The visible rate is the source frames plus the interpolated
+sub-frames, capped by how often the canvas was actually presented:
+
+```
+fps = min(sourceFrames + generatedFrames, presentedFrames) / seconds
+```
+
+with the breakdown carried alongside (`sourceFps`, `generatedFps`). The
+arithmetic lives in `src/player/upscale/outputRate.ts` as a pure function with
+its own tests, because this is precisely the logic that silently regressed
+once already. Verified on the packaged exe: **fi off → 25**, **fi 2x → 49**
+(25 + 24), **fi 4x → 63** (25 + 38) — read from both the store and the rendered
+DOM text.
+
+**HUD changes.** `OUTPUT FPS` now shows the true rate with a small
+`source + generated` breakdown under it. When interpolation is enabled but
+producing nothing, the breakdown reads `补帧未产出` in vermilion (or
+`补帧不可用` on an engine fallback) instead of letting a healthy-looking total
+hide it. The settings panel's `OUT FPS` gets the same breakdown, and its
+`GENERATING` line turns vermilion at 0 rather than staying green.
+
+**Measurement notes for whoever revisits this.**
+- The engine's generated counter is **per-interpolator and restarts at 0** on
+  every renderer rebuild (a settings change, a resolution switch). A negative
+  delta means "reset", not "no frames produced". A duty-cycle measurement that
+  ignores this reports resets as dead seconds — it produced a false
+  "1080p interpolation is broken" conclusion during this investigation before
+  being caught.
+- `fi 2x @1080p` and `fi 2x @720p` produce **the same** ~23.5/s. 1080p costs
+  more GPU (~90% vs ~63% utilization) but does not lose frames, so the
+  processing resolution is not a correctness lever.
+- The HUD samples a 1 s window, so the number moves with scene content: a
+  static passage has no distinct source frames for the interpolator to double
+  (correctly), and the total drops. Sweep the source before concluding
+  anything from one window.
+
+

@@ -11,6 +11,7 @@ import {
   type TargetResolution,
   type UpscaleSettings,
 } from '@/store/settings'
+import { computeOutputRate } from './outputRate'
 
 // The weights are served as `.dat`, not `.bin`: some Windows security/web
 // filters silently block in-browser downloads of `.bin` files (returning an
@@ -23,8 +24,12 @@ export type InterpolationStatus = 'off' | 'active' | 'fallback'
 
 /** Per-report HUD numbers derived from the engine's diagnostics summary. */
 export interface UpscaleStatsReport {
+  /** True on-screen frame rate: source frames + interpolated sub-frames. */
   fps: number
+  /** Source-video rate on its own (what the file carries). */
+  sourceFps: number
   cpuFrameMs: number
+  /** interpolation-generated frames per second (0 when off). */
   generatedFps: number
 }
 
@@ -210,18 +215,24 @@ export class UpscaleController {
     const generatedAttr =
       this.canvas?.dataset.danmakuAnywhereFrameInterpolationGenerated
     const generatedTotal = generatedAttr ? Number(generatedAttr) || 0 : 0
+    // The engine's generated counter is per-interpolator and restarts at 0
+    // whenever the renderer is rebuilt (a settings change, a resolution
+    // switch), so a negative delta means "reset", not "no frames produced".
     const generatedDelta = Math.max(0, generatedTotal - this.lastGeneratedCount)
     this.lastGeneratedCount = generatedTotal
-    // `presentedFrames` counts every frame swapped onto the canvas (rAF-paced,
-    // real + interpolated sub-frames) — i.e. the true on-screen rate after
-    // interpolation. `frames` only counts source-video rVFC callbacks, so it
-    // would report the SOURCE rate (~24) even when we present 120. Fall back
-    // to `frames` for the rvfc path where the presentation loop never runs.
-    const presented = summary.presentedFrames || summary.frames
+    // `frames` counts source-video rVFC callbacks (the file's own rate);
+    // `presentedFrames` is the canvas swap cadence. The visible rate and its
+    // breakdown live in `computeOutputRate` — see the note there for why the
+    // swap cadence must never be reported as the frame rate.
+    const rate = computeOutputRate({
+      sourceFrames: summary.frames,
+      generatedFrames: generatedDelta,
+      presentedFrames: summary.presentedFrames,
+      seconds,
+    })
     this.callbacks.onStats?.({
-      fps: Math.round(presented / seconds),
+      ...rate,
       cpuFrameMs: summary.averageCpuFrameMs,
-      generatedFps: Math.round(generatedDelta / seconds),
     })
   }
 

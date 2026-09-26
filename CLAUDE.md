@@ -360,7 +360,7 @@ Tauri v2 + React 19 desktop player (fork feature) that reuses the workspace engi
 - Danmaku filter chain: `src/danmaku/filter.ts` (blocked words plain+regex + merge-duplicates, applied before render).
 - OP/ED inference: `src/player/useOpEdMarks.ts` (danmaku density heuristic, shared by ProgressBar gold ticks + skip-OP button). Skip mode `playbackSettings.skipOpEd` (auto/ask/off).
 - A/B compare: canvas `clip-path` via `compareRatio` store field; keyboard C. Upscale toggle keyboard U.
-- Real-time HUD: `upscaleStats` (presentedFrames-based OUT FPS, cpuFrameMs, generatedFps) fed by engine `onDiagnostics`. 回调守卫与 apply 串行的坑见上方 hard rules。
+- Real-time HUD: `upscaleStats` fed by engine `onDiagnostics`。**HUD 的帧率必须是"真实可见帧率"= 源帧率 + 插帧产出，不能用 `presentedFrames`**：那个计数器在呈现循环里每个 rAF turn 都自增（`presentLatestProcessedFrame()` 在生成代未变时会重复提交同一张纹理，只有暂停才被 gate），所以它等于**显示器刷新率**——本机 170Hz 上，补帧**完全关掉**也显示 175，用户会以为补帧在跑。算术抽在 `src/player/upscale/outputRate.ts`（纯函数 + 单测），`fps = min(源 + 插帧, presentedFrames)/秒`，并把 `sourceFps`/`generatedFps` 一起显示出来；插帧开着但产出为 0 时显示「补帧未产出」而不是让一个好看的总数盖过去。回调守卫与 apply 串行的坑见上方 hard rules。**另一个坑：引擎的 `...FrameInterpolationGenerated` 计数器是 per-interpolator 的，渲染器重建（改设置/换分辨率）会归零**——测速率时负增量是"重置"不是"没产出"，把它当 dead second 会得出"补帧坏了"的假结论（2026-09-27 真的这么误判过一次）。
 - Hold-to-speed: 长按 → 临时倍速 `playbackSettings.holdSpeed`（默认 3，设置页 1.5–8× / 0.5 步进）；短按 → 仍 seek。逻辑在 `useKeyboardControls.ts`，快照恢复见上方 hard rules。
 - Settings full-window page (not drawer): `settingsSection` store field + `openSettingsAt(section)` action.
 - Self-hosted fonts: `public/assets/fonts/` (~230 woff2 shards, Noto Sans SC + Zen Antique + JetBrains Mono); `mascot-manga.png` for idle screen.

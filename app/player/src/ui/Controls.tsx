@@ -178,6 +178,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
 
   const fi = upscale.frameInterpolation
   const upscaleStats = usePlayerStore((s) => s.upscaleStats)
+  const interpolationStatus = usePlayerStore((s) => s.interpolationStatus)
   const playbackSettings = usePlayerStore((s) => s.playbackSettings)
   const currentTime = usePlayerStore((s) => s.playback.currentTime)
   const statusText =
@@ -363,6 +364,30 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             >
               {upscaleStats.fps}
             </Box>
+            {/* The composition, so the number is never mistaken for the
+                display refresh. With interpolation on, "+N" is the sub-frames
+                it actually produced this second; when it is enabled but
+                producing nothing, say so instead of showing a healthy total. */}
+            {fi.enabled && (
+              <Box
+                component="span"
+                sx={{
+                  fontFamily: MONO,
+                  fontSize: 8,
+                  letterSpacing: '0.1em',
+                  color:
+                    interpolationStatus === 'fallback'
+                      ? VERMILION
+                      : alpha(PAPER, 0.45),
+                }}
+              >
+                {upscaleStats.generatedFps > 0
+                  ? `${upscaleStats.sourceFps} + ${upscaleStats.generatedFps}`
+                  : interpolationStatus === 'fallback'
+                    ? '补帧不可用'
+                    : '补帧未产出'}
+              </Box>
+            )}
           </Box>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
             <Box

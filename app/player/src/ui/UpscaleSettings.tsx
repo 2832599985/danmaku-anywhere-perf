@@ -633,12 +633,14 @@ export const UpscaleSettings = () => {
                     fontFamily: MONO,
                     fontSize: 10,
                     fontWeight: 700,
-                    color: GREEN,
+                    color: upscaleStats.generatedFps > 0 ? GREEN : VERMILION,
                     textTransform: 'uppercase',
                     letterSpacing: '0.06em',
                   }}
                 >
-                  GENERATING {upscaleStats.generatedFps.toFixed(1)} F/S
+                  {upscaleStats.generatedFps > 0
+                    ? `GENERATING ${upscaleStats.generatedFps.toFixed(1)} F/S`
+                    : '补帧未产出'}
                 </Typography>
               )}
             </Stack>
@@ -666,6 +668,16 @@ export const UpscaleSettings = () => {
                   }}
                 >
                   OUT FPS
+                </Typography>
+                <Typography
+                  sx={{
+                    fontFamily: MONO,
+                    fontSize: 9,
+                    color: alpha(PAPER, 0.4),
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  源 {upscaleStats.sourceFps} + 补帧 {upscaleStats.generatedFps}
                 </Typography>
               </Box>
 

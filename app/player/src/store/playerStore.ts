@@ -80,8 +80,15 @@ export interface DanmakuSearchPrefill {
 
 /** Live renderer statistics for the HUD (session-only, ~1s cadence). */
 export interface UpscaleStats {
-  /** presented frames per second over the report window. */
+  /**
+   * True on-screen frame rate: the source frames plus the interpolated
+   * sub-frames the engine produced, capped by how often the canvas was
+   * presented. NOT the canvas swap cadence, which just tracks the display
+   * refresh and reads the same with interpolation off.
+   */
   fps: number
+  /** Source-video frame rate on its own (what the file carries). */
+  sourceFps: number
   /** average CPU cost per frame in ms. */
   cpuFrameMs: number
   /** interpolation-generated frames per second (0 when off). */
