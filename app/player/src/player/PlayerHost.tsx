@@ -16,9 +16,16 @@ import {
 } from '@/danmaku/filenameRules'
 import { filterComments } from '@/danmaku/filter'
 import { parseDanmakuText } from '@/danmaku/parse'
-import { extOf, type Platform, VIDEO_EXTENSIONS } from '@/platform'
+import {
+  extOf,
+  type Platform,
+  readFileText,
+  SUBTITLE_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+} from '@/platform'
 import { type PlaylistItem, usePlayerStore } from '@/store/playerStore'
 import {
+  type EmbeddedMountResult,
   loadEmbeddedTracks,
   mountEmbeddedTrack,
   pickDefaultTrack,
@@ -26,7 +33,8 @@ import {
 } from '@/subtitle/embedded'
 import { parseSubtitleText } from '@/subtitle/format'
 import { onUserSeek, resetGeneration } from '@/subtitle/generate'
-import { INK, PAPER, SANS } from '@/theme/theme'
+import { focusEmbeddedExtraction } from '@/subtitle/native'
+import { rankSiblingSubtitles } from '@/subtitle/siblings'
 import { Controls } from '@/ui/Controls'
 import { DanmakuSourceDialog } from '@/ui/DanmakuSourceDialog'
 import { EmptyState } from '@/ui/EmptyState'
@@ -38,14 +46,14 @@ import { type PlayerCommands, PlayerCommandsContext } from './commands'
 import { DanmakuController } from './danmaku/DanmakuController'
 import { detectHdrTransfer } from './detectHdr'
 import { FullscreenPortalContext } from './fullscreenPortal'
-import { selectSiblings } from './siblingEpisodes'
+import { type SiblingEpisode, selectBatch } from './siblingEpisodes'
 import { SubtitleController } from './subtitle/SubtitleController'
+import { SubtitleRenderer } from './subtitle/SubtitleRenderer'
 import { UpscaleController } from './upscale/UpscaleController'
 import { useKeyboardControls } from './useKeyboardControls'
 import { useVideoElement } from './useVideoElement'
 
 const DANMAKU_EXTENSIONS = new Set(['xml', 'json', 'txt'])
-const SUBTITLE_EXTENSIONS = new Set(['srt', 'ass', 'vtt'])
 
 const basename = (p: string): string => p.split(/[\\/]/).pop() || p
 const formatClock = (input: number): string => {
@@ -84,6 +92,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   const upscaleCtrlRef = useRef<UpscaleController | null>(null)
   const danmakuCtrlRef = useRef<DanmakuController | null>(null)
   const subtitleCtrlRef = useRef<SubtitleController | null>(null)
+  const subtitleRendererRef = useRef<SubtitleRenderer | null>(null)
 
   // Every MUI overlay portals to document.body by default, and document.body is
   // hidden behind the fullscreen element (only the fullscreen subtree renders in
@@ -107,8 +116,9 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   const comments = usePlayerStore((s) => s.comments)
   const danmakuSettings = usePlayerStore((s) => s.danmakuSettings)
   const subtitleCues = usePlayerStore((s) => s.subtitleCues)
-  const subtitleCueIndex = usePlayerStore((s) => s.subtitleCueIndex)
   const subtitleSettings = usePlayerStore((s) => s.subtitleSettings)
+  const videoWidth = usePlayerStore((s) => s.playback.videoWidth)
+  const videoHeight = usePlayerStore((s) => s.playback.videoHeight)
   const upscale = usePlayerStore((s) => s.upscale)
   const isHdr = usePlayerStore((s) => s.isHdr)
   const playing = usePlayerStore((s) => s.playback.playing)
@@ -138,7 +148,8 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   useEffect(() => {
     const stage = stageRef.current
     const layer = danmakuLayerRef.current
-    if (!video || !stage || !layer) return
+    const subtitleLayer = subtitleLayerRef.current
+    if (!video || !stage || !layer || !subtitleLayer) return
     const store = usePlayerStore.getState()
     const upscaleCtrl = new UpscaleController(video, stage, {
       onStatus: (status, error) => store.setUpscaleStatus(status, error),
@@ -146,20 +157,28 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       onStats: (stats) => usePlayerStore.getState().setUpscaleStats(stats),
     })
     const danmakuCtrl = new DanmakuController(layer)
+    // Timing → DOM directly: the controller hands each change of the
+    // on-screen lines to the renderer in the same task (a frame callback, a
+    // seek command). No store write, no React render per subtitle line.
+    const subtitleRenderer = new SubtitleRenderer(subtitleLayer)
+    subtitleRenderer.applySettings(store.subtitleSettings)
     const subtitleCtrl = new SubtitleController({
-      onCueChange: (index) =>
-        usePlayerStore.getState().setSubtitleCueIndex(index),
+      onActiveChange: (active) => subtitleRenderer.render(active),
     })
+    subtitleCtrl.updateStyle({ offset: store.subtitleSettings.offset })
     upscaleCtrlRef.current = upscaleCtrl
     danmakuCtrlRef.current = danmakuCtrl
     subtitleCtrlRef.current = subtitleCtrl
+    subtitleRendererRef.current = subtitleRenderer
     return () => {
       upscaleCtrl.destroy()
       danmakuCtrl.destroy()
       subtitleCtrl.destroy()
+      subtitleRenderer.destroy()
       upscaleCtrlRef.current = null
       danmakuCtrlRef.current = null
       subtitleCtrlRef.current = null
+      subtitleRendererRef.current = null
     }
   }, [video])
 
@@ -245,9 +264,9 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     danmakuCtrlRef.current?.updateSettings(danmakuSettings)
   }, [danmakuSettings])
 
-  // --- subtitles: mount cues / forward style into the timing controller ---
-  // The controller computes the active cue with frame-exact rVFC ticks and only
-  // reports CHANGES (subtitleCueIndex); React renders the text from the store.
+  // --- subtitles: mount cues / forward settings into controller + renderer ---
+  // The controller finds the on-screen lines frame by frame and hands CHANGES
+  // straight to the renderer; nothing on this path re-renders React.
   useEffect(() => {
     const ctrl = subtitleCtrlRef.current
     if (!video || !ctrl) return
@@ -261,12 +280,16 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     })
   }, [subtitleSettings.offset])
 
-  // --- subtitle visibility flip -> re-evaluate the active cue immediately ---
-  // While hidden the tick may have stopped (paused video); flipping back on
-  // must not wait for the next seek/play edge to show the current cue.
+  // Visibility is a style switch on lines that stay laid out, so toggling
+  // subtitles on shows the current line in the very next frame. (The toggle
+  // command also applies it synchronously — see `toggleSubtitles`.)
   useEffect(() => {
-    if (subtitleSettings.visible) subtitleCtrlRef.current?.refresh()
-  }, [subtitleSettings.visible])
+    subtitleRendererRef.current?.applySettings(subtitleSettings)
+  }, [subtitleSettings, video])
+
+  useEffect(() => {
+    subtitleRendererRef.current?.setVideoSize(videoWidth, videoHeight)
+  }, [videoWidth, videoHeight, video])
 
   // --- keep danmaku laid out correctly across container/fullscreen resizes ---
   // The danmaku engine caches the container width when tracks are created; on a
@@ -514,10 +537,11 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
 
   // --- sibling episodes -> playlist (Tauri; same folder; rules-aware) ---
   // Opening one episode of a downloaded batch should not mean playing ONE
-  // episode: find the rest of the batch next to it and queue it right behind
-  // the current file, so autoplay carries on into the next episode. The batch
-  // is identified by the file name's literal head (see siblingEpisodes.ts), so
-  // a folder holding many shows contributes only its own episodes. Files whose
+  // episode: find the rest of the batch next to it and arrange it around the
+  // current file — earlier episodes in front, later ones behind — so autoplay
+  // carries on into the NEXT episode (not back to episode 1). The batch is
+  // identified by the file name's literal head (see siblingEpisodes.ts), so a
+  // folder holding many shows contributes only its own episodes. Files whose
   // episode number cannot be determined are skipped, never guessed.
   useEffect(() => {
     if (!platform.isTauri || !media?.path || !autoAddSiblings) return
@@ -526,24 +550,30 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     void (async () => {
       const paths = await platform.listVideoFiles(dirname(videoPath))
       if (stale) return
-      const siblings = selectSiblings(
+      const batch = selectBatch(
         videoPath,
         paths,
         (path) =>
           matchRule(usePlayerStore.getState().filenameRules, path)?.episode ??
           null
       )
-      if (siblings.length === 0) return
+      if (!batch || (batch.before.length === 0 && batch.after.length === 0)) {
+        return
+      }
       const store = usePlayerStore.getState()
       if (store.media?.path !== videoPath) return
+      const toItem = (sibling: SiblingEpisode): PlaylistItem => ({
+        url: platform.mediaUrlForPath(sibling.path),
+        name: sibling.name,
+        path: sibling.path,
+      })
       const known = new Set(store.playlist.map((item) => item.path))
-      const fresh = siblings.filter((sibling) => !known.has(sibling.path))
-      store.insertAfterCurrent(
-        siblings.map((sibling) => ({
-          url: platform.mediaUrlForPath(sibling.path),
-          name: sibling.name,
-          path: sibling.path,
-        }))
+      const fresh = [...batch.before, ...batch.after].filter(
+        (sibling) => !known.has(sibling.path)
+      )
+      store.placeAroundCurrent(
+        batch.before.map(toItem),
+        batch.after.map(toItem)
       )
       if (fresh.length > 0) {
         usePlayerStore
@@ -557,10 +587,11 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   }, [media, platform, autoAddSiblings])
 
   // --- auto-load subtitles: sibling file first, then the container's own ---
-  // Two sources, in that order. A `.srt`/`.ass`/`.vtt` next to the video is the
-  // more explicit choice, so it wins; otherwise the best track INSIDE the
-  // container is mounted (fansub MKVs carry 简体/繁體 streams, and the webview
-  // can never see them — Rust demuxes them, see `subtitle/embedded.ts`).
+  // Two sources, in that order. A subtitle file next to the video
+  // (`<video>.srt`, or fansub-tagged `<video>.sc.ass` …, best language first)
+  // is the more explicit choice, so it wins; otherwise the best track INSIDE
+  // the container is mounted (fansub MKVs carry 简体/繁體 streams, and the
+  // webview can never see them — Rust demuxes them, see `subtitle/embedded.ts`).
   // Same identity-recheck discipline as the danmaku sibling loader above: an
   // explicit mount or a media switch mid-read must not be clobbered.
   useEffect(() => {
@@ -569,47 +600,54 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     // acting on a stale generation (a media switch mid-window otherwise
     // still mounts the old video's cues when the window resolves).
     resetGeneration()
-    if (!platform.isTauri || !media?.path) return
+    if (!platform.isTauri) return
+    // Probes and extractions still reading the PREVIOUS file stop now instead
+    // of competing with this one for the disk.
+    void focusEmbeddedExtraction(media?.path ?? '').catch(() => undefined)
+    if (!media?.path) return
     const videoPath = media.path
-    const base = videoPath.replace(/\.[^./\\]+$/, '')
-    const suffixOrder = ['.srt', '.ass', '.vtt']
     let stale = false
     void (async () => {
-      // Probe the embedded tracks FIRST, whatever ends up mounted: the picker
-      // in 设置 → 字幕 must be able to offer them even when a sibling file wins,
-      // and "没有内封字幕" has to mean "we looked", not "we never tried".
-      const tracks = await loadEmbeddedTracks(videoPath)
-      if (stale) return
-      for (const suffix of suffixOrder) {
-        const candidate = `${base}${suffix}`
+      // Probe the embedded tracks on EVERY open, whatever ends up mounted: the
+      // picker in 设置 → 字幕 must offer them even when a sibling file wins, and
+      // "没有内封字幕" has to mean "we looked", not "we never tried". Started
+      // now but NOT awaited yet — a slow ffprobe (network share, a virus
+      // scanner's first look) must not hold up an ordinary `.srt`.
+      const probing = loadEmbeddedTracks(videoPath)
+      const siblings = rankSiblingSubtitles(
+        videoPath,
+        await platform.listSubtitleFiles(dirname(videoPath))
+      )
+      for (const candidate of siblings) {
+        if (stale) return
         let text: string
         try {
           text = await platform.readTextFile(candidate)
         } catch {
-          continue // no sibling file with this extension
+          continue // vanished or unreadable — try the next one
         }
         if (stale) return
-        try {
-          const cues = parseSubtitleText(text, basename(candidate))
-          const s = usePlayerStore.getState()
-          if (stale || s.media?.path !== videoPath || s.subtitleSource) return
-          if (!cues.length) continue
-          s.setSubtitles(cues, {
-            label: basename(candidate),
-            count: cues.length,
-            kind: 'file',
-          })
-          s.showOsd(`自动加载字幕 · ${cues.length} 条`, '🎬')
-          return
-        } catch {
-          // unparsable sibling — try the next extension
-        }
+        const cues = parseSubtitleText(text, basename(candidate))
+        const s = usePlayerStore.getState()
+        if (stale || s.media?.path !== videoPath || s.subtitleSource) return
+        if (!cues.length) continue
+        s.setSubtitles(cues, {
+          label: basename(candidate),
+          count: cues.length,
+          kind: 'file',
+        })
+        s.showOsd(`自动加载字幕 · ${cues.length} 条`, '🎬')
+        return
       }
+      const tracks = await probing
+      if (stale) return
       const pick = pickDefaultTrack(tracks)
       if (!pick) return
-      let mounted = false
+      let result: EmbeddedMountResult
       try {
-        mounted = await mountEmbeddedTrack(pick.index)
+        // `auto`: a subtitle mounted while ffmpeg runs (a file dropped in with
+        // the video, a pick in 设置 → 字幕) is kept, never replaced.
+        result = await mountEmbeddedTrack(pick.index, { auto: true })
       } catch (error) {
         // ffmpeg missing, or the stream could not be converted: say so once on
         // screen, and keep the detail for 设置 → 字幕. Same media-identity guard
@@ -623,7 +661,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         store.showOsd('内封字幕加载失败', '🎬')
         return
       }
-      if (stale || !mounted) return
+      if (stale || result !== 'mounted') return
       const source = usePlayerStore.getState().subtitleSource
       if (!source) return
       usePlayerStore
@@ -768,6 +806,8 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
           : Number.POSITIVE_INFINITY
         const next = Math.max(0, Math.min(seconds, dur))
         v.currentTime = next
+        // The target's lines go up with this keypress, not after the decoder.
+        subtitleCtrlRef.current?.seekTo(next)
         onUserSeek(next)
       },
       seekBy: (delta) => {
@@ -778,6 +818,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
           : Number.POSITIVE_INFINITY
         const next = Math.max(0, Math.min(v.currentTime + delta, dur))
         v.currentTime = next
+        subtitleCtrlRef.current?.seekTo(next)
         store().showOsd(formatClock(next), delta >= 0 ? '⏩' : '⏪')
         onUserSeek(next)
       },
@@ -875,8 +916,12 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       },
       toggleSubtitles: () => {
         store().toggleSubtitleVisible()
-        const visible = store().subtitleSettings.visible
-        store().showOsd(visible ? '字幕开' : '字幕关', '🎬')
+        const settings = store().subtitleSettings
+        // Applied here, synchronously, rather than by the settings effect
+        // after React's next render: the lines are already laid out, so they
+        // are on screen in the very next frame.
+        subtitleRendererRef.current?.applySettings(settings)
+        store().showOsd(settings.visible ? '字幕开' : '字幕关', '🎬')
       },
       loadSubtitleFromFile: async () => {
         const picked = await platform.pickSubtitleFile()
@@ -930,13 +975,12 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       )
       if (videos.length) commands.openVideosFromFiles(videos)
       for (const file of danmaku) {
-        void file
-          .text()
-          .then((text) => commands.loadDanmakuFromText(text, file.name))
+        void readFileText(file).then((text) =>
+          commands.loadDanmakuFromText(text, file.name)
+        )
       }
       for (const file of subtitles) {
-        void file
-          .text()
+        void readFileText(file)
           .then((text) => commands.loadSubtitleFromText(text, file.name))
           .catch(() => undefined)
       }
@@ -961,12 +1005,15 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
 
   const overlaysVisible = controlsVisible || !playing || !media
 
-  // The cue the timing controller reports as on-screen (store-mirrored).
-  const activeCue =
-    subtitleCueIndex >= 0 ? subtitleCues[subtitleCueIndex] : undefined
-  // Lift the cue block above the bottom controls while they are shown.
-  const subtitleBottom =
-    subtitleSettings.bottom + (overlaysVisible && media ? 7 : 0)
+  // Move the subtitle rows clear of the bottom controls while they show.
+  useEffect(() => {
+    subtitleRendererRef.current?.setLifted(overlaysVisible && !!media)
+  }, [overlaysVisible, media, video])
+
+  // The bar measures itself and reports; the lift clears exactly its height.
+  const onControlsHeight = useCallback((height: number) => {
+    subtitleRendererRef.current?.setControlBarHeight(height)
+  }, [])
 
   return (
     <PlayerCommandsContext.Provider value={commands}>
@@ -1020,50 +1067,21 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
               }}
             />
             {/* Subtitle layer (zIndex 3): above danmaku, below error/chrome.
-                The SubtitleController owns WHICH cue is active; this div only
-                renders the store-mirrored text, so re-renders happen once per
-                cue boundary, never per frame. */}
+                React renders NOTHING into it: SubtitleRenderer owns its
+                content and the SubtitleController drives it frame by frame
+                (styles: `.sub-*` in public/app.css). Hidden with no media. */}
             <div
               ref={subtitleLayerRef}
+              data-subtitle-layer
               style={{
                 position: 'absolute',
                 inset: 0,
                 zIndex: 3,
                 pointerEvents: 'none',
                 overflow: 'hidden',
+                display: media ? undefined : 'none',
               }}
-            >
-              {media && subtitleSettings.visible && activeCue && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: '4%',
-                    right: '4%',
-                    bottom: `${subtitleBottom}%`,
-                    display: 'flex',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <span
-                    style={{
-                      fontFamily: SANS,
-                      fontSize: subtitleSettings.fontSize,
-                      lineHeight: 1.4,
-                      fontWeight: 700,
-                      color: PAPER,
-                      opacity: subtitleSettings.opacity,
-                      textAlign: 'center',
-                      whiteSpace: 'pre-wrap',
-                      textShadow: subtitleSettings.outline
-                        ? `0 0 4px ${INK}, 0 0 8px ${INK}, 2px 2px 2px ${INK}`
-                        : 'none',
-                    }}
-                  >
-                    {activeCue.text}
-                  </span>
-                </div>
-              )}
-            </div>
+            />
 
             {!media && <EmptyState />}
 
@@ -1101,7 +1119,12 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             <Osd />
             <TopBar visible={overlaysVisible} platform={platform} />
             {/* No media -> nothing to control; the idle stage stands alone. */}
-            {media && <Controls visible={overlaysVisible} />}
+            {media && (
+              <Controls
+                visible={overlaysVisible}
+                onHeightChange={onControlsHeight}
+              />
+            )}
           </div>
 
           <SettingsDrawer />

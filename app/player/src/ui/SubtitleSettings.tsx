@@ -27,28 +27,43 @@ export const SubtitleSettings = () => {
   const [models, setModels] = useState<ModelStatus[]>([])
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [downloadPercent, setDownloadPercent] = useState(0)
-  /** Failure of a manual track pick (conversion error, empty track). */
-  const [pickError, setPickError] = useState<string | null>(null)
-  /** Stream index being extracted right now (0 is a valid index → null = idle). */
-  const [pickBusy, setPickBusy] = useState<number | null>(null)
+  /**
+   * The pick being extracted right now and the last pick's failure, each tied
+   * to the file it was made for: when the video switches mid-extraction (e.g.
+   * autoplay moves on while this page is open), the old pick must neither lock
+   * the new file's rows nor leave its error message on them.
+   */
+  const [pick, setPick] = useState<{ index: number; path: string } | null>(null)
+  const [pickFailure, setPickFailure] = useState<{
+    message: string
+    path: string
+  } | null>(null)
+  const pickBusy = pick && pick.path === media?.path ? pick.index : null
+  const pickError =
+    pickFailure && pickFailure.path === media?.path ? pickFailure.message : null
 
   /**
    * Switch to an embedded track: extract it and mount it over what is shown.
-   * Extraction is a sub-second ffmpeg run on a local file but can take seconds
-   * on a network share — the row says so instead of looking dead.
+   * Extraction is a sub-second ffmpeg run on a local file but can take much
+   * longer on a network share — the row says so instead of looking dead, and
+   * Rust aborts a wedged ffmpeg, so this always settles.
    */
   const selectTrack = (index: number) => {
-    if (pickBusy !== null) return
-    setPickError(null)
-    setPickBusy(index)
+    const path = media?.path
+    if (!path || pickBusy !== null) return
+    const token = { index, path }
+    setPickFailure(null)
+    setPick(token)
+    const fail = (message: string) => setPickFailure({ message, path })
     void mountEmbeddedTrack(index)
-      .then((mounted) => {
-        if (!mounted) setPickError('这条字幕轨没有可用内容')
+      .then((result) => {
+        // 'media-switched' is not a failure of this track: nothing to report.
+        if (result === 'empty') fail('这条字幕轨没有可用内容')
       })
       .catch((error: unknown) =>
-        setPickError(error instanceof Error ? error.message : String(error))
+        fail(error instanceof Error ? error.message : String(error))
       )
-      .finally(() => setPickBusy(null))
+      .finally(() => setPick((current) => (current === token ? null : current)))
   }
 
   useEffect(() => {

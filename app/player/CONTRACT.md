@@ -1172,10 +1172,20 @@ pick every file by hand.
 
 **Behaviour.** When a video is opened (Tauri, and only while
 `playbackSettings.autoAddSiblings` is on, default on) the player lists its own
-folder, keeps the files that belong to the same batch, and inserts them in
-episode order right behind the current entry. Autoplay then continues into the
-next episode. The OSD reports `已加入 N 集到播放列表` only when something was
-actually new.
+folder, keeps the files that belong to the same batch, and arranges them in
+episode order AROUND the current entry: earlier episodes in front of it, later
+ones behind it. Autoplay then continues into the next episode. The OSD reports
+`已加入 N 集到播放列表` only when something was actually new.
+
+**Around, not behind (2026-09-16).** The first version queued the whole batch
+right BEHIND the current entry. That only looks right when episode 1 is opened:
+opening episode 7 of a 1–9 batch produced `7,1,2,3,4,5,6,8,9`, so autoplay went
+from 7 back to 1 — exactly the "open 7, continue into 8" case the feature is
+for. `selectBatch` now returns `{ episode, before, after }` split at the opened
+episode (a second file with the SAME number, e.g. a v2, counts as `before`, so
+autoplay never replays the episode), and the store's `placeAroundCurrent`
+puts `before` in front of the entry and `after` behind it. The old tests only
+ever opened episode 1, where `before` is empty and the two behaviours agree.
 
 **Same batch = same literal head.** `siblingEpisodes.ts` (pure, unit-tested)
 identifies a batch by everything in the file name BEFORE the episode number
@@ -1205,12 +1215,15 @@ episode and returned `[]` for every file — the effect then hit its
 episode (not just the later ones). tsc, biome and all 68 tests passed, because
 nothing exercised the listing→path seam: the existing tests hand-built paths.
 `joinPath` is now a named, unit-tested helper and `siblingEpisodes.test.ts`
-feeds `selectSiblings` the output of `joinPath`, which is the shape the platform
-actually produces.
+feeds `selectBatch` (then called `selectSiblings`) the output of `joinPath`,
+which is the shape the platform actually produces.
 
-**Store.** `insertAfterCurrent(items)` moves rather than duplicates (an episode
-already queued ends up in order, not twice), never moves the playing entry, and
-keeps `PLAYLIST_MAX` enforced without dropping the entry being watched.
+**Store.** `placeAroundCurrent(before, after)` moves rather than duplicates (an
+episode already queued ends up in order, not twice), never moves or duplicates
+the playing entry, leaves unrelated history where it was, and keeps
+`PLAYLIST_MAX` enforced without dropping the entry being watched.
+`playerStore.test.ts` replays the exact calls the open effect makes and asserts
+what autoplay plays next.
 
 **Settings.** 设置 → 播放 → 「自动加入同系列剧集」with a one-line hint; both
 playback toggles now share a `ToggleRow` component.
@@ -1266,9 +1279,23 @@ every container ffmpeg can read is covered by the same code path (requirement
   probes and publishes the list, stashing the failure reason in `embeddedError`.
 - Auto-mount order on open is unchanged in spirit: **sibling file → embedded
   track → (manual) ASR**. The embedded step runs only when the sibling loop
-  mounted nothing, so a user's own `.srt` next to the video still wins.
+  mounted nothing, so a user's own `.srt` next to the video still wins. The
+  probe is STARTED first but awaited only after the sibling loop, so a slow
+  ffprobe never holds up an ordinary `.srt`.
+- `mountEmbeddedTrack(index, { auto })` returns why nothing mounted
+  (`no-media` / `media-switched` / `already-mounted` / `empty`). The open-time
+  call passes `auto: true`: if anything got mounted while ffmpeg ran (a
+  `xxx.chs.ass` dropped in together with the MKV, a pick in 设置 → 字幕), the
+  embedded track is dropped instead of replacing it. A manual pick replaces
+  whatever is showing — that is the user's explicit choice.
+- Every ffprobe/ffmpeg run has a deadline (probe 20 s, conversion 90 s; stdout
+  and stderr drained on threads so a large SRT cannot deadlock the pipe): a
+  wedged process on an unreachable share is killed and reported instead of
+  leaving the picker at "提取中…" forever.
 - Store (session-only, cleared with the cues on a media switch):
-  `embeddedTracks`, `activeEmbeddedTrack`.
+  `embeddedTracks`, `activeEmbeddedTrack` (also cleared by EVERY
+  `setSubtitles`, so the picker never marks an embedded track "正在使用" after a
+  `.srt` or generated subtitles replaced it).
 - UI: 设置 → 字幕 → 「内封字幕 / EMBEDDED」 lists the tracks with language,
   title and codec; clicking one mounts it. No tracks → `此视频没有内封字幕`;
   bitmap tracks are shown disabled with the reason.
@@ -1279,3 +1306,80 @@ so karaoke/moving signs render as plain bottom-centered lines (the same limit
 the existing ASS parser has). ffmpeg/ffprobe must be present — exactly the
 requirement the ASR pipeline already has; without them the settings section
 reports it instead of failing silently.
+
+## 26. Subtitle smoothness: no React per line, frame-exact timing (2026-09-25 — DONE)
+
+**Why.** "字幕功能的流畅度实在比不上商业播放器，特别是开关字幕时候字幕的出现时间，
+以及按左右键快退快进有概率字幕没出来。" Three separate defects hid behind that
+complaint, and all three were structural rather than cosmetic.
+
+**1. The lines went through React.** Every cue change wrote the store and
+re-rendered the subtitle subtree, which also re-ran persistence on the way. A
+20-line bilingual track re-rendered the player on each cue boundary, and a seek
+re-rendered it twice. Now `SubtitleController` (timing) hands the active set
+straight to `SubtitleRenderer` (DOM) in the same task — no store write, no
+React render, no persistence for a line to appear. The store keeps only the
+*mounted track* (`subtitles`, `subtitleSource`), never the on-screen set.
+
+**2. Toggle-on was a rebuild.** Hiding showed/hid through `display`, so
+switching back on had to lay the lines out again. It is now `visibility:
+hidden` — hidden lines stay laid out, so switching on is a repaint
+(`applySettings`). Measured: 0 extra frames from toggle to visible.
+
+**3. A seek while paused could end frame delivery for good.** The old engine
+re-registered its `requestVideoFrameCallback` only while playing, so a paused
+seek consumed the single presented frame and never armed another one; playback
+then refreshed once, and the line stayed frozen until the next seek — the
+"有概率字幕没出来". The controller now keeps exactly one callback registered
+for as long as cues are mounted (paused or not), re-arms on every edge
+(`play`/`playing`/`loadeddata`/`emptied`), and treats a seek's TARGET as the
+time to evaluate immediately, so a keypress puts the target's line up in the
+same task instead of waiting for the decoder (which takes ~6–20 ms).
+`timeupdate` is the fallback when no frames are presented at all (occluded or
+minimized window) — muzzled for 350 ms after a real frame, because the clock
+runs slightly ahead of the picture and would show a line one frame early.
+
+**Lookup cost.** Cues are start-sorted with a prefix maximum of end times
+(`maxEnd`), so a lookup is a binary search plus a short bounded backward scan,
+and a cached validity window `[from, to)` answers without searching at all
+between boundaries. Property-checked against brute force (400 randomized
+tracks, every start/end/boundary sample): no mismatches, and the window is
+sound — the optimization can never leave a stale line on screen.
+
+**Measured (real Chromium, `e2e/scratch-latency.mjs`).** Arrow-key seek → line
+in DOM: **0 extra frames** (avg/p50/max all 0.00) while the decoder takes
+6.2 ms median to finish its own seek — the line is up before the picture
+settles. Toggle on → visible: **0 extra frames**. Store write that changes
+nothing persisted: **0.01 ms** (was 0.76 ms).
+
+### The lift must measure the control bar, not guess a percentage (2026-09-26)
+
+The subtitle rows shift up while the controls are showing, and that shift was a
+percentage of the stage (`--sub-lift: 7`). The control bar's height is a
+**constant** (142 px: `52px 24px 16px` padding + content) while the stage is
+not, so 7 % is 50 px at 720p and 76 px at 1080p — measured at 1280×720 the
+lowest line sat **48 px inside** the bar's gradient, its ink washed out by the
+dimming band that renders ABOVE the subtitle layer (`zIndex` 30 vs 3).
+
+The bar now measures itself (`Controls.tsx` → `onHeightChange` →
+`SubtitleRenderer.setControlBarHeight`) and the CSS lifts by that exact value
+plus an 8 px gap, taking `max()` against the user's own bottom setting so a
+larger margin is never pulled back down. Verified at 1280×720, 1920×1080,
+1024×768 and 2560×1440: **clearance 8 px at every size**, and when the danmaku
+density strip appears the bar grows 142 → 201 px and the lift follows to 201 px
+(clearance 9 px).
+
+**Two traps worth remembering if this is ever refactored:**
+- `ResizeObserver`'s `contentRect` is the CONTENT box. Because the bar's height
+  is almost entirely *padding*, it reported 74 px against a real 142 px, and a
+  padding-only height never re-fires the observer at all — the value would
+  freeze at whatever it was on first paint. Measure the border box
+  (`offsetHeight`); `borderBoxSize` is the honest one in the entry.
+- A `ResizeObserver` alone is still not enough: it is created before the bar's
+  content settles, and a later pass that changes only the inner layout does not
+  always re-fire it. A `useLayoutEffect` re-measures after every commit, which
+  is exactly when the density strip arrives (it is gated on store fields
+  `Controls` already subscribes to, so the component re-renders by
+  construction). `setControlBarHeight` drops repeat values, so the per-commit
+  measurement stays free.
+

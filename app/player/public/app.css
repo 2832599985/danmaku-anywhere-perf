@@ -80,3 +80,109 @@ body,
     transform: translateY(-10px);
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * Subtitle layer — content owned by src/player/subtitle/SubtitleRenderer.ts.
+ * The renderer only sets classes and these custom properties; everything the
+ * lines look like is here, so a settings change never rebuilds them.
+ *   --sub-size     px font size (the player's setting)
+ *   --sub-bottom   % of stage height between the bottom row and the edge
+ *   --sub-opacity  0..1
+ *   --sub-ar       source aspect ratio (w/h), places `\pos` signs on the
+ *                  picture instead of the letterbox
+ *   --sub-bar      px height of the bottom control bar (measured in
+ *                  Controls.tsx) — the lift clears exactly that much, plus a
+ *                  small gap. A percentage cannot: the bar's height is a
+ *                  constant while the stage is not.
+ * `.sub-lifted` moves the rows clear of the bottom controls / top bar.
+ * ------------------------------------------------------------------------- */
+.sub-root {
+  --sub-size: 30;
+  --sub-bottom: 6;
+  --sub-opacity: 1;
+  --sub-ar: 1.7778;
+  --sub-bar: 0px;
+  --sub-lift: 0px;
+  position: absolute;
+  inset: 0;
+  container-type: size;
+  font-family:
+    "Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  font-size: calc(var(--sub-size) * 1px);
+  font-weight: 700;
+  line-height: 1.35;
+  color: #f4f1e8;
+  opacity: var(--sub-opacity);
+}
+.sub-root.sub-lifted {
+  /* The bar's gradient starts at its top edge, so clearing the bar itself
+   * (not just its buttons) keeps the line off the dimmed band. */
+  --sub-lift: calc(var(--sub-bar) + 8px);
+  --sub-top-clear: 52px; /* the top bar is 48px */
+}
+.sub-row {
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12em;
+}
+.sub-row-bottom {
+  bottom: calc(var(--sub-bottom) * 1%);
+}
+.sub-lifted .sub-row-bottom {
+  /* Whichever is lower: the user's own margin, or clear of the bar. */
+  bottom: max(calc(var(--sub-bottom) * 1%), var(--sub-lift));
+}
+.sub-row-top {
+  top: calc(3% + var(--sub-top-clear, 0px));
+}
+.sub-row-middle {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.sub-line {
+  align-self: center;
+  max-width: 100%;
+  text-align: center;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* Balanced breaks: a long line wraps into two halves, not a long line and
+   * a single orphaned word. */
+  text-wrap: balance;
+}
+.sub-line[data-h="left"] {
+  align-self: flex-start;
+  text-align: left;
+}
+.sub-line[data-h="right"] {
+  align-self: flex-end;
+  text-align: right;
+}
+/* Signs (`\pos`) live in a frame the size of the picture itself (object-fit:
+ * contain), so script coordinates land where the typesetter put them. */
+.sub-frame {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(100cqw, 100cqh * var(--sub-ar));
+  height: min(100cqh, 100cqw / var(--sub-ar));
+  transform: translate(-50%, -50%);
+}
+.sub-sign {
+  position: absolute;
+  max-width: 90%;
+  width: max-content;
+}
+/* Ink outline: a real stroke painted UNDER the fill (paint-order), plus a soft
+ * shadow for bright frames. Without paint-order the stroke eats into the
+ * glyphs; measured in Chromium: 5785 fill pixels kept vs 157. */
+.sub-root.sub-outline .sub-line {
+  -webkit-text-stroke: 0.14em #0a0a0c;
+  paint-order: stroke fill;
+  text-shadow: 0 0.04em 0.2em rgba(10, 10, 12, 0.85);
+}
+.sub-root:not(.sub-outline) .sub-line {
+  text-shadow: 0 0 0.12em rgba(10, 10, 12, 0.9);
+}

@@ -32,11 +32,15 @@ export const initPlatform = async (): Promise<Platform> => {
   return cached
 }
 
+export { readFileText } from './browser'
+export { decodeTextBytes } from './decodeText'
 export {
   extOf,
   type PickedMedia,
   type PickedText,
   type Platform,
+  SUBTITLE_EXTENSION_LIST,
+  SUBTITLE_EXTENSIONS,
   VIDEO_EXTENSION_LIST,
   VIDEO_EXTENSIONS,
 } from './types'

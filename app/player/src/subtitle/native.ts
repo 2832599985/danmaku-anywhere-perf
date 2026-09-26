@@ -58,11 +58,37 @@ export interface EmbeddedTrack {
 export const listEmbeddedTracks = (path: string): Promise<EmbeddedTrack[]> =>
   invoke('subtitle_list_tracks', { path })
 
-/** One embedded track converted to SRT text. Rejects for bitmap tracks. */
+/** One embedded track as text, ready for `parseSubtitleText`. */
+export interface ExtractedTrack {
+  /** An ASS script (styles and positions intact) or SRT, per `format`. */
+  text: string
+  format: 'ass' | 'srt'
+  /** false = only the requested span was read; the whole track follows. */
+  complete: boolean
+}
+
+/**
+ * Read an embedded track. With `span` (seconds on the video clock) only that
+ * stretch is read — fast enough to show before the whole track is in; without
+ * it the whole track is read (and every other text track of the file with it,
+ * in the same pass). Rejects for bitmap tracks.
+ */
 export const extractEmbeddedTrack = (
   path: string,
-  index: number
-): Promise<string> => invoke('subtitle_extract_track', { path, index })
+  index: number,
+  span?: { start: number; end: number }
+): Promise<ExtractedTrack> =>
+  invoke('subtitle_extract_track', { path, index, span: span ?? null })
+
+/**
+ * Tell the backend which file is open: probes and extractions of any other
+ * file are killed instead of reading on in the background (empty = none).
+ */
+export const focusEmbeddedExtraction = (path: string): Promise<void> =>
+  invoke('subtitle_extract_focus', { path })
+
+/** How the backend reports an extraction it stopped on purpose. */
+export const EXTRACTION_CANCELLED = '__cancelled__'
 
 /** Start a transcription task for the window [startSecs, endSecs]; events
  * stream through `onEvent`. Single-flight. Bounded lookahead ahead of the

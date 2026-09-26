@@ -1,8 +1,16 @@
+import { decodeTextBytes } from './decodeText'
 import type { PickedMedia, PickedText, Platform } from './types'
+import { SUBTITLE_EXTENSION_LIST } from './types'
 
 const VIDEO_EXTENSIONS = 'video/*,.mp4,.m4v,.webm,.mkv,.mov,.avi,.ts,.flv,.ogv'
 const DANMAKU_EXTENSIONS = '.xml,.json,.txt'
-const SUBTITLE_EXTENSIONS = '.srt,.ass,.vtt'
+const SUBTITLE_EXTENSIONS = SUBTITLE_EXTENSION_LIST.map(
+  (ext) => `.${ext}`
+).join(',')
+
+/** A picked file's text, whatever encoding it was saved in. */
+export const readFileText = async (file: Blob): Promise<string> =>
+  decodeTextBytes(await file.arrayBuffer())
 
 const pickFile = (accept: string): Promise<File | null> =>
   new Promise((resolve) => {
@@ -69,13 +77,13 @@ export const browserPlatform: Platform = {
   async pickDanmakuFile(): Promise<PickedText | null> {
     const file = await pickFile(DANMAKU_EXTENSIONS)
     if (!file) return null
-    return { text: await file.text(), name: file.name }
+    return { text: await readFileText(file), name: file.name }
   },
 
   async pickSubtitleFile(): Promise<PickedText | null> {
     const file = await pickFile(SUBTITLE_EXTENSIONS)
     if (!file) return null
-    return { text: await file.text(), name: file.name }
+    return { text: await readFileText(file), name: file.name }
   },
 
   mediaUrlForPath(path: string): string {
@@ -90,6 +98,11 @@ export const browserPlatform: Platform = {
   async listVideoFiles(): Promise<string[]> {
     // A page cannot read a directory. The sibling-episode scan is Tauri-only;
     // in the browser the playlist grows the way it always did (drop/pick files).
+    return []
+  },
+
+  async listSubtitleFiles(): Promise<string[]> {
+    // A page cannot read a directory; subtitles arrive by drop or picker.
     return []
   },
 

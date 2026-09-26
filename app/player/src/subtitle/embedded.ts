@@ -17,6 +17,8 @@ import { usePlayerStore } from '@/store/playerStore'
 import { parseSubtitleText } from './format'
 import {
   type EmbeddedTrack,
+  EXTRACTION_CANCELLED,
+  type ExtractedTrack,
   extractEmbeddedTrack,
   listEmbeddedTracks,
   subtitleLog,
@@ -145,35 +147,163 @@ export const pickDefaultTrack = (
 }
 
 /**
- * Convert one embedded track and mount it. Returns false when nothing was
- * mounted (no media, the video switched while ffmpeg ran, empty/unparsable
- * cues) — callers then leave the danmaku and the OSD alone.
+ * Outcome of one mount attempt. The reasons are distinct because the picker
+ * reports them differently: an empty track is the file's fault, a media switch
+ * or a subtitle mounted meanwhile is not a failure at all.
  */
-export const mountEmbeddedTrack = async (index: number): Promise<boolean> => {
+export type EmbeddedMountResult =
+  | 'mounted'
+  | 'no-media'
+  | 'media-switched'
+  | 'already-mounted'
+  | 'empty'
+
+/** Seconds of the timeline read before / after the playhead for the first paint. */
+const SPAN_BEFORE_SECS = 20
+const SPAN_AFTER_SECS = 120
+
+/**
+ * Bumped by every mount attempt. A newer attempt (a pick while the open-time
+ * mount is still reading, two picks in a row) supersedes the older one at its
+ * next checkpoint, so whichever the user chose LAST is what stays on screen.
+ */
+let mountGeneration = 0
+
+const errorText = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error)
+
+/**
+ * Where playback is — or is about to be: right after opening, the resume
+ * point has not been applied yet but is where the first lines are needed.
+ */
+const expectedPlayhead = (path: string): number => {
+  const store = usePlayerStore.getState()
+  const now = store.playback.currentTime
+  if (now > 1) return now
+  const resume = store.progress[path]?.time
+  return resume !== undefined && resume > 3 ? resume : 0
+}
+
+const cuesOf = (extracted: ExtractedTrack) =>
+  parseSubtitleText(extracted.text, `embedded.${extracted.format}`)
+
+/**
+ * Read one embedded track and mount it.
+ *
+ * Two reads, so the first lines are up before the whole track is in: the
+ * minutes around the playhead first (a fraction of the file), then the whole
+ * track, swapped in when it lands. The whole-track read also caches every
+ * other text track of the file, so switching tracks later is instant. When
+ * the whole track is already cached the first read answers with it.
+ *
+ * `auto` is the open-time path: it must never replace a subtitle that got
+ * mounted while ffmpeg was running (a dropped `.chs.ass`, a picker choice). A
+ * manual pick is the user's explicit choice and replaces whatever is showing.
+ * Either way the second read only replaces the first one — never something
+ * mounted in between.
+ */
+export const mountEmbeddedTrack = async (
+  index: number,
+  { auto = false }: { auto?: boolean } = {}
+): Promise<EmbeddedMountResult> => {
   const path = usePlayerStore.getState().media?.path
   if (!path) {
     subtitleLog(`embedded mount skip: no local path (stream #${index})`)
-    return false
+    return 'no-media'
   }
-  const raw = await extractEmbeddedTrack(path, index)
-  const store = usePlayerStore.getState()
-  // The video may have been switched (or a subtitle file mounted by hand)
-  // while ffmpeg was running — never clobber that.
-  if (store.media?.path !== path) {
-    subtitleLog(`embedded mount drop: media switched (stream #${index})`)
-    return false
-  }
-  const cues = parseSubtitleText(raw, 'embedded.srt')
-  if (cues.length === 0) {
-    subtitleLog(`embedded mount skip: 0 cues (stream #${index})`)
-    return false
-  }
-  const track = store.embeddedTracks.find((item) => item.index === index)
+  mountGeneration += 1
+  const generation = mountGeneration
+  const track = usePlayerStore
+    .getState()
+    .embeddedTracks.find((item) => item.index === index)
   const label = `内封 · ${track ? trackLabel(track) : `#${index}`}`
-  store.setSubtitles(cues, { label, count: cues.length, kind: 'file' })
-  store.setActiveEmbeddedTrack(index)
+
+  /** Why this attempt may not mount now, or null when it may. */
+  const blocked = (
+    owner: unknown
+  ): 'media-switched' | 'already-mounted' | null => {
+    const store = usePlayerStore.getState()
+    if (store.media?.path !== path) return 'media-switched'
+    if (generation !== mountGeneration) return 'already-mounted'
+    if (owner !== undefined && store.subtitleSource !== owner) {
+      return 'already-mounted'
+    }
+    return null
+  }
+
+  // --- first read: the minutes around the playhead ---
+  const at = expectedPlayhead(path)
+  let first: ExtractedTrack | null = null
+  try {
+    first = await extractEmbeddedTrack(path, index, {
+      start: Math.max(0, at - SPAN_BEFORE_SECS),
+      end: at + SPAN_AFTER_SECS,
+    })
+  } catch (error) {
+    if (errorText(error) === EXTRACTION_CANCELLED) return 'media-switched'
+    // A span that cannot be read (a container that will not seek) is not
+    // fatal: the whole-track read below decides.
+    subtitleLog(`embedded span failed (#${index}): ${errorText(error)}`)
+  }
+  const early = blocked(auto ? null : undefined)
+  if (early) {
+    subtitleLog(`embedded mount drop (${early}): stream #${index}`)
+    return early
+  }
+  const store = usePlayerStore.getState()
+  if (first?.complete) {
+    // The whole track was already cached: done in one step.
+    const cues = cuesOf(first)
+    if (cues.length === 0) return 'empty'
+    store.setSubtitles(cues, { label, count: cues.length, kind: 'file' }, index)
+    subtitleLog(`embedded mount: #${index} ${label} cues=${cues.length}`)
+    return 'mounted'
+  }
+  if (first) {
+    // Mounted even when empty (nobody speaks in these minutes): a pick must
+    // take the previous track off screen now, not when the whole read lands.
+    const cues = cuesOf(first)
+    store.setSubtitles(
+      cues,
+      { label, count: cues.length, kind: 'file', loading: true },
+      index
+    )
+    subtitleLog(`embedded span: #${index} cues=${cues.length} around ${at}s`)
+  }
+  // What must still be on screen for the whole track to replace it.
+  const owner = usePlayerStore.getState().subtitleSource
+  const ownsScreen = () =>
+    owner?.loading === true &&
+    usePlayerStore.getState().subtitleSource === owner
+
+  // --- second read: the whole track ---
+  let full: ExtractedTrack
+  try {
+    full = await extractEmbeddedTrack(path, index)
+  } catch (error) {
+    if (errorText(error) === EXTRACTION_CANCELLED) return 'media-switched'
+    // Take the partial track down only if it is still ours on screen.
+    if (!blocked(owner) && ownsScreen()) {
+      usePlayerStore.getState().clearSubtitles()
+    }
+    throw error
+  }
+  const late = blocked(owner)
+  if (late) {
+    subtitleLog(`embedded full drop (${late}): stream #${index}`)
+    return late
+  }
+  const cues = cuesOf(full)
+  if (cues.length === 0) {
+    if (ownsScreen()) usePlayerStore.getState().clearSubtitles()
+    subtitleLog(`embedded mount skip: 0 cues (stream #${index})`)
+    return 'empty'
+  }
+  usePlayerStore
+    .getState()
+    .setSubtitles(cues, { label, count: cues.length, kind: 'file' }, index)
   subtitleLog(`embedded mount: #${index} ${label} cues=${cues.length}`)
-  return true
+  return 'mounted'
 }
 
 /**
@@ -203,9 +333,11 @@ export const loadEmbeddedTracks = async (
     )
     return tracks
   } catch (error) {
-    const store = usePlayerStore.getState()
-    const message = error instanceof Error ? error.message : String(error)
+    const message = errorText(error)
+    // Stopped on purpose: another file was opened while it ran.
+    if (message === EXTRACTION_CANCELLED) return []
     subtitleLog(`embedded probe failed: ${message}`)
+    const store = usePlayerStore.getState()
     if (store.media?.path === videoPath) {
       store.setEmbeddedTracks([])
       store.setEmbeddedError(message)

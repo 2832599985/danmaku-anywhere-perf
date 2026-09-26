@@ -1,9 +1,12 @@
+import { decodeTextBytes } from './decodeText'
 import {
   extOf,
   joinPath,
   type PickedMedia,
   type PickedText,
   type Platform,
+  SUBTITLE_EXTENSION_LIST,
+  SUBTITLE_EXTENSIONS,
   VIDEO_EXTENSIONS,
 } from './types'
 
@@ -23,6 +26,25 @@ const basename = (p: string): string => {
  */
 const streamUrlForPath = (path: string): string =>
   `http://stream.localhost/${encodeURIComponent(path)}`
+
+/** Absolute paths of the files directly in `dir` whose extension is in `extensions`. */
+const listFiles = async (
+  dir: string,
+  extensions: ReadonlySet<string>
+): Promise<string[]> => {
+  const { readDir } = await import('@tauri-apps/plugin-fs')
+  try {
+    const entries = await readDir(dir)
+    return entries
+      .filter((entry) => entry.isFile && extensions.has(extOf(entry.name)))
+      .map((entry) => joinPath(dir, entry.name))
+  } catch {
+    // Unreadable folder (permissions, a disconnected drive, a network share):
+    // the scan simply finds nothing — opening the video must not fail because
+    // its neighbours could not be listed.
+    return []
+  }
+}
 
 /**
  * Tauri adapter. Plugin modules are imported lazily so the browser bundle never
@@ -119,7 +141,7 @@ export const tauriPlatform: Platform = {
     const selected = await open({
       multiple: false,
       directory: false,
-      filters: [{ name: 'Subtitle', extensions: ['srt', 'ass', 'vtt'] }],
+      filters: [{ name: 'Subtitle', extensions: [...SUBTITLE_EXTENSION_LIST] }],
     })
     if (typeof selected !== 'string') return null
     const text = await this.readTextFile(selected)
@@ -131,25 +153,18 @@ export const tauriPlatform: Platform = {
   },
 
   async readTextFile(path: string): Promise<string> {
-    const { readTextFile } = await import('@tauri-apps/plugin-fs')
-    return readTextFile(path)
+    // Bytes, decoded here: subtitle and danmaku files are as often GBK, Big5
+    // or UTF-16 as UTF-8, and a UTF-8-only read turns those into mojibake.
+    const { readFile } = await import('@tauri-apps/plugin-fs')
+    return decodeTextBytes(await readFile(path))
   },
 
   async listVideoFiles(dir: string): Promise<string[]> {
-    const { readDir } = await import('@tauri-apps/plugin-fs')
-    try {
-      const entries = await readDir(dir)
-      return entries
-        .filter(
-          (entry) => entry.isFile && VIDEO_EXTENSIONS.has(extOf(entry.name))
-        )
-        .map((entry) => joinPath(dir, entry.name))
-    } catch {
-      // Unreadable folder (permissions, a disconnected drive, a network share):
-      // the scan simply finds nothing — opening the video must not fail because
-      // its neighbours could not be listed.
-      return []
-    }
+    return listFiles(dir, VIDEO_EXTENSIONS)
+  },
+
+  async listSubtitleFiles(dir: string): Promise<string[]> {
+    return listFiles(dir, SUBTITLE_EXTENSIONS)
   },
 
   minimizeWindow(): void {

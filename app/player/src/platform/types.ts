@@ -30,6 +30,21 @@ export const VIDEO_EXTENSIONS: ReadonlySet<string> = new Set(
   VIDEO_EXTENSION_LIST
 )
 
+/**
+ * Subtitle file extensions (no dot): the picker, the drop routing and the
+ * sibling-file auto-load (in this order of preference) share this list.
+ */
+export const SUBTITLE_EXTENSION_LIST: readonly string[] = [
+  'srt',
+  'ass',
+  'ssa',
+  'vtt',
+]
+
+export const SUBTITLE_EXTENSIONS: ReadonlySet<string> = new Set(
+  SUBTITLE_EXTENSION_LIST
+)
+
 /** Lower-case extension (no dot) of a file name, or '' when it has none. */
 export const extOf = (name: string): string =>
   name.split('.').pop()?.toLowerCase() ?? ''
@@ -41,7 +56,7 @@ export const extOf = (name: string): string =>
  * that turned the whole sibling-episode scan into a silent no-op: written as
  * `` `${dir}\${name}` `` the `\$` is an ESCAPE, not a separator plus an
  * interpolation, so every entry in the folder collapsed to the literal string
- * `${dir}${entry.name}` — no digits in it, so `selectSiblings` recognised no
+ * `${dir}${entry.name}` — no digits in it, so `selectBatch` recognised no
  * episode and returned an empty list. Type-checking and the sibling tests both
  * passed, because nothing covered this join.
  */
@@ -81,13 +96,16 @@ export interface Platform {
   /** Open a native/browser file picker for a danmaku file (.xml/.json). */
   pickDanmakuFile(): Promise<PickedText | null>
 
-  /** Open a native/browser file picker for a subtitle file (.srt/.ass/.vtt). */
+  /** Open a native/browser file picker for a subtitle file (.srt/.ass/.ssa/.vtt). */
   pickSubtitleFile(): Promise<PickedText | null>
 
   /** Convert an absolute fs path to a playable media URL (Tauri stream:// / convertFileSrc). */
   mediaUrlForPath(path: string): string
 
-  /** Read a text file by absolute path (Tauri drag-drop). */
+  /**
+   * Read a text file by absolute path (Tauri drag-drop, sibling files). The
+   * encoding is detected (UTF-8/16, GBK, Big5, Shift_JIS), not assumed.
+   */
   readTextFile(path: string): Promise<string>
 
   /**
@@ -98,6 +116,13 @@ export interface Platform {
    * dependency.
    */
   listVideoFiles(dir: string): Promise<string[]>
+
+  /**
+   * Absolute paths of the SUBTITLE files directly inside `dir` (no recursion).
+   * Finds the fansub-style tagged siblings (`<video>.sc.ass`, …) that a fixed
+   * `<video>.srt` probe misses. Returns [] in the browser.
+   */
+  listSubtitleFiles(dir: string): Promise<string[]>
 
   /**
    * Subscribe to native OS drag-and-drop of files onto the window (Tauri).

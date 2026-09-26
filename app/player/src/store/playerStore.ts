@@ -1,6 +1,11 @@
 import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import {
+  createJSONStorage,
+  type PersistStorage,
+  persist,
+  type StorageValue,
+} from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import { type FilenameRule, ruleShape } from '@/danmaku/filenameRules'
 import type { PickedMedia } from '@/platform/types'
@@ -117,10 +122,11 @@ export interface PlayerStore {
   danmakuSource: DanmakuSource | null
 
   // --- subtitles (session-only; re-mounted per media by the auto-load effect) ---
+  // Which cues are on screen is NOT store state: the SubtitleController draws
+  // them straight into the stage (a store write per line re-rendered the
+  // player and re-persisted its settings on every subtitle change).
   subtitleCues: SubtitleCue[]
   subtitleSource: SubtitleSource | null
-  /** cue currently on screen (set by SubtitleController), -1 = none. */
-  subtitleCueIndex: number
   /** Subtitle streams INSIDE the current file (mkv/mp4/webm); empty = none. */
   embeddedTracks: EmbeddedTrack[]
   /** Stream index of the mounted embedded track, null when none is mounted. */
@@ -193,8 +199,16 @@ export interface PlayerStore {
   setMediaError: (message: string | null) => void
   setComments: (comments: CommentEntity[], source: DanmakuSource | null) => void
   clearDanmaku: () => void
-  /** mount a subtitle track (external file or generated cues). */
-  setSubtitles: (cues: SubtitleCue[], source: SubtitleSource) => void
+  /**
+   * Mount a subtitle track (external file, embedded track or generated cues).
+   * `embeddedTrack` is the stream index when the cues come from the video's
+   * own track (the picker highlights it); anything else clears the highlight.
+   */
+  setSubtitles: (
+    cues: SubtitleCue[],
+    source: SubtitleSource,
+    embeddedTrack?: number | null
+  ) => void
   clearSubtitles: () => void
   /** record the subtitle streams found inside the current file. */
   setEmbeddedTracks: (tracks: EmbeddedTrack[]) => void
@@ -202,8 +216,6 @@ export interface PlayerStore {
   setActiveEmbeddedTrack: (index: number | null) => void
   /** record why the probe failed (cleared on the next successful one). */
   setEmbeddedError: (message: string | null) => void
-  /** called by SubtitleController when the on-screen cue changes. */
-  setSubtitleCueIndex: (index: number) => void
   setSttStatus: (status: SttStatus, progress?: number) => void
   setSttProgress: (progress: number) => void
   setSttError: (message: string | null) => void
@@ -252,11 +264,13 @@ export interface PlayerStore {
   openMedia: (items: PlaylistItem[]) => void
   appendToPlaylist: (items: PlaylistItem[]) => void
   /**
-   * Put `items` in order immediately AFTER the playing entry (the sibling
-   * episodes of the file that was just opened). Entries already queued are
-   * MOVED rather than duplicated, and the playing entry itself never moves.
+   * Arrange the rest of the playing entry's batch around it: `before` right in
+   * front of it, `after` right behind it, each in the order given (episode
+   * order). Entries already queued are MOVED rather than duplicated, and the
+   * playing entry itself stays put. Putting everything behind it would make
+   * autoplay jump from episode 7 back to episode 1.
    */
-  insertAfterCurrent: (items: PlaylistItem[]) => void
+  placeAroundCurrent: (before: PlaylistItem[], after: PlaylistItem[]) => void
   playPlaylistIndex: (index: number) => void
   removePlaylistIndex: (index: number) => void
   clearPlaylist: () => void
@@ -341,6 +355,70 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
+ * localStorage for the persisted slice, minus the writes that change nothing.
+ *
+ * The persist middleware serializes and writes the whole persisted slice
+ * after EVERY store update — the <video> mirror alone updates it four times a
+ * second, and a long history makes that slice a couple of hundred kilobytes
+ * of JSON. Immer keeps untouched branches referentially equal, so when every
+ * persisted field is the very same object as last time there is nothing new
+ * to write, and the write is skipped.
+ */
+const changedOnlyStorage = <S extends object>(
+  inner: PersistStorage<S> | undefined
+): PersistStorage<S> | undefined => {
+  if (!inner) return undefined
+  let last: S | null = null
+  const same = (a: S, b: S): boolean => {
+    const keys = Object.keys(a) as Array<keyof S>
+    return (
+      keys.length === Object.keys(b).length &&
+      keys.every((key) => Object.is(a[key], b[key]))
+    )
+  }
+  return {
+    getItem: (name) => inner.getItem(name),
+    setItem: (name, value: StorageValue<S>) => {
+      if (last && same(last, value.state)) return
+      const result = inner.setItem(name, value)
+      // Remembered only once written: a failed write (quota) is retried.
+      last = value.state
+      return result
+    },
+    removeItem: (name) => {
+      last = null
+      return inner.removeItem(name)
+    },
+  }
+}
+
+/** The persisted slice; `partialize` below must return exactly this shape. */
+interface PersistedSlice {
+  upscale: UpscaleSettings
+  danmakuSettings: DanmakuSettings
+  playbackSettings: PlaybackSettings
+  subtitleSettings: SubtitleSettings
+  playlist: PlaylistItem[]
+  progress: Record<string, ResumeEntry>
+  filenameRules: FilenameRule[]
+}
+
+/**
+ * Path-backed playlist entries (blob URLs cannot be revived). Memoized on the
+ * playlist array so an unchanged list keeps its identity — the change-only
+ * storage above relies on it.
+ */
+let persistablePlaylistFor: PlaylistItem[] | null = null
+let persistablePlaylist: PlaylistItem[] = []
+const persistableItems = (playlist: PlaylistItem[]): PlaylistItem[] => {
+  if (playlist !== persistablePlaylistFor) {
+    persistablePlaylistFor = playlist
+    persistablePlaylist = playlist.filter((item) => !!item.path)
+  }
+  return persistablePlaylist
+}
+
+/**
  * Switching media invalidates the live playback mirror and the detected HDR
  * state; reset both the same way `setMedia` does (volume/mute are user prefs
  * and survive the switch).
@@ -351,7 +429,6 @@ function resetPlaybackForNewMedia(s: PlayerStore): void {
   s.mediaError = null
   s.subtitleCues = []
   s.subtitleSource = null
-  s.subtitleCueIndex = -1
   s.embeddedTracks = []
   s.activeEmbeddedTrack = null
   s.embeddedError = null
@@ -378,7 +455,6 @@ export const usePlayerStore = create<PlayerStore>()(
 
       subtitleCues: [],
       subtitleSource: null,
-      subtitleCueIndex: -1,
       embeddedTracks: [],
       activeEmbeddedTrack: null,
       embeddedError: null,
@@ -442,26 +518,22 @@ export const usePlayerStore = create<PlayerStore>()(
           s.danmakuSource = null
         }),
 
-      setSubtitles: (cues, source) =>
+      setSubtitles: (cues, source, embeddedTrack = null) =>
         set((s) => {
           s.subtitleCues = cues
           s.subtitleSource = source
-          s.subtitleCueIndex = -1
+          // Whatever is mounted now replaced any embedded track unless it IS
+          // one — set in the same write, so the picker never flickers.
+          s.activeEmbeddedTrack = embeddedTrack
         }),
 
       clearSubtitles: () =>
         set((s) => {
           s.subtitleCues = []
           s.subtitleSource = null
-          s.subtitleCueIndex = -1
           // The embedded track list stays (the file did not change); only the
           // "which one is mounted" highlight is dropped.
           s.activeEmbeddedTrack = null
-        }),
-
-      setSubtitleCueIndex: (index) =>
-        set((s) => {
-          s.subtitleCueIndex = index
         }),
 
       setEmbeddedTracks: (tracks) =>
@@ -679,28 +751,36 @@ export const usePlayerStore = create<PlayerStore>()(
           }
         }),
 
-      insertAfterCurrent: (items) =>
+      placeAroundCurrent: (before, after) =>
         set((s) => {
-          if (items.length === 0) return
+          if (before.length === 0 && after.length === 0) return
           const current = s.playlist[s.playlistIndex]
           if (!current) return
           const currentKey = playlistKey(current)
           // Move instead of duplicate: an episode of this batch that is already
           // elsewhere in the list (the user played it earlier) must end up in
-          // episode order behind the current file, not appear twice.
-          const incoming = new Map(
-            items.map((item) => [playlistKey(item), item])
+          // episode order around the current file, not appear twice. The
+          // current entry is never part of either group.
+          const earlier = new Map(
+            before.map((item) => [playlistKey(item), item] as const)
           )
+          earlier.delete(currentKey)
+          const later = new Map(
+            after.map((item) => [playlistKey(item), item] as const)
+          )
+          later.delete(currentKey)
+          for (const key of earlier.keys()) later.delete(key)
           const kept = s.playlist.filter((item) => {
             const key = playlistKey(item)
-            return key === currentKey || !incoming.has(key)
+            return key === currentKey || (!earlier.has(key) && !later.has(key))
           })
-          const index = kept.findIndex(
-            (item) => playlistKey(item) === currentKey
-          )
+          let index = kept.findIndex((item) => playlistKey(item) === currentKey)
           if (index < 0) return
-          kept.splice(index + 1, 0, ...incoming.values())
-          // Bound the persisted list; the playing entry is never dropped.
+          kept.splice(index + 1, 0, ...later.values())
+          kept.splice(index, 0, ...earlier.values())
+          index += earlier.size
+          // Bound the persisted list; the playing entry is never dropped. The
+          // oldest history goes first, then the far end of the tail.
           const overflow = kept.length - PLAYLIST_MAX
           let shift = 0
           if (overflow > 0) {
@@ -830,15 +910,18 @@ export const usePlayerStore = create<PlayerStore>()(
     {
       name: 'danmaku-player-settings',
       version: 1,
+      storage: changedOnlyStorage<PersistedSlice>(
+        createJSONStorage<PersistedSlice>(() => localStorage)
+      ),
       // Persist user settings + the local-file playlist and resume history.
       // Blob-backed items (browser File opens, no `path`) can't be revived
       // across launches, so only path-backed items are kept.
-      partialize: (state) => ({
+      partialize: (state): PersistedSlice => ({
         upscale: state.upscale,
         danmakuSettings: state.danmakuSettings,
         playbackSettings: state.playbackSettings,
         subtitleSettings: state.subtitleSettings,
-        playlist: state.playlist.filter((i) => !!i.path),
+        playlist: persistableItems(state.playlist),
         progress: state.progress,
         filenameRules: state.filenameRules,
       }),

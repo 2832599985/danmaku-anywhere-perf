@@ -1,5 +1,12 @@
 import { alpha, Box, Menu, MenuItem } from '@mui/material'
-import { useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { getPlatform } from '@/platform'
 import { usePlayerCommands } from '@/player/commands'
 import { useOpEdMarks } from '@/player/useOpEdMarks'
@@ -74,9 +81,16 @@ const capsuleSx = {
 interface ControlsProps {
   /** When false, the bar fades and slides out (parent owns the hide timer). */
   visible: boolean
+  /**
+   * Reports the bar's measured height in px whenever it changes, so the
+   * subtitle layer can lift its rows clear of it. The bar's height is a
+   * constant (padding + content) while the stage is not, so a percentage
+   * lift is wrong at the sizes it was not tuned for.
+   */
+  onHeightChange?: (height: number) => void
 }
 
-export const Controls = ({ visible }: ControlsProps) => {
+export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
   const commands = usePlayerCommands()
   const playing = usePlayerStore((s) => s.playback.playing)
   const fullscreen = usePlayerStore((s) => s.playback.fullscreen)
@@ -97,6 +111,42 @@ export const Controls = ({ visible }: ControlsProps) => {
   const isTauri = getPlatform().isTauri
 
   const [rateAnchor, setRateAnchor] = useState<HTMLElement | null>(null)
+  const barRef = useRef<HTMLDivElement | null>(null)
+
+  // The bar's height depends on its own content (the danmaku density strip
+  // appears once comments load, the status capsules come and go), so the
+  // subtitle layer needs the measured value — not a percentage of the stage.
+  //
+  // Measuring it is fussier than it looks: the bar's height is mostly
+  // *padding* (`52px 24px 16px`), and `ResizeObserver`'s `contentRect` (what
+  // most examples reach for) reports the content box only — 74px against the
+  // real 142px border box. Worse, a padding-only height never re-fires the
+  // observer, so the value would freeze at whatever it was on first paint.
+  // The observer entry's `borderBoxSize` is the honest box; a layout effect
+  // measures it again after every commit, which is when the density strip
+  // actually arrives.
+  const measureBar = useCallback(() => {
+    const bar = barRef.current
+    if (!bar || !onHeightChange) return
+    // `offsetHeight` rounds to an integer and includes padding + border.
+    const height = bar.offsetHeight
+    if (height > 0) onHeightChange(height)
+  }, [onHeightChange])
+
+  useLayoutEffect(() => {
+    measureBar()
+  })
+
+  useEffect(() => {
+    const bar = barRef.current
+    if (!bar) return
+    // The observer covers changes that do not re-render this component (the
+    // density strip's own resize, a font swap); the layout effect covers the
+    // ones that do.
+    const observer = new ResizeObserver(measureBar)
+    observer.observe(bar)
+    return () => observer.disconnect()
+  }, [measureBar])
 
   const canPrev = playlistIndex > 0
   const canNext = playlistIndex >= 0 && playlistIndex < playlist.length - 1
@@ -410,6 +460,8 @@ export const Controls = ({ visible }: ControlsProps) => {
 
       {/* bottom bar — gradient only, no frame (per design) */}
       <Box
+        ref={barRef}
+        data-controls-bar
         sx={{
           position: 'absolute',
           left: 0,

@@ -84,25 +84,47 @@ export const locateEpisode = (
 }
 
 /**
- * The episodes of the same batch as `currentPath`, ordered, excluding itself.
+ * The rest of a batch, split around the file that was opened.
+ *
+ * The split is what makes autoplay continue FORWARD: opening episode 7 of a
+ * 1–9 batch must queue 8 right behind it, with 1–6 in front of it. The first
+ * version returned one flat list and queued all of it behind the current file
+ * (`7,1,2,…,6,8,9`), so episode 7 was followed by episode 1.
+ */
+export interface SiblingBatch {
+  /** Episode number of the opened file, read from its own name. */
+  episode: number
+  /**
+   * Members numbered at or below it, in episode order. A second file with the
+   * SAME number (a v2 re-release) goes here too, so autoplay moves on to the
+   * next episode instead of replaying this one.
+   */
+  before: SiblingEpisode[]
+  /** Members numbered above it, in episode order. */
+  after: SiblingEpisode[]
+}
+
+/**
+ * The batch `currentPath` belongs to (itself excluded), or null when its own
+ * episode number cannot be read — then there is nothing to anchor a batch on.
  *
  * `paths` is whatever the platform listed for the folder (order irrelevant);
  * `episodeFromRule` lets a learned rule supply the episode number for shapes
  * the heuristic cannot read — the user already decided what the number means
  * there, so it outranks guessing.
  */
-export function selectSiblings(
+export function selectBatch(
   currentPath: string,
   paths: string[],
   episodeFromRule: (path: string) => number | null = () => null
-): SiblingEpisode[] {
+): SiblingBatch | null {
   const currentName = basenameWithoutExt(currentPath)
   // The heuristic first; a learned rule covers the shapes it cannot read. If
   // neither knows, there is nothing to anchor the batch on.
   const current = locateEpisode(currentName, episodeFromRule(currentPath))
-  if (!current) return []
+  if (!current) return null
   const prefix = head(currentName, current.index)
-  if (prefix.trim().length < MIN_HEAD_CHARS) return []
+  if (prefix.trim().length < MIN_HEAD_CHARS) return null
 
   const dir = dirname(currentPath)
   const found: SiblingEpisode[] = []
@@ -124,5 +146,12 @@ export function selectSiblings(
     })
   }
   found.sort((a, b) => a.episode - b.episode || a.name.localeCompare(b.name))
-  return found.slice(0, MAX_SIBLINGS)
+  const after = found.filter((sibling) => sibling.episode > current.episode)
+  const before = found.filter((sibling) => sibling.episode <= current.episode)
+  // Bound a pathological folder. What comes NEXT matters most (that is what
+  // autoplay continues into), then the episodes nearest before this one.
+  const keptAfter = after.slice(0, MAX_SIBLINGS)
+  const room = MAX_SIBLINGS - keptAfter.length
+  const keptBefore = before.slice(Math.max(0, before.length - room))
+  return { episode: current.episode, before: keptBefore, after: keptAfter }
 }

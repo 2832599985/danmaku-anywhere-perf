@@ -5,7 +5,7 @@ use subtitle::commands::{
     subtitle_cancel, subtitle_log, subtitle_model_download, subtitle_model_status,
     subtitle_save_srt, subtitle_transcribe, TaskRegistry,
 };
-use subtitle::tracks::{subtitle_extract_track, subtitle_list_tracks};
+use subtitle::tracks::{subtitle_extract_focus, subtitle_extract_track, subtitle_list_tracks};
 
 /// Builds and runs the Tauri desktop application.
 ///
@@ -37,6 +37,7 @@ pub fn run() {
             subtitle_log,
             subtitle_list_tracks,
             subtitle_extract_track,
+            subtitle_extract_focus,
         ])
         // Async variant so large-file range reads happen off the UI thread.
         .register_asynchronous_uri_scheme_protocol("stream", |_ctx, request, responder| {
