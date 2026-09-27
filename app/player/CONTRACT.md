@@ -1447,3 +1447,126 @@ hide it. The settings panel's `OUT FPS` gets the same breakdown, and its
   anything from one window.
 
 
+
+## 28. Interpolation gave up whenever the GPU was busy — and never produced 3x/4x (2026-09-27 — DONE)
+
+**Reported as** "有时候补帧不补" and "明明gpu有空闲但是补帧上不去".
+
+Both were real, and the second one was measurable: at the user's own setting
+(ultra / 720p / 3x) the engine interpolated **48 of 204 pairs** and the GPU sat
+at 96% — while at balanced / 1080p / 2x it interpolated **86 of 204** at **45%**
+GPU. Interpolation was being switched off on a GPU with more than half its
+capacity idle.
+
+Measured on the packaged exe (`e2e/fi-probe.mjs`, 8 s windows, seek 400 s into a
+1080p 24fps anime episode):
+
+| config | gen/s | pairs | late | bypassed | GPU |
+|---|---|---|---|---|---|
+| performance/720p/2x | 7.5 | 204 | 1 | 0 | 37% |
+| ultra/720p/2x | 6.5 | 204 | 8 | 6 | 82% |
+| **ultra/720p/3x** (user's) | 8.1 | 204 | 25 | **48** | 96% |
+| balanced/1080p/2x | 3.1 | 204 | 11 | **86** | **45%** |
+
+**Cause 1 — the repeat test queued behind Anime4K.** `classifyPair` ran a 48x27
+GPU difference pass and then `mapAsync`-ed it back on the *same* queue the
+Anime4K chain saturates. Measured: 8.5-15.9 ms average and 39-88 ms worst, so by
+the time the verdict arrived the pair's output slot had always passed, the pair
+was counted "late", and three in a row armed a **2-second full bypass**. That is
+the whole mechanism behind "GPU idle but no interpolation".
+
+**Cause 2 — the display delay ignored the multiplier.** `calculateFrameProcessingDelay`
+was a flat `interval/2 + 8` (~29 ms). The first sub-frame of a factor-f pair
+sits `(1 - 1/f)` of a source interval before the current frame's slot, which is
+28 ms at 3x — so at 3x the measured slack was **-0.7 ms** and the first
+sub-frame was always already in the past. 3x and 4x could not produce their
+first sub-frame by construction.
+
+**Cause 3 — no way to skip held drawings.** Anime is drawn on twos and threes:
+measured **68% of pairs** are the same drawing as the previous frame. Every one
+of them still cost a full Anime4K pass to re-present a picture already on
+screen, which is most of the GPU budget that the interpolation needed.
+
+**The fix.**
+1. **Repeat test on the CPU.** A 160x90 thumbnail via `createImageBitmap(...,
+   { resizeQuality: 'medium' })` + `getImageData`, compared against the last
+   *presented* drawing. Calibrated inside the real WebView2 on 1080p anime: a
+   held pair never differs by more than **7** (summed over RGB, 0..765) while any
+   real drawing change starts at **189** — two orders of magnitude of margin, not
+   a tight fit. Threshold 8. Cost: **p50 1.6-3.3 ms, p90 ~6 ms**, asynchronously,
+   never blocking the render loop.
+2. **Factor-aware display delay** (see above), so the first sub-frame of 3x/4x
+   lands in the future.
+3. **Elide held drawings.** A frame classified as a repeat is marked in the
+   display queue and `takeDueFrame` skips it, so the Anime4K chain never runs on
+   a picture the canvas already shows. This only *skips* a pass — it moves no
+   display time, so the presentation timeline is identical to before minus the
+   redundant work.
+4. **Degrade, don't switch off.** The overload guard now costs one step of the
+   interpolation factor per three late pairs (down to 2x) and gives it back after
+   60 healthy pairs; a full bypass (600 ms) only happens when even 2x cannot keep
+   up. The old guard armed a 2 s bypass and cleared its own evidence, so a single
+   hitch could latch interpolation off.
+5. **Present only new frames.** `presentLatestProcessedFrame` re-submitted the
+   same texture on every rAF turn — at 170 Hz that burned GPU time the
+   interpolation needed (and it is why the HUD once read the refresh rate). It
+   now submits only when a new frame was actually processed.
+6. **Cadence from media time.** `intervalMs` was smoothed from
+   `expectedDisplayTime`, which jitters by tens of milliseconds under load; it
+   now comes from `mediaTime` deltas (normalized by playback rate), so a jittery
+   window can no longer read as "wrong cadence" and skip interpolation.
+
+**After, same clip and windows** (before/after in parentheses):
+
+| config | gen/s | late | bypassed | GPU | ceiling |
+|---|---|---|---|---|---|
+| performance/720p/2x | 7.5 (7.5) | 0 (1) | 0 (0) | 33% (37%) | 2/2 |
+| ultra/720p/2x | 7.6 (6.5) | 0 (8) | **0 (6)** | 58% (82%) | 2/2 |
+| **ultra/720p/3x** | **14.9 (8.1)** | **1 (25)** | **0 (48)** | 67% (96%) | 3/3 |
+| balanced/1080p/2x | 7.5 (3.1) | 1 (11) | **0 (86)** | 39% (45%) | 2/2 |
+| performance/720p/4x | **22.9 (—)** | 0 | 0 | 33% | 4/4 |
+
+3x now produces **1.8x** the frames it did and 4x works at all; the bypass
+counter is zero at every tier; and 139-140 of ~202 pairs are elided, so the
+Anime4K chain runs on the distinct drawings only. `slack` went from -0.7 ms to
+**+14-16 ms** and the classify readback from 14.6 ms avg / 55 ms max to 1.6-6.4 ms.
+
+**HUD correctness, again.** `presentedFrames` had to change meaning with the
+elision: it counts *distinct pictures shown*, and the engine now also reports how
+many of those were generated (`presentedGeneratedFrames`). Deriving the split
+from captured counts would be wrong on anime — 202 frames captured in 8 s is
+25/s but only 61 were distinct drawings, and reporting the capture rate as the
+"source fps" would claim frames the viewer never saw. Verified against the
+engine's own accounting (averaging the 1 s HUD samples against `getStats()`
+deltas over the same 8 s window):
+`ultra/720p/3x` HUD **22.3/s = 7.8 + 14.5** vs engine **20.4/s = 6.9 drawings +
+13.5 generated**; `performance/720p/2x` HUD **15.6 = 7.9 + 7.8** vs engine
+**14.8 = 7.4 + 7.4**. `e2e/fi-probe.mjs` prints the same HUD reading next to the
+engine deltas, so the two can always be compared in one run.
+
+**HUD wording superseded (§27).** §27's HUD description — a vermilion `补帧未产出`
+whenever the count is 0, and the same at 0 in the settings panel — was replaced.
+Zero generated frames is legitimate while paused, on a static passage, or in the
+first second after enabling, so alarming wording cried wolf. The breakdown now
+always reads `源 N + 补帧 M`, and the only definitive failure the engine reports
+(its fallback state) is what says `补帧不可用`.
+
+**Gates.** upscale-engine 27/27, player 147/147, both `tsc --noEmit` clean,
+`verify-exe.mjs` **30/30**. Two `packages/danmaku-anywhere` e2e failures
+(`changing the CORS option updates the static ruleset`, `renders an Anime4K
+canvas...`) were confirmed by stashing this change and re-running: **they fail
+identically on the unmodified baseline** and are unrelated.
+
+**Traps for whoever touches this next.**
+- The repeat reference is the last *presented* drawing, not the previous frame.
+  Comparing frame-to-frame would let a slow fade walk out of the threshold in
+  small steps that each look like a repeat while the picture drifts on screen.
+- An unknown (missing thumbnail, length mismatch) must classify as **changed**.
+  A false "changed" only costs GPU work; a false "held" elides a frame the viewer
+  needs.
+- The frame-interpolator's generated counter restarts at 0 on every renderer
+  rebuild, so any per-second measurement must treat a negative delta as a reset
+  (this already produced one false "1080p is broken" conclusion — see §27).
+- `SHERPA_ONNX_LIB_DIR` must point at the local sherpa libs or `tauri build`
+  tries to download them and fails on a blocked network; the libs are already at
+  `C:/_DEV/sherpa-onnx/sherpa-onnx-v1.13.7-win-x64-static-MT-Release-lib/lib`.

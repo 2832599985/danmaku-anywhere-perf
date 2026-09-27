@@ -364,10 +364,13 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             >
               {upscaleStats.fps}
             </Box>
-            {/* The composition, so the number is never mistaken for the
-                display refresh. With interpolation on, "+N" is the sub-frames
-                it actually produced this second; when it is enabled but
-                producing nothing, say so instead of showing a healthy total. */}
+            {/* The composition, so the big number is never mistaken for the
+                display refresh or for the interpolated rate alone. Stated
+                factually rather than as a warning: 0 interpolated frames is
+                legitimate while paused, on a static passage, or in the first
+                second after enabling, so alarming wording would cry wolf. A
+                persistent "补帧 0" while playing is the real signal. The one
+                definitive failure the engine reports is its fallback state. */}
             {fi.enabled && (
               <Box
                 component="span"
@@ -381,11 +384,9 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
                       : alpha(PAPER, 0.45),
                 }}
               >
-                {upscaleStats.generatedFps > 0
-                  ? `${upscaleStats.sourceFps} + ${upscaleStats.generatedFps}`
-                  : interpolationStatus === 'fallback'
-                    ? '补帧不可用'
-                    : '补帧未产出'}
+                {interpolationStatus === 'fallback'
+                  ? '补帧不可用'
+                  : `源 ${upscaleStats.sourceFps} + 补帧 ${upscaleStats.generatedFps}`}
               </Box>
             )}
           </Box>

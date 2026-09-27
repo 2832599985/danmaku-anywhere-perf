@@ -17,10 +17,19 @@ const MAX_MID_POOL_SIZE = 12
 const MAX_INTERPOLATION_FACTOR = 8
 /** Lowest source fps assumed when sizing pools for a target-fps request. */
 const MIN_ASSUMED_SOURCE_FPS = 20
-/** Consecutive pairs that produced nothing in time before bypassing. */
-const LATE_PAIRS_BEFORE_BYPASS = 3
-/** How long interpolation stays bypassed after the overload guard arms. */
-const OVERLOAD_BYPASS_MS = 2000
+/**
+ * Consecutive pairs that produced nothing displayable before the effective
+ * factor drops one step — and only once it is already 2 is interpolation
+ * bypassed at all. Dropping a step first matters: the first sub-frame of a
+ * factor-f pair sits (1 - 1/f) of a source interval *before* the current
+ * frame's slot, so one step down buys a whole extra slice of slack and a GPU
+ * that cannot hold 3x settles at 2x instead of latching off.
+ */
+const LATE_PAIRS_BEFORE_DEGRADE = 3
+/** Consecutive timely pairs needed to give the factor one step back. */
+const TIMELY_PAIRS_BEFORE_RECOVERY = 60
+/** Bypass window used once even 2x cannot keep up. */
+const OVERLOAD_BYPASS_MS = 600
 /** Short bypass used to let a saturated source pool drain. */
 const POOL_RECOVERY_BYPASS_MS = 500
 /**
@@ -31,13 +40,28 @@ const POOL_RECOVERY_BYPASS_MS = 500
  * at 4x.
  */
 const INTERPOLATION_PIXEL_BUDGET_MP = 6.5
-const DEDUP_SAMPLE_WIDTH = 48
-const DEDUP_SAMPLE_HEIGHT = 27
-const DEDUP_SAMPLE_COUNT = DEDUP_SAMPLE_WIDTH * DEDUP_SAMPLE_HEIGHT
-const DEDUP_ZERO = new Uint32Array(2)
 const MIN_PROCESSING_DELAY_MS = 20
 const MAX_PROCESSING_DELAY_MS = 50
-const INTERPOLATION_COMPUTE_LEAD_MS = 8
+/**
+ * Slack added to the display delay for the classify readback, the queue wait
+ * and the jitter of the frame callback itself.
+ */
+const INTERPOLATION_COMPUTE_LEAD_MS = 12
+/**
+ * Repeat test resolution. 160x90 is the smallest thumbnail that still resolves
+ * a drawing change, and `resizeQuality: 'medium'` is what makes it clean:
+ * measured inside the real WebView2 on 1080p anime, a held pair never differs
+ * by more than 7 (summed over the three channels, so 0..765) while any real
+ * drawing change starts at 189 — a two-order-of-magnitude gap, not a tight fit.
+ * It costs ~2.3 ms p50 asynchronously, whereas the GPU readback it replaces
+ * queued behind Anime4K for 8-16 ms average and up to 88 ms.
+ */
+const CLASSIFY_WIDTH = 160
+const CLASSIFY_HEIGHT = 90
+/** Max summed-RGB difference below which the pair is the same drawing. */
+const REPEAT_MAX_DIFFERENCE = 8
+/** Mean per-channel difference above which the pair is a cut between shots. */
+const SCENE_CUT_MEAN_DIFFERENCE = 32
 
 const blitShader = `
 struct VertexOutput {
@@ -72,27 +96,6 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 `
 
-const differenceShader = `
-@group(0) @binding(0) var previousTexture: texture_2d<f32>;
-@group(0) @binding(1) var currentTexture: texture_2d<f32>;
-@group(0) @binding(2) var sourceSampler: sampler;
-@group(0) @binding(3) var<storage, read_write> stats: array<atomic<u32>, 2>;
-
-@compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-  if (id.x >= ${DEDUP_SAMPLE_WIDTH}u || id.y >= ${DEDUP_SAMPLE_HEIGHT}u) {
-    return;
-  }
-  let uv = (vec2<f32>(f32(id.x), f32(id.y)) + 0.5) /
-    vec2<f32>(${DEDUP_SAMPLE_WIDTH}.0, ${DEDUP_SAMPLE_HEIGHT}.0);
-  let previous = textureSampleLevel(previousTexture, sourceSampler, uv, 0.0).rgb;
-  let current = textureSampleLevel(currentTexture, sourceSampler, uv, 0.0).rgb;
-  let difference = u32(dot(abs(previous - current), vec3<f32>(255.0)));
-  atomicAdd(&stats[0], difference);
-  atomicMax(&stats[1], difference);
-}
-`
-
 export interface FrameDifferenceClassification {
   duplicate: boolean
   sceneCut: boolean
@@ -103,6 +106,14 @@ export interface FrameDifferenceClassification {
 export interface InterpolationFrame {
   texture: GPUTexture
   release: () => void
+  /**
+   * True when this frame was synthesized by the model rather than captured from
+   * the video. The renderer counts presents by this flag, which is the only
+   * honest way to split the output rate: repeat frames are elided and source
+   * frames are captured at the file's rate, so counting captures would report a
+   * source rate the viewer never saw.
+   */
+  generated: boolean
 }
 
 export interface FrameInterpolatorCreateOptions {
@@ -121,9 +132,62 @@ export interface FrameCaptureTiming {
   presentedFrames?: number
 }
 
+/**
+ * Cumulative pair accounting since the interpolator was created. Every source
+ * pair ends in exactly one of the outcome buckets, so their sum is the number
+ * of pairs seen; the timings say where the time went. Read it (e.g. from a
+ * debugger or the HUD) to tell "the GPU is saturated" apart from "the
+ * scheduler gave up on work the GPU could still do".
+ */
+export interface FrameInterpolationStats {
+  /** Pairs that produced at least one generated frame. */
+  produced: number
+  /** Generated frames enqueued for display. */
+  generatedFrames: number
+  /** Pairs skipped as repeats (anime held on twos/threes, paused). */
+  duplicate: number
+  /** Source frames skipped by the Anime4K chain because they repeat the last one. */
+  elided: number
+  /** Pairs skipped as scene cuts (a mid would blend two shots). */
+  sceneCut: number
+  /** Pairs skipped because the source cadence is outside 22–100 ms. */
+  cadence: number
+  /** Pairs dropped because their output slot had already passed. */
+  late: number
+  /** Pairs skipped while the overload guard's bypass window was open. */
+  bypassed: number
+  /** Pairs abandoned by a seek / rebuild (a new timeline). */
+  stale: number
+  /** Frames that could not be captured because every source slot was busy. */
+  poolSaturated: number
+  /** Times the overload guard armed its bypass window. */
+  bypassArms: number
+  /** Factor the interpolator is configured for (after the resolution cap). */
+  maxFactor: number
+  /** Current adaptive factor ceiling; drops under load, climbs back when idle. */
+  factorCeiling: number
+  /** Mean ms from capture to the start of pair processing (queue wait). */
+  averageQueueWaitMs: number
+  /** Mean ms the repeat/scene-cut readback took. */
+  averageClassifyMs: number
+  /** Worst classify readback seen. */
+  maximumClassifyMs: number
+  /** Mean slack (ms) between "ready to enqueue" and the first sub-frame's slot. */
+  averageSlackMs: number
+}
+
 type QueuedFrame = {
   texture: GPUTexture
   displayAt: number
+  /** True when the frame came out of the model rather than off the video. */
+  generated: boolean
+  /**
+   * Set once the pair it belongs to is classified as a repeat: the canvas
+   * already shows this exact picture, so presenting it would buy an Anime4K
+   * pass and nothing else. Held drawings are 50-70% of an anime source, so this
+   * is most of the chain's work.
+   */
+  elide: boolean
 }
 
 interface FramegenRuntime {
@@ -200,15 +264,36 @@ export function computeResolutionFactorCap(
   )
 }
 
-export function classifyDifferenceStats(
-  sum: number,
-  maximum: number,
-  sampleCount = DEDUP_SAMPLE_COUNT
+/**
+ * Compare two 160x90 RGBA thumbnails of consecutive frames. The maximum is what
+ * separates "same drawing" from "the drawing changed" (see
+ * REPEAT_MAX_DIFFERENCE); the mean only has to catch hard cuts, where every
+ * pixel changes at once.
+ */
+export function classifyThumbnailDifference(
+  previous: Uint8ClampedArray,
+  current: Uint8ClampedArray
 ): FrameDifferenceClassification {
-  const mean = sum / Math.max(1, sampleCount)
+  const pixels = previous.length / 4
+  if (previous.length !== current.length || !(pixels >= 1)) {
+    // An unknown must never read as "held": a false "changed" only costs GPU
+    // work, while a false "held" would elide a frame the viewer needs.
+    return { duplicate: false, sceneCut: false, mean: 0, maximum: 0 }
+  }
+  let maximum = 0
+  let sum = 0
+  for (let index = 0; index < previous.length; index += 4) {
+    const difference =
+      Math.abs(previous[index] - current[index]) +
+      Math.abs(previous[index + 1] - current[index + 1]) +
+      Math.abs(previous[index + 2] - current[index + 2])
+    sum += difference
+    if (difference > maximum) maximum = difference
+  }
+  const mean = sum / pixels / 3
   return {
-    duplicate: mean < 2.5 && maximum < 45,
-    sceneCut: mean > 90,
+    duplicate: maximum <= REPEAT_MAX_DIFFERENCE,
+    sceneCut: mean >= SCENE_CUT_MEAN_DIFFERENCE,
     mean,
     maximum,
   }
@@ -264,10 +349,34 @@ export function resolveInterpolationFactor(
 /** Outcome of one source pair, as seen by the overload guard. */
 export type InterpolationPairOutcome = 'late' | 'timely'
 
-/** Overload-guard state: consecutive late pairs and the active bypass window. */
+/**
+ * Overload-guard state. `factorCeiling` is the whole point: instead of a
+ * binary on/off, sustained lateness costs one step of the interpolation factor
+ * (down to 2x) and a healthy stretch gives it back. The old guard armed a
+ * 2-second full bypass after three late pairs, so a GPU with plenty of headroom
+ * spent 40%+ of its pairs interpolating nothing at all (measured: 86 of 204
+ * pairs bypassed at 45% GPU utilization).
+ */
 export interface InterpolationOverloadState {
+  /** Consecutive pairs that produced nothing displayable. */
   lateSamples: number
+  /** Consecutive pairs that produced something displayable. */
+  timelySamples: number
+  /** Adaptive ceiling on the interpolation factor, in [2, maxFactor]. */
+  factorCeiling: number
+  /** While > now, interpolation is skipped entirely (pool recovery). */
   bypassUntil: number
+}
+
+export function createInterpolationOverloadState(
+  maxFactor: number
+): InterpolationOverloadState {
+  return {
+    lateSamples: 0,
+    timelySamples: 0,
+    factorCeiling: Math.max(2, maxFactor),
+    bypassUntil: 0,
+  }
 }
 
 /**
@@ -275,30 +384,52 @@ export interface InterpolationOverloadState {
  * produced nothing that could still be displayed — a signal attributable to
  * interpolation alone, unlike a queue-drain timing, which also measures the
  * Anime4K passes sharing the same GPU queue.
- *
- * Arming the bypass resets the counter, so the window that follows is judged
- * only on fresh evidence. A decaying cost average would instead still sit above
- * the threshold when the bypass expires and re-arm within a few pairs, latching
- * interpolation off for the rest of the session after a single hitch.
  */
 export function updateInterpolationOverload(
   state: InterpolationOverloadState,
   outcome: InterpolationPairOutcome,
   now: number,
-  options: { threshold?: number; bypassMs?: number } = {}
+  options: {
+    threshold?: number
+    bypassMs?: number
+    recoveryPairs?: number
+    maxFactor?: number
+  } = {}
 ): InterpolationOverloadState {
+  const maxFactor = Math.max(2, options.maxFactor ?? state.factorCeiling)
   if (outcome === 'timely') {
+    const lateSamples = Math.max(0, state.lateSamples - 1)
+    const timelySamples = state.timelySamples + 1
+    if (
+      state.factorCeiling < maxFactor &&
+      timelySamples >= (options.recoveryPairs ?? TIMELY_PAIRS_BEFORE_RECOVERY)
+    ) {
+      return {
+        lateSamples,
+        timelySamples: 0,
+        factorCeiling: state.factorCeiling + 1,
+        bypassUntil: state.bypassUntil,
+      }
+    }
+    return { ...state, lateSamples, timelySamples }
+  }
+
+  const lateSamples = state.lateSamples + 1
+  if (lateSamples < (options.threshold ?? LATE_PAIRS_BEFORE_DEGRADE)) {
+    return { ...state, lateSamples, timelySamples: 0 }
+  }
+  if (state.factorCeiling > 2) {
     return {
-      lateSamples: Math.max(0, state.lateSamples - 1),
+      lateSamples: 0,
+      timelySamples: 0,
+      factorCeiling: state.factorCeiling - 1,
       bypassUntil: state.bypassUntil,
     }
   }
-  const lateSamples = state.lateSamples + 1
-  if (lateSamples < (options.threshold ?? LATE_PAIRS_BEFORE_BYPASS)) {
-    return { lateSamples, bypassUntil: state.bypassUntil }
-  }
   return {
     lateSamples: 0,
+    timelySamples: 0,
+    factorCeiling: 2,
     bypassUntil: now + (options.bypassMs ?? OVERLOAD_BYPASS_MS),
   }
 }
@@ -309,12 +440,26 @@ export function shouldInterpolateInterval(intervalMs: number): boolean {
   return intervalMs >= 22 && intervalMs <= 100
 }
 
-export function calculateFrameProcessingDelay(intervalMs: number): number {
+/**
+ * How far after a frame's nominal display time it is shown. The delay has to
+ * cover the (1 - 1/factor) of a source interval that separates the current
+ * frame's slot from the first sub-frame's slot, plus the time the pair needs to
+ * be classified. Without the factor term — the delay used to be a flat
+ * interval/2 — the first sub-frame of every pair was already 1-8 ms in the past
+ * by the time it was computed, so 3x and 4x produced at most their later
+ * sub-frames and usually nothing at all.
+ */
+export function calculateFrameProcessingDelay(
+  intervalMs: number,
+  factor = 2
+): number {
+  const firstSubFrameLead =
+    intervalMs * (1 - 1 / Math.max(2, Math.floor(factor)))
   return Math.min(
     MAX_PROCESSING_DELAY_MS,
     Math.max(
       MIN_PROCESSING_DELAY_MS,
-      intervalMs / 2 + INTERPOLATION_COMPUTE_LEAD_MS
+      firstSubFrameLead + INTERPOLATION_COMPUTE_LEAD_MS
     )
   )
 }
@@ -385,30 +530,45 @@ export class FrameInterpolator {
   private readonly captureTexture: GPUTexture
   private readonly capturePipeline: GPURenderPipeline
   private readonly captureBindGroup: GPUBindGroup
-  private readonly differencePipeline: GPUComputePipeline
-  private readonly differenceSampler: GPUSampler
-  private readonly differenceStats: GPUBuffer
-  private readonly differenceReadback: GPUBuffer
-  private readonly differenceBindGroups = new Map<string, GPUBindGroup>()
+  private readonly classifyContext: CanvasRenderingContext2D
 
   private lastTexture: GPUTexture | null = null
   private lastDisplayAt = 0
-  private lastArrival = 0
   private lastMediaTime: number | null = null
   private lastExpectedDisplayTime: number | null = null
   private lastPresentedFrames: number | null = null
+  /** 160x90 RGBA of the previous captured frame, for the repeat test. */
+  private lastThumbnailData: Uint8ClampedArray | null = null
   private intervalMs = 1000 / 30
   private sourceIndex = 0
   private midIndex = 0
   private pairTail: Promise<void> = Promise.resolve()
   private generation = 0
   private destroyed = false
-  private overload: InterpolationOverloadState = {
-    lateSamples: 0,
-    bypassUntil: 0,
-  }
+  private overload: InterpolationOverloadState
   private lastSourcePoolWarningAt = 0
   private generatedFrames = 0
+  /** Raw counters behind `getStats()`. */
+  private readonly tally = {
+    produced: 0,
+    duplicate: 0,
+    elided: 0,
+    sceneCut: 0,
+    cadence: 0,
+    late: 0,
+    bypassed: 0,
+    stale: 0,
+    poolSaturated: 0,
+    bypassArms: 0,
+    enqueued: 0,
+    queueWaitTotal: 0,
+    queueWaitSamples: 0,
+    classifyTotal: 0,
+    classifySamples: 0,
+    classifyMax: 0,
+    slackTotal: 0,
+    slackSamples: 0,
+  }
 
   /** Factor selection (explicit multiplier or derived from targetFps). */
   private readonly factorOptions: InterpolationFactorOptions
@@ -441,6 +601,7 @@ export class FrameInterpolator {
       computeMaxInterpolationFactor(this.factorOptions),
       computeResolutionFactorCap(dimensions)
     )
+    this.overload = createInterpolationOverloadState(this.maxFactor)
 
     this.sourceTextures = Array.from({ length: SOURCE_POOL_SIZE }, (_, index) =>
       this.createFrameTexture(
@@ -492,28 +653,18 @@ export class FrameInterpolator {
       ],
     })
 
-    this.differenceSampler = this.device.createSampler({
-      magFilter: 'linear',
-      minFilter: 'linear',
-    })
-    this.differenceStats = this.device.createBuffer({
-      size: 8,
-      usage:
-        GPUBufferUsage.STORAGE |
-        GPUBufferUsage.COPY_DST |
-        GPUBufferUsage.COPY_SRC,
-    })
-    this.differenceReadback = this.device.createBuffer({
-      size: 8,
-      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-    })
-    this.differencePipeline = this.device.createComputePipeline({
-      layout: 'auto',
-      compute: {
-        module: this.device.createShaderModule({ code: differenceShader }),
-        entryPoint: 'main',
-      },
-    })
+    // The repeat test runs on the CPU. Doing it on the GPU meant a mapAsync
+    // readback on the same queue Anime4K saturates, so it measured 8-16 ms
+    // average and up to 88 ms — long enough that the pair's output slot had
+    // always passed by the time the verdict arrived.
+    const canvas = document.createElement('canvas')
+    canvas.width = CLASSIFY_WIDTH
+    canvas.height = CLASSIFY_HEIGHT
+    const context = canvas.getContext('2d', { willReadFrequently: true })
+    if (!context) {
+      throw new Error('Failed to create a 2D context for the repeat test')
+    }
+    this.classifyContext = context
   }
 
   public static async create(
@@ -655,9 +806,29 @@ export class FrameInterpolator {
     return null
   }
 
-  private enqueue(texture: GPUTexture, displayAt: number): void {
+  private enqueue(
+    texture: GPUTexture,
+    displayAt: number,
+    generated: boolean
+  ): QueuedFrame {
+    const frame: QueuedFrame = { texture, displayAt, generated, elide: false }
     this.retain(texture)
-    this.queue.push({ texture, displayAt })
+    this.queue.push(frame)
+    return frame
+  }
+
+  /**
+   * Snapshot the frame currently in the video element as a 160x90 thumbnail.
+   * Issued at capture time so the bitmap belongs to the same frame as the
+   * texture, and awaited by the pair task — `createImageBitmap` resizes off the
+   * main thread, so this never blocks the render loop.
+   */
+  private createThumbnail(): Promise<ImageBitmap | null> {
+    return createImageBitmap(this.video, {
+      resizeWidth: CLASSIFY_WIDTH,
+      resizeHeight: CLASSIFY_HEIGHT,
+      resizeQuality: 'medium',
+    }).catch(() => null)
   }
 
   /**
@@ -676,10 +847,10 @@ export class FrameInterpolator {
     if (this.lastTexture) this.release(this.lastTexture)
     this.lastTexture = null
     this.lastDisplayAt = 0
-    this.lastArrival = 0
     this.lastMediaTime = null
     this.lastExpectedDisplayTime = null
     this.lastPresentedFrames = null
+    this.lastThumbnailData = null
   }
 
   private capture(texture: GPUTexture): void {
@@ -718,9 +889,10 @@ export class FrameInterpolator {
     }
 
     const mediaTime = timing.mediaTime ?? this.video.currentTime
+    const previousMediaTime = this.lastMediaTime
     if (
       isMediaTimelineDiscontinuity({
-        previousMediaTime: this.lastMediaTime,
+        previousMediaTime,
         mediaTime,
         previousExpectedDisplayTime: this.lastExpectedDisplayTime,
         expectedDisplayTime: timing.expectedDisplayTime,
@@ -751,7 +923,9 @@ export class FrameInterpolator {
       // short-circuits) and bypass interpolation briefly, so the pool is free
       // again by the next frame instead of staying pinned.
       this.dropPendingPairWork()
+      this.tally.poolSaturated += 1
       this.overload = {
+        ...this.overload,
         lateSamples: 0,
         bypassUntil: Math.max(
           this.overload.bypassUntil,
@@ -765,19 +939,40 @@ export class FrameInterpolator {
       return false
     }
 
+    // Thumbnail first: both this and the texture copy below snapshot the frame
+    // the video element is showing right now, so they must be issued together.
+    const thumbnail = this.createThumbnail()
     this.capture(currentTexture)
-    const cadenceAt = timing.expectedDisplayTime ?? arrival
-    if (this.lastArrival > 0) {
-      const delta = cadenceAt - this.lastArrival
-      if (delta > 5 && delta < 500) {
-        this.intervalMs = this.intervalMs * 0.85 + delta * 0.15
+
+    // Derive the source cadence from media time rather than from
+    // `expectedDisplayTime`. The compositor's expected display time jitters by
+    // tens of milliseconds under load, and this smoothed interval gates both
+    // `shouldInterpolateInterval` and the display delay — a jittery value made
+    // whole stretches read as "wrong cadence" and go uninterpolated.
+    const playbackRate = Math.abs(this.video.playbackRate) || 1
+    if (previousMediaTime !== null && timing.mediaTime !== undefined) {
+      const deltaMs =
+        ((timing.mediaTime - previousMediaTime) * 1000) / playbackRate
+      if (deltaMs > 5 && deltaMs < 500) {
+        this.intervalMs = this.intervalMs * 0.85 + deltaMs * 0.15
       }
     }
-    this.lastArrival = cadenceAt
 
+    const cadenceAt = timing.expectedDisplayTime ?? arrival
+    // Size the delay for the factor this pair is expected to use — the request
+    // capped by the adaptive ceiling — rather than the configured maximum.
+    // Oversizing it would add display latency the pair never needs.
+    const expectedFactor = Math.min(
+      resolveInterpolationFactor(
+        this.factorOptions,
+        1000 / this.intervalMs,
+        this.maxFactor
+      ),
+      this.overload.factorCeiling
+    )
     const currentDisplayAt =
-      cadenceAt + calculateFrameProcessingDelay(this.intervalMs)
-    this.enqueue(currentTexture, currentDisplayAt)
+      cadenceAt + calculateFrameProcessingDelay(this.intervalMs, expectedFactor)
+    const queued = this.enqueue(currentTexture, currentDisplayAt, false)
 
     const previousTexture = this.lastTexture
     const previousDisplayAt = this.lastDisplayAt
@@ -785,6 +980,7 @@ export class FrameInterpolator {
       this.retain(previousTexture)
       this.retain(currentTexture)
       const generation = this.generation
+      const capturedAt = performance.now()
       this.pairTail = this.pairTail
         .then(() =>
           this.processPair(
@@ -792,7 +988,10 @@ export class FrameInterpolator {
             previousTexture,
             currentTexture,
             previousDisplayAt,
-            currentDisplayAt
+            currentDisplayAt,
+            capturedAt,
+            thumbnail,
+            queued
           )
         )
         .catch((error) => {
@@ -802,6 +1001,24 @@ export class FrameInterpolator {
           this.release(previousTexture)
           this.release(currentTexture)
         })
+    } else {
+      // No pair to classify yet, but this thumbnail is the right reference for
+      // the next pair. Chained onto the same tail so the pair that follows
+      // always classifies against it rather than against "unknown" — otherwise
+      // the first change after every seek would be forced to interpolate even
+      // when it is a held drawing.
+      const generation = this.generation
+      this.pairTail = this.pairTail
+        .then(async () => {
+          const bitmap = await thumbnail
+          try {
+            if (this.destroyed || generation !== this.generation) return
+            this.classifyThumbnail(bitmap)
+          } finally {
+            bitmap?.close()
+          }
+        })
+        .catch(() => undefined)
     }
 
     if (this.lastTexture) this.release(this.lastTexture)
@@ -816,156 +1033,214 @@ export class FrameInterpolator {
     previousTexture: GPUTexture,
     currentTexture: GPUTexture,
     previousDisplayAt: number,
-    currentDisplayAt: number
+    currentDisplayAt: number,
+    capturedAt: number,
+    thumbnail: Promise<ImageBitmap | null>,
+    queued: QueuedFrame
   ): Promise<void> {
-    if (
-      this.destroyed ||
-      generation !== this.generation ||
-      performance.now() < this.overload.bypassUntil
-    ) {
-      return
-    }
+    const startedAt = performance.now()
+    this.tally.queueWaitTotal += startedAt - capturedAt
+    this.tally.queueWaitSamples += 1
+    const bitmap = await thumbnail
+    try {
+      if (this.destroyed || generation !== this.generation) {
+        this.tally.stale += 1
+        return
+      }
 
-    const displayAt = (previousDisplayAt + currentDisplayAt) / 2
-    // Drop stale work before the GPU readback. Otherwise a brief classification
-    // slowdown creates an unbounded pair backlog where every result arrives too
-    // late, so interpolation can never catch up to live playback.
-    if (displayAt <= performance.now() + 4) {
-      this.recordPairOutcome('late')
-      return
-    }
+      // Classify first: the verdict decides two independent things. Whether to
+      // interpolate this pair is time-sensitive; whether the *source* frame is
+      // worth an Anime4K pass at all is not. A held drawing must be elided even
+      // while interpolation is bypassed — elision removes GPU work, which is
+      // exactly what a bypass is waiting for, so skipping it there would
+      // re-add the redundant passes at the worst moment.
+      const classifyStartedAt = performance.now()
+      const classification = this.classifyThumbnail(bitmap)
+      const classifyMs = performance.now() - classifyStartedAt
+      this.tally.classifyTotal += classifyMs
+      this.tally.classifySamples += 1
+      this.tally.classifyMax = Math.max(this.tally.classifyMax, classifyMs)
 
-    const classification = await this.classifyPair(
-      previousTexture,
-      currentTexture
+      if (classification.duplicate) {
+        this.tally.duplicate += 1
+        // The drawing is held: the canvas already shows this exact picture, so
+        // the Anime4K chain can skip the frame entirely. Held drawings are
+        // 50-70% of an anime source, which is most of the chain's work — and
+        // freeing that is what lets the interpolated sub-frames fit.
+        queued.elide = true
+        this.tally.elided += 1
+        return
+      }
+      if (classification.sceneCut) {
+        this.tally.sceneCut += 1
+        return
+      }
+      if (performance.now() < this.overload.bypassUntil) {
+        this.tally.bypassed += 1
+        return
+      }
+      if (!shouldInterpolateInterval(this.intervalMs)) {
+        this.tally.cadence += 1
+        return
+      }
+
+      // Drop stale work before doing any GPU work. Otherwise a brief slowdown
+      // creates an unbounded pair backlog where every result arrives too late,
+      // so interpolation can never catch up to live playback. Timed here, after
+      // the thumbnail await, because that is the point of no return.
+      if ((previousDisplayAt + currentDisplayAt) / 2 <= performance.now() + 4) {
+        this.tally.late += 1
+        this.recordPairOutcome('late')
+        return
+      }
+
+      // Choose how many frames to synthesize for this pair. Explicit multiplier
+      // is constant; a target-fps request adapts to the live source cadence.
+      // The adaptive ceiling can lower it below the request under load.
+      const sourceFps = this.intervalMs > 0 ? 1000 / this.intervalMs : 0
+      const factor = Math.min(
+        resolveInterpolationFactor(
+          this.factorOptions,
+          sourceFps,
+          this.maxFactor
+        ),
+        this.overload.factorCeiling
+      )
+
+      // Acquire a mid texture and compute the display time for each sub-frame at
+      // t = k/factor. Skip sub-frames that are already stale.
+      const now = performance.now()
+      this.tally.slackTotal +=
+        previousDisplayAt +
+        (currentDisplayAt - previousDisplayAt) / factor -
+        now
+      this.tally.slackSamples += 1
+      const generated: { texture: GPUTexture; t: number; displayAt: number }[] =
+        []
+      for (let k = 1; k < factor; k++) {
+        const t = k / factor
+        const subDisplayAt =
+          previousDisplayAt + (currentDisplayAt - previousDisplayAt) * t
+        if (subDisplayAt <= now + 4) continue
+        const texture = this.acquireTexture(this.midTextures, 'midIndex')
+        if (!texture) break // pool exhausted — present what we have
+        generated.push({ texture, t, displayAt: subDisplayAt })
+      }
+      if (generated.length === 0) {
+        // Every sub-frame missed its slot, or the mid pool was empty: this pair
+        // cost GPU time and produced nothing displayable.
+        this.tally.late += 1
+        this.recordPairOutcome('late')
+        return
+      }
+      this.tally.produced += 1
+      this.tally.enqueued += generated.length
+      this.recordPairOutcome('timely')
+
+      this.runtime.prepPair(previousTexture, currentTexture)
+      for (const frame of generated) {
+        this.runtime.runT(frame.t, frame.texture)
+        this.enqueue(frame.texture, frame.displayAt, true)
+      }
+
+      void this.device.queue
+        .onSubmittedWorkDone()
+        .then(() => {
+          if (this.destroyed) return
+          this.generatedFrames += generated.length
+          this.onFrameGenerated?.(this.generatedFrames)
+        })
+        .catch(() => undefined)
+    } finally {
+      bitmap?.close()
+    }
+  }
+
+  /**
+   * Compare the new thumbnail against the last *presented* drawing and decide
+   * whether this frame is worth an Anime4K pass. The reference is deliberately
+   * not the previous frame but the previous frame we actually showed: elided
+   * frames are, by definition, within the repeat threshold of their
+   * predecessor, so comparing frame-to-frame would let a slow fade or a
+   * creeping pan walk out of the threshold in small steps that each look like a
+   * repeat while the picture on screen drifts.
+   *
+   * The first pair after a seek has nothing to compare against and is reported
+   * as a change, which is the safe default: a false "changed" only costs GPU
+   * work, while a false "held" would freeze a frame.
+   */
+  private classifyThumbnail(
+    bitmap: ImageBitmap | null
+  ): FrameDifferenceClassification {
+    if (!bitmap) {
+      return { duplicate: false, sceneCut: false, mean: 0, maximum: 0 }
+    }
+    this.classifyContext.drawImage(
+      bitmap,
+      0,
+      0,
+      CLASSIFY_WIDTH,
+      CLASSIFY_HEIGHT
     )
-    if (
-      this.destroyed ||
-      generation !== this.generation ||
-      classification.duplicate ||
-      classification.sceneCut ||
-      !shouldInterpolateInterval(this.intervalMs)
-    ) {
-      return
-    }
-
-    // Choose how many frames to synthesize for this pair. Explicit multiplier is
-    // constant; a target-fps request adapts to the live source cadence.
-    const sourceFps = this.intervalMs > 0 ? 1000 / this.intervalMs : 0
-    const factor = resolveInterpolationFactor(
-      this.factorOptions,
-      sourceFps,
-      this.maxFactor
-    )
-
-    // Acquire a mid texture and compute the display time for each sub-frame at
-    // t = k/factor. Skip sub-frames that are already stale.
-    const now = performance.now()
-    const generated: { texture: GPUTexture; t: number; displayAt: number }[] =
-      []
-    for (let k = 1; k < factor; k++) {
-      const t = k / factor
-      const subDisplayAt =
-        previousDisplayAt + (currentDisplayAt - previousDisplayAt) * t
-      if (subDisplayAt <= now + 4) continue
-      const texture = this.acquireTexture(this.midTextures, 'midIndex')
-      if (!texture) break // pool exhausted — present what we have
-      generated.push({ texture, t, displayAt: subDisplayAt })
-    }
-    if (generated.length === 0) {
-      // Every sub-frame missed its slot, or the mid pool was empty: this pair
-      // cost GPU time and produced nothing displayable.
-      this.recordPairOutcome('late')
-      return
-    }
-    this.recordPairOutcome('timely')
-
-    this.runtime.prepPair(previousTexture, currentTexture)
-    for (const frame of generated) {
-      this.runtime.runT(frame.t, frame.texture)
-      this.enqueue(frame.texture, frame.displayAt)
-    }
-
-    void this.device.queue
-      .onSubmittedWorkDone()
-      .then(() => {
-        if (this.destroyed) return
-        this.generatedFrames += generated.length
-        this.onFrameGenerated?.(this.generatedFrames)
-      })
-      .catch(() => undefined)
+    const current = this.classifyContext.getImageData(
+      0,
+      0,
+      CLASSIFY_WIDTH,
+      CLASSIFY_HEIGHT
+    ).data
+    const reference = this.lastThumbnailData
+    const classification = reference
+      ? classifyThumbnailDifference(reference, current)
+      : { duplicate: false, sceneCut: false, mean: 0, maximum: 0 }
+    if (!classification.duplicate) this.lastThumbnailData = current
+    return classification
   }
 
   /**
    * Fold one pair outcome into the overload guard and surface the transition.
    * Timing the queue drain instead would attribute the Anime4K passes that
-   * share this GPU queue to interpolation and bypass it on every loaded GPU.
+   * share this GPU queue to interpolation and degrade it on every loaded GPU.
    */
   private recordPairOutcome(outcome: InterpolationPairOutcome): void {
     const previous = this.overload
     this.overload = updateInterpolationOverload(
       previous,
       outcome,
-      performance.now()
+      performance.now(),
+      { maxFactor: this.maxFactor }
     )
     if (this.overload.bypassUntil > previous.bypassUntil) {
+      this.tally.bypassArms += 1
       this.onWarning?.(
         'Frame interpolation is temporarily bypassed because the GPU is saturated'
       )
     }
   }
 
-  private async classifyPair(
-    previousTexture: GPUTexture,
-    currentTexture: GPUTexture
-  ): Promise<FrameDifferenceClassification> {
-    const key = `${previousTexture.label}|${currentTexture.label}`
-    let bindGroup = this.differenceBindGroups.get(key)
-    if (!bindGroup) {
-      bindGroup = this.device.createBindGroup({
-        layout: this.differencePipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: previousTexture.createView() },
-          { binding: 1, resource: currentTexture.createView() },
-          { binding: 2, resource: this.differenceSampler },
-          { binding: 3, resource: { buffer: this.differenceStats } },
-        ],
-      })
-      this.differenceBindGroups.set(key, bindGroup)
+  /** Cumulative pair accounting (see FrameInterpolationStats). */
+  public getStats(): FrameInterpolationStats {
+    const t = this.tally
+    const mean = (total: number, samples: number) =>
+      samples > 0 ? total / samples : 0
+    return {
+      produced: t.produced,
+      generatedFrames: t.enqueued,
+      duplicate: t.duplicate,
+      elided: t.elided,
+      sceneCut: t.sceneCut,
+      cadence: t.cadence,
+      late: t.late,
+      bypassed: t.bypassed,
+      stale: t.stale,
+      poolSaturated: t.poolSaturated,
+      bypassArms: t.bypassArms,
+      maxFactor: this.maxFactor,
+      factorCeiling: this.overload.factorCeiling,
+      averageQueueWaitMs: mean(t.queueWaitTotal, t.queueWaitSamples),
+      averageClassifyMs: mean(t.classifyTotal, t.classifySamples),
+      maximumClassifyMs: t.classifyMax,
+      averageSlackMs: mean(t.slackTotal, t.slackSamples),
     }
-
-    this.device.queue.writeBuffer(this.differenceStats, 0, DEDUP_ZERO)
-    const encoder = this.device.createCommandEncoder()
-    const pass = encoder.beginComputePass()
-    pass.setPipeline(this.differencePipeline)
-    pass.setBindGroup(0, bindGroup)
-    pass.dispatchWorkgroups(6, 4)
-    pass.end()
-    encoder.copyBufferToBuffer(
-      this.differenceStats,
-      0,
-      this.differenceReadback,
-      0,
-      8
-    )
-    this.device.queue.submit([encoder.finish()])
-    await this.differenceReadback.mapAsync(GPUMapMode.READ)
-    // The readback buffer is shared by every pair, so it must be unmapped even
-    // if reading the range throws — otherwise every later mapAsync() rejects
-    // with "already mapped" and interpolation silently stops for good.
-    let values: Uint32Array
-    try {
-      values = new Uint32Array(
-        this.differenceReadback.getMappedRange().slice(0)
-      )
-    } finally {
-      try {
-        this.differenceReadback.unmap()
-      } catch {
-        // The buffer may already be destroyed by a concurrent teardown.
-      }
-    }
-    return classifyDifferenceStats(values[0], values[1])
   }
 
   public takeDueFrame(now = performance.now()): InterpolationFrame | null {
@@ -979,14 +1254,25 @@ export class FrameInterpolator {
     if (dueIndex < 0) return null
 
     const dueFrames = this.queue.splice(0, dueIndex + 1)
-    const selected = dueFrames.at(-1)
-    if (!selected) return null
-    for (let index = 0; index < dueFrames.length - 1; index++) {
-      this.release(dueFrames[index].texture)
+    // A repeat frame is a picture the canvas already shows (see QueuedFrame.elide),
+    // so the newest *non-elided* due frame is the only one worth an Anime4K pass.
+    // Skipping them is what keeps a high Anime4K tier affordable: the held
+    // drawings cost nothing instead of costing a full chain each.
+    let selected: QueuedFrame | null = null
+    for (const frame of dueFrames) {
+      if (frame.elide) {
+        this.release(frame.texture)
+        continue
+      }
+      if (selected) this.release(selected.texture)
+      selected = frame
     }
+    if (!selected) return null
+
     let released = false
     return {
       texture: selected.texture,
+      generated: selected.generated,
       release: () => {
         if (released) return
         released = true
@@ -1008,7 +1294,5 @@ export class FrameInterpolator {
     for (const texture of this.sourceTextures) texture.destroy()
     for (const texture of this.midTextures) texture.destroy()
     this.captureTexture.destroy()
-    this.differenceStats.destroy()
-    this.differenceReadback.destroy()
   }
 }

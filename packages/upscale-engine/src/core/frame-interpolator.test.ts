@@ -2,15 +2,40 @@ import { describe, expect, it } from 'vitest'
 import {
   calculateFrameProcessingDelay,
   calculateInterpolationDimensions,
-  classifyDifferenceStats,
+  classifyThumbnailDifference,
   computeMaxInterpolationFactor,
   computeResolutionFactorCap,
+  createInterpolationOverloadState,
   type InterpolationOverloadState,
   isMediaTimelineDiscontinuity,
   resolveInterpolationFactor,
   shouldInterpolateInterval,
   updateInterpolationOverload,
 } from './frame-interpolator'
+
+/** Build a 160x90 RGBA thumbnail filled with one grey level. */
+const flatThumbnail = (value: number) => {
+  const data = new Uint8ClampedArray(160 * 90 * 4)
+  data.fill(value)
+  return data
+}
+
+/** Same, but with `changed` pixels set to a different level. */
+const thumbnailWithChange = (
+  base: number,
+  changed: number,
+  count: number,
+  step = 3
+) => {
+  const data = flatThumbnail(base)
+  for (let i = 0; i < count; i++) {
+    const offset = (i * step * 4) % data.length
+    data[offset] = changed
+    data[offset + 1] = changed
+    data[offset + 2] = changed
+  }
+  return data
+}
 
 describe('frame interpolation helpers', () => {
   it('fits common sources to the selected 16-pixel-aligned model size', () => {
@@ -60,26 +85,30 @@ describe('frame interpolation helpers', () => {
     expect(computeResolutionFactorCap({ width: 7680, height: 4320 })).toBe(2)
   })
 
-  it('detects repeated frames and scene cuts using Framegen thresholds', () => {
-    expect(classifyDifferenceStats(1000, 20, 1296)).toMatchObject({
-      duplicate: true,
-      sceneCut: false,
-    })
-    expect(classifyDifferenceStats(1296 * 100, 300, 1296)).toMatchObject({
-      duplicate: false,
-      sceneCut: true,
-    })
-  })
-
   it('targets 24-30 fps sources and bypasses already-high frame rates', () => {
     expect(shouldInterpolateInterval(1000 / 24)).toBe(true)
     expect(shouldInterpolateInterval(1000 / 30)).toBe(true)
     expect(shouldInterpolateInterval(1000 / 60)).toBe(false)
   })
 
-  it('keeps the processing lead near one source-frame of visible latency', () => {
-    expect(calculateFrameProcessingDelay(1000 / 30)).toBeCloseTo(24.67, 1)
-    expect(calculateFrameProcessingDelay(1000 / 24)).toBeCloseTo(28.83, 1)
+  it('leaves room for the first sub-frame of every factor', () => {
+    // The first sub-frame sits (1 - 1/factor) of a source interval before the
+    // current frame's slot, so a factor-3 request needs two thirds of an
+    // interval of budget. The old flat interval/2 left 3x and 4x permanently
+    // late — measured slack at 3x was -0.7 ms.
+    expect(calculateFrameProcessingDelay(1000 / 30, 2)).toBeCloseTo(28.67, 1)
+    expect(calculateFrameProcessingDelay(1000 / 24, 2)).toBeCloseTo(32.83, 1)
+    expect(calculateFrameProcessingDelay(1000 / 24, 3)).toBeCloseTo(39.78, 1)
+    expect(calculateFrameProcessingDelay(1000 / 24, 4)).toBeCloseTo(43.25, 1)
+    // ...and stays within the display-latency budget at every factor
+    for (const factor of [2, 3, 4, 6, 8]) {
+      const delay = calculateFrameProcessingDelay(1000 / 24, factor)
+      expect(delay).toBeGreaterThanOrEqual(20)
+      expect(delay).toBeLessThanOrEqual(50)
+      expect(delay).toBeGreaterThanOrEqual(
+        calculateFrameProcessingDelay(1000 / 24, Math.max(2, factor - 1))
+      )
+    }
   })
 
   it('detects seeks without treating ordinary dropped frames as a seek', () => {
@@ -135,6 +164,66 @@ describe('frame interpolation helpers', () => {
   })
 })
 
+describe('repeat and scene-cut classification', () => {
+  it('calls an unchanged drawing a repeat', () => {
+    const previous = flatThumbnail(120)
+    expect(classifyThumbnailDifference(previous, flatThumbnail(120))).toEqual({
+      duplicate: true,
+      sceneCut: false,
+      mean: 0,
+      maximum: 0,
+    })
+  })
+
+  it('tolerates codec noise and film grain on a held drawing', () => {
+    // Measured on 1080p anime in the real WebView2: a held pair never exceeded
+    // 7 (summed over RGB), while any real drawing change started at 189.
+    expect(
+      classifyThumbnailDifference(flatThumbnail(120), flatThumbnail(122))
+        .duplicate
+    ).toBe(true)
+    // A few hundred pixels drifting by +-2 per channel is still the same
+    // drawing; the same pixels moving by 40 are not.
+    const grain = thumbnailWithChange(120, 122, 400)
+    expect(
+      classifyThumbnailDifference(flatThumbnail(120), grain).duplicate
+    ).toBe(true)
+  })
+
+  it('does not call a real drawing change a repeat', () => {
+    const previous = flatThumbnail(120)
+    // A mouth opening: a handful of pixels moving a long way.
+    const changed = thumbnailWithChange(120, 160, 60)
+    const result = classifyThumbnailDifference(previous, changed)
+    expect(result.duplicate).toBe(false)
+    expect(result.maximum).toBe(120)
+    expect(result.sceneCut).toBe(false)
+  })
+
+  it('flags a cut between shots, where the whole frame changes at once', () => {
+    const previous = flatThumbnail(10)
+    const next = flatThumbnail(200)
+    const result = classifyThumbnailDifference(previous, next)
+    expect(result.duplicate).toBe(false)
+    expect(result.sceneCut).toBe(true)
+    expect(result.mean).toBeCloseTo(190, 0)
+  })
+
+  it('treats a missing thumbnail or a length mismatch as a change', () => {
+    // A false "changed" only costs GPU work; a false "held" would freeze a
+    // frame, so every unknown must fall on the changed side.
+    const previous = flatThumbnail(120)
+    const mismatched = new Uint8ClampedArray(16)
+    expect(classifyThumbnailDifference(previous, mismatched)).toMatchObject({
+      duplicate: false,
+      sceneCut: false,
+    })
+    expect(classifyThumbnailDifference(previous, previous)).toMatchObject({
+      duplicate: true,
+    })
+  })
+})
+
 describe('interpolation factor selection', () => {
   it('defaults to 2x when neither multiplier nor targetFps is set', () => {
     expect(resolveInterpolationFactor({}, 24)).toBe(2)
@@ -172,74 +261,90 @@ describe('interpolation factor selection', () => {
 })
 
 describe('interpolation overload guard', () => {
-  const idle: InterpolationOverloadState = { lateSamples: 0, bypassUntil: 0 }
-  const runLate = (
+  const run = (
     state: InterpolationOverloadState,
+    outcome: 'late' | 'timely',
     times: number,
-    startAt = 0
+    startAt = 0,
+    maxFactor = 4
   ) => {
     let next = state
     for (let i = 0; i < times; i++) {
-      next = updateInterpolationOverload(next, 'late', startAt + i * 10)
+      next = updateInterpolationOverload(next, outcome, startAt + i * 10, {
+        maxFactor,
+      })
     }
     return next
   }
 
-  it('bypasses interpolation only after three consecutive late pairs', () => {
-    let state = updateInterpolationOverload(idle, 'late', 1_000)
-    expect(state).toEqual({ lateSamples: 1, bypassUntil: 0 })
-    state = updateInterpolationOverload(state, 'late', 1_010)
-    expect(state).toEqual({ lateSamples: 2, bypassUntil: 0 })
-    state = updateInterpolationOverload(state, 'late', 1_020)
-    expect(state).toEqual({ lateSamples: 0, bypassUntil: 3_020 })
+  it('starts at the configured factor ceiling', () => {
+    expect(createInterpolationOverloadState(4)).toEqual({
+      lateSamples: 0,
+      timelySamples: 0,
+      factorCeiling: 4,
+      bypassUntil: 0,
+    })
+    expect(createInterpolationOverloadState(1).factorCeiling).toBe(2)
   })
 
-  it('lets a timely pair decay the accumulated evidence', () => {
-    let state = runLate(idle, 2)
-    state = updateInterpolationOverload(state, 'timely', 30)
-    expect(state.lateSamples).toBe(1)
-    // one more late pair is not enough — the decay really counted
-    state = updateInterpolationOverload(state, 'late', 40)
+  it('degrades one factor step at a time instead of switching off', () => {
+    // The old guard armed a 2-second full bypass after three late pairs, which
+    // on a loaded-but-idle GPU burned 86 of 204 pairs interpolating nothing.
+    let state = createInterpolationOverloadState(4)
+    state = run(state, 'late', 2)
+    expect(state.factorCeiling).toBe(4)
+    state = run(state, 'late', 1, 20)
+    expect(state.factorCeiling).toBe(3)
     expect(state.bypassUntil).toBe(0)
-    state = updateInterpolationOverload(state, 'late', 50)
-    expect(state.bypassUntil).toBe(2_050)
+    state = run(state, 'late', 3, 40)
+    expect(state.factorCeiling).toBe(2)
+    expect(state.bypassUntil).toBe(0)
+  })
+
+  it('bypasses only when even 2x cannot keep up', () => {
+    let state = run(createInterpolationOverloadState(4), 'late', 6)
+    expect(state.factorCeiling).toBe(2)
+    state = run(state, 'late', 3, 100)
+    expect(state.bypassUntil).toBe(100 + 20 + 600)
+  })
+
+  it('gives the factor back after a sustained healthy stretch', () => {
+    let state = run(createInterpolationOverloadState(4), 'late', 3)
+    expect(state.factorCeiling).toBe(3)
+    // A single timely pair must not immediately restore the request — that is
+    // the oscillation the ceiling exists to prevent.
+    state = updateInterpolationOverload(state, 'timely', 100, { maxFactor: 4 })
+    expect(state.factorCeiling).toBe(3)
+    state = run(state, 'timely', 58, 200)
+    expect(state.factorCeiling).toBe(3)
+    state = updateInterpolationOverload(state, 'timely', 900, { maxFactor: 4 })
+    expect(state.factorCeiling).toBe(4)
+    expect(state.timelySamples).toBe(0)
+  })
+
+  it('never climbs past the configured ceiling or below 2x', () => {
+    let state = createInterpolationOverloadState(2)
+    state = run(state, 'timely', 500, 0, 2)
+    expect(state.factorCeiling).toBe(2)
+    state = run(state, 'late', 500, 0, 2)
+    expect(state.factorCeiling).toBe(2)
+    // every 3rd late pair re-arms the bypass, so the ceiling never moves below 2
+    expect(state.bypassUntil).toBeGreaterThan(0)
   })
 
   it('never drops the late counter below zero', () => {
-    let state = idle
+    let state = createInterpolationOverloadState(2)
     for (let i = 0; i < 5; i++) {
-      state = updateInterpolationOverload(state, 'timely', i)
+      state = updateInterpolationOverload(state, 'timely', i, { maxFactor: 2 })
     }
     expect(state.lateSamples).toBe(0)
   })
 
-  it('does not latch: one hitch cannot keep interpolation bypassed', () => {
-    // Regression for the decaying cost average, which was still above the
-    // threshold when the bypass expired and so re-armed after ~3 pairs,
-    // leaving interpolation effectively off for the rest of the session.
-    let state = runLate(idle, 3)
-    const firstBypass = state.bypassUntil
-    expect(firstBypass).toBe(2_020)
-    // arming must clear the evidence, not carry it into the next window
-    expect(state.lateSamples).toBe(0)
-
-    // after the window, a single late pair must not re-arm the bypass
-    state = updateInterpolationOverload(state, 'late', 3_000)
-    expect(state.bypassUntil).toBe(firstBypass)
-
-    // and a healthy stream keeps it off for good
-    for (let i = 0; i < 10; i++) {
-      state = updateInterpolationOverload(state, 'timely', 3_100 + i)
-    }
-    expect(state).toEqual({ lateSamples: 0, bypassUntil: firstBypass })
-  })
-
-  it('honours a custom threshold and bypass window', () => {
-    expect(
-      updateInterpolationOverload(idle, 'late', 500, {
-        threshold: 1,
-        bypassMs: 50,
-      })
-    ).toEqual({ lateSamples: 0, bypassUntil: 550 })
+  it('lets one timely pair decay the accumulated late evidence', () => {
+    let state = run(createInterpolationOverloadState(4), 'late', 2)
+    expect(state.lateSamples).toBe(2)
+    state = updateInterpolationOverload(state, 'timely', 30, { maxFactor: 4 })
+    expect(state.lateSamples).toBe(1)
+    expect(state.factorCeiling).toBe(4)
   })
 })

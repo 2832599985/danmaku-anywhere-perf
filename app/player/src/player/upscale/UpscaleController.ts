@@ -137,10 +137,20 @@ export class UpscaleController {
    * installed and takes the in-place update path instead of a second create.
    */
   private serial: Promise<void> = Promise.resolve()
-  /** cumulative generated-frame count at the last diagnostics report. */
-  private lastGeneratedCount = 0
   /** current A/B split ratio, null = compare off. */
   private compareRatio: number | null = null
+
+  /**
+   * Engine internals for diagnostics (e2e probes, the dev console):
+   * cumulative interpolation accounting plus the renderer's identity. Never
+   * used for control flow.
+   */
+  getEngineDebug(): {
+    interpolation: ReturnType<Renderer['getInterpolationStats']>
+  } | null {
+    if (!this.renderer) return null
+    return { interpolation: this.renderer.getInterpolationStats() }
+  }
 
   constructor(
     video: HTMLVideoElement,
@@ -207,28 +217,14 @@ export class UpscaleController {
 
   /** Translate the engine's diagnostics summary into HUD numbers. */
   private reportStats(summary: {
-    frames: number
     presentedFrames: number
+    presentedGeneratedFrames: number
     averageCpuFrameMs: number
   }): void {
-    const seconds = DIAGNOSTICS_INTERVAL_MS / 1000
-    const generatedAttr =
-      this.canvas?.dataset.danmakuAnywhereFrameInterpolationGenerated
-    const generatedTotal = generatedAttr ? Number(generatedAttr) || 0 : 0
-    // The engine's generated counter is per-interpolator and restarts at 0
-    // whenever the renderer is rebuilt (a settings change, a resolution
-    // switch), so a negative delta means "reset", not "no frames produced".
-    const generatedDelta = Math.max(0, generatedTotal - this.lastGeneratedCount)
-    this.lastGeneratedCount = generatedTotal
-    // `frames` counts source-video rVFC callbacks (the file's own rate);
-    // `presentedFrames` is the canvas swap cadence. The visible rate and its
-    // breakdown live in `computeOutputRate` — see the note there for why the
-    // swap cadence must never be reported as the frame rate.
     const rate = computeOutputRate({
-      sourceFrames: summary.frames,
-      generatedFrames: generatedDelta,
       presentedFrames: summary.presentedFrames,
-      seconds,
+      presentedGeneratedFrames: summary.presentedGeneratedFrames,
+      seconds: DIAGNOSTICS_INTERVAL_MS / 1000,
     })
     this.callbacks.onStats?.({
       ...rate,
@@ -375,7 +371,6 @@ export class UpscaleController {
       this.canvas = null
     }
     this.video.style.opacity = this.originalVideoOpacity
-    this.lastGeneratedCount = 0
     this.callbacks.onStats?.(null)
   }
 

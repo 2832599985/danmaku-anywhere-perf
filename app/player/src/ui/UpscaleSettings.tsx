@@ -633,14 +633,16 @@ export const UpscaleSettings = () => {
                     fontFamily: MONO,
                     fontSize: 10,
                     fontWeight: 700,
-                    color: upscaleStats.generatedFps > 0 ? GREEN : VERMILION,
+                    // Not a warning when 0: paused, a static passage, or the
+                    // first second after enabling all legitimately produce no
+                    // interpolated frames. A reading that stays 0 while the
+                    // picture is moving is the real signal.
+                    color: GREEN,
                     textTransform: 'uppercase',
                     letterSpacing: '0.06em',
                   }}
                 >
-                  {upscaleStats.generatedFps > 0
-                    ? `GENERATING ${upscaleStats.generatedFps.toFixed(1)} F/S`
-                    : '补帧未产出'}
+                  {`GENERATING ${upscaleStats.generatedFps.toFixed(1)} F/S`}
                 </Typography>
               )}
             </Stack>

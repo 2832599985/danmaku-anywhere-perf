@@ -942,6 +942,8 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     ;(window as unknown as Record<string, unknown>).__player = {
       store: usePlayerStore,
       commands,
+      // Engine internals for probes: interpolation outcome counters.
+      engine: () => upscaleCtrlRef.current?.getEngineDebug() ?? null,
     }
   }, [commands])
 

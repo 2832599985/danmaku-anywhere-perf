@@ -5,7 +5,10 @@ import type {
   FrameInterpolationOptions,
 } from '../types'
 import { waitForVideoReady } from '../utils/video-ready'
-import { FrameInterpolator } from './frame-interpolator'
+import {
+  type FrameInterpolationStats,
+  FrameInterpolator,
+} from './frame-interpolator'
 
 type DestroyablePipeline = Anime4KPipeline & { destroy?: () => void }
 
@@ -129,10 +132,12 @@ export interface RendererDiagnosticsSummary {
   inputTextureFormat: 'rgba16float' | 'rgba8unorm'
   presentationMode: RendererPresentationMode
   frames: number
-  /** Frames actually presented to the canvas (rAF-driven; reflects true output
-   *  rate including interpolated sub-frames, unlike `frames` which counts
-   *  source-video rVFC callbacks). */
+  /** Distinct frames actually swapped onto the canvas. Unlike `frames` (source
+   *  video rVFC callbacks) this includes interpolated sub-frames, and unlike the
+   *  old always-re-present behavior it no longer counts idle rAF turns. */
   presentedFrames: number
+  /** Of `presentedFrames`, how many were synthesized by the interpolation model. */
+  presentedGeneratedFrames: number
   presentedFrameGaps: number
   rendererBusyDrops: number
   lateCallbacks: number
@@ -189,10 +194,13 @@ export class Renderer {
   private hasPresentedFirstFrame = false
   private processedFrameGeneration = 0
   private presentedFrameGeneration = -1
+  /** Whether the frame counted by `processedFrameGeneration` was synthesized. */
+  private lastPresentedGenerated = false
   private frameInFlight = false
   private diagnosticsWindowStartedAt = performance.now()
   private diagnosticsFrames = 0
   private diagnosticsPresentedFrames = 0
+  private diagnosticsPresentedGeneratedFrames = 0
   private diagnosticsPresentedFrameGaps = 0
   private diagnosticsBusyDrops = 0
   private diagnosticsLateCallbacks = 0
@@ -445,6 +453,15 @@ export class Renderer {
   /** 返回设备支持的最大 2D 纹理边长（供上层钳制目标分辨率） */
   public getMaxTextureDimension(): number {
     return this.maxTextureDimension
+  }
+
+  /**
+   * Cumulative interpolation accounting of the live interpolator, or null when
+   * interpolation is off / unavailable. The counters restart whenever the
+   * interpolator is rebuilt (a settings change, a source resize).
+   */
+  public getInterpolationStats(): FrameInterpolationStats | null {
+    return this.frameInterpolator?.getStats() ?? null
   }
 
   /** 监听当前设备的丢失事件，非主动销毁时触发自动恢复 */
@@ -1217,6 +1234,8 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       const submitStartedAt = this.diagnosticsEnabled ? performance.now() : 0
       this.device.queue.submit([commandEncoder.finish()])
       this.hasProcessedFrame = true
+      // No interpolator on this path, so every processed frame is a source one.
+      this.lastPresentedGenerated = false
       this.processedFrameGeneration++
       if (this.diagnosticsEnabled) {
         const submitMs = performance.now() - submitStartedAt
@@ -1347,6 +1366,7 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       presentationMode: this.presentationMode,
       frames,
       presentedFrames: this.diagnosticsPresentedFrames,
+      presentedGeneratedFrames: this.diagnosticsPresentedGeneratedFrames,
       presentedFrameGaps: this.diagnosticsPresentedFrameGaps,
       rendererBusyDrops: this.diagnosticsBusyDrops,
       lateCallbacks: this.diagnosticsLateCallbacks,
@@ -1370,6 +1390,7 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
     this.diagnosticsWindowStartedAt = performance.now()
     this.diagnosticsFrames = 0
     this.diagnosticsPresentedFrames = 0
+    this.diagnosticsPresentedGeneratedFrames = 0
     this.diagnosticsPresentedFrameGaps = 0
     this.diagnosticsBusyDrops = 0
     this.diagnosticsLateCallbacks = 0
@@ -1396,8 +1417,12 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   /**
    * Draw the most recently processed texture to the canvas. GPU queue ordering
    * guarantees that an earlier copy/compute submission completes before this
-   * pass. Re-presenting the latest completed texture on every display cadence
-   * keeps canvas swapchain pacing independent from irregular video callbacks.
+   * pass. A WebGPU canvas keeps showing the last submitted frame until a new
+   * one is submitted, so this only runs when a *new* frame was processed:
+   * re-submitting the same texture every display turn (170 Hz on a 170 Hz
+   * monitor) burned GPU time that the interpolation and Anime4K passes needed,
+   * and it also made the canvas swap cadence — not the frame rate — the thing
+   * the HUD measured.
    */
   private presentLatestProcessedFrame(): boolean {
     if (
@@ -1405,8 +1430,7 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       this.isRecovering ||
       this.resourceRebuildPromise ||
       !this.hasProcessedFrame ||
-      (this.video.paused &&
-        this.presentedFrameGeneration === this.processedFrameGeneration)
+      this.presentedFrameGeneration === this.processedFrameGeneration
     ) {
       return false
     }
@@ -1443,6 +1467,7 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       this.pipelines.forEach((pipeline) => pipeline.pass(commandEncoder))
       this.device.queue.submit([commandEncoder.finish()])
       this.hasProcessedFrame = true
+      this.lastPresentedGenerated = frame.generated
       this.processedFrameGeneration++
       return true
     } catch (error) {
@@ -1469,10 +1494,17 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
 
     if (this.presentLatestProcessedFrame()) {
       this.notifyFirstFrameRendered()
-      // Count the frame we just swapped onto the canvas. This is the true
-      // output rate (rAF-paced, includes interpolated sub-frames); the rVFC
-      // `diagnosticsFrames` counter only tracks source-video callbacks.
-      if (this.diagnosticsEnabled) this.diagnosticsPresentedFrames++
+      // Count the frame we just swapped onto the canvas, split by origin. This
+      // is the true output rate: distinct pictures, rAF-paced, including
+      // interpolated sub-frames. The rVFC `diagnosticsFrames` counter only
+      // tracks source-video callbacks — including the repeats that were never
+      // presented, so it must not be reported as the source rate either.
+      if (this.diagnosticsEnabled) {
+        this.diagnosticsPresentedFrames++
+        if (this.lastPresentedGenerated) {
+          this.diagnosticsPresentedGeneratedFrames++
+        }
+      }
     }
     // Build the next interpolated/real output after presenting the previous
     // one. This keeps Anime4K compute and the canvas swapchain on separate rAF
