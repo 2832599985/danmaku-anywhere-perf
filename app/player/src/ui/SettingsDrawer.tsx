@@ -11,17 +11,15 @@ import {
   VERMILION,
 } from '@/theme/theme'
 import { DanmakuSettings } from './DanmakuSettings'
-import { FilenameRulesSettings } from './FilenameRulesSettings'
 import { SubtitleSettings } from './SubtitleSettings'
 import { UpscaleSettings } from './UpscaleSettings'
 
 type SettingsPage =
-  | 'shortcuts'
   | 'playback'
   | 'danmaku'
-  | 'patterns'
-  | 'upscale'
   | 'subtitle'
+  | 'upscale'
+  | 'shortcuts'
   | 'about'
 
 const SHORTCUTS: Array<{
@@ -244,6 +242,96 @@ const ToggleRow = ({
   </Box>
 )
 
+/** 跳过 OP/ED mode picker (自动 / 询问 / 关) — lives on 播放, not 快捷键. */
+const SkipOpEdCard = () => {
+  const playback = usePlayerStore((s) => s.playbackSettings)
+  const updatePlaybackSettings = usePlayerStore((s) => s.updatePlaybackSettings)
+
+  return (
+    <Box
+      sx={{
+        flex: 1,
+        border: LINE_STRONG,
+        background: alpha(PAPER, 0.04),
+        padding: '14px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+      }}
+    >
+      <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+        <Typography sx={{ fontSize: 14, fontWeight: 900, color: PAPER }}>
+          跳过 OP / ED
+        </Typography>
+        <Typography
+          sx={{
+            fontFamily: MONO,
+            fontSize: 9,
+            letterSpacing: '0.16em',
+            color: alpha(PAPER, 0.45),
+            textTransform: 'uppercase',
+          }}
+        >
+          SKIP OPENING · 弹幕密度推断
+        </Typography>
+      </Box>
+      <Box
+        sx={{
+          display: 'flex',
+          border: LINE_STRONG,
+          cursor: 'pointer',
+          alignSelf: 'flex-start',
+        }}
+      >
+        {(['自动', '询问', '关'] as const).map((mode) => {
+          const active =
+            (mode === '自动' && playback.skipOpEd === 'auto') ||
+            (mode === '询问' && playback.skipOpEd === 'ask') ||
+            (mode === '关' && playback.skipOpEd === 'off')
+          return (
+            <Box
+              key={mode}
+              component="button"
+              type="button"
+              onClick={() =>
+                updatePlaybackSettings({
+                  skipOpEd:
+                    mode === '自动' ? 'auto' : mode === '询问' ? 'ask' : 'off',
+                })
+              }
+              sx={{
+                appearance: 'none',
+                border: 0,
+                padding: '5px 10px',
+                fontFamily: MONO,
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+                background: active ? VERMILION : 'transparent',
+                color: active ? PAPER : alpha(PAPER, 0.4),
+                transition: 'all 100ms steps(1)',
+              }}
+            >
+              {mode}
+            </Box>
+          )
+        })}
+      </Box>
+      <Typography
+        sx={{
+          fontFamily: MONO,
+          fontSize: 10,
+          fontWeight: 700,
+          color: alpha(PAPER, 0.5),
+          lineHeight: 1.5,
+        }}
+      >
+        自动 = 进入 OP 直接跳过；询问 = 右下角给按钮
+      </Typography>
+    </Box>
+  )
+}
+
 const PlaybackSettingsPage = () => {
   const playback = usePlayerStore((s) => s.playbackSettings)
   const updatePlaybackSettings = usePlayerStore((s) => s.updatePlaybackSettings)
@@ -251,121 +339,6 @@ const PlaybackSettingsPage = () => {
   return (
     <Stack spacing={2}>
       <Stack direction="row" spacing={2}>
-        <StepperCard
-          label="快进步长"
-          unit="SEC"
-          value={playback.seekStepSec}
-          min={1}
-          max={120}
-          onChange={(v) => updatePlaybackSettings({ seekStepSec: v })}
-        />
-        <StepperCard
-          label="音量步长"
-          unit="%"
-          value={Math.round(playback.volumeStep * 100)}
-          min={1}
-          max={50}
-          onChange={(v) => updatePlaybackSettings({ volumeStep: v / 100 })}
-        />
-        <StepperCard
-          label="长按倍速"
-          unit="×"
-          value={playback.holdSpeed}
-          min={1.5}
-          max={8}
-          step={0.5}
-          onChange={(v) => updatePlaybackSettings({ holdSpeed: v })}
-        />
-      </Stack>
-
-      <ToggleRow
-        label="自动连播"
-        on={playback.autoAdvance}
-        onToggle={() =>
-          updatePlaybackSettings({ autoAdvance: !playback.autoAdvance })
-        }
-      />
-      <ToggleRow
-        label="自动加入同系列剧集"
-        hint="打开一集时，把同目录里同一批的其它集按集数排到它后面（按文件名前缀判定；认不出集数的文件不动）"
-        on={playback.autoAddSiblings}
-        onToggle={() =>
-          updatePlaybackSettings({
-            autoAddSiblings: !playback.autoAddSiblings,
-          })
-        }
-      />
-    </Stack>
-  )
-}
-
-const ShortcutsPage = () => {
-  const playback = usePlayerStore((s) => s.playbackSettings)
-  const updatePlaybackSettings = usePlayerStore((s) => s.updatePlaybackSettings)
-
-  return (
-    <Stack spacing={3}>
-      {/* Shortcuts table — 2 columns per design */}
-      <Box
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '10px 26px',
-        }}
-      >
-        {SHORTCUTS.map((sc) => (
-          <Box
-            key={sc.key}
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              borderBottom: `1px dashed ${alpha(PAPER, 0.18)}`,
-              paddingBottom: '9px',
-            }}
-          >
-            <Box
-              sx={{
-                minWidth: 74,
-                padding: '5px 9px',
-                border: LINE_STRONG,
-                background: alpha(PAPER, 0.08),
-                textAlign: 'center',
-                boxShadow: `3px 3px 0 ${alpha(PAPER, 0.25)}`,
-              }}
-            >
-              <Typography
-                sx={{
-                  fontFamily: MONO,
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: PAPER,
-                }}
-              >
-                {sc.key}
-              </Typography>
-            </Box>
-            <Typography
-              sx={{ flex: 1, fontSize: 13, fontWeight: 700, color: PAPER }}
-            >
-              {sc.zh}
-            </Typography>
-            <Typography
-              sx={{
-                fontFamily: MONO,
-                fontSize: 10,
-                color: alpha(PAPER, 0.4),
-                letterSpacing: '0.1em',
-              }}
-            >
-              {sc.en}
-            </Typography>
-          </Box>
-        ))}
-      </Box>
-
-      {/* Stepper cards — 3 across per design */}
-      <Box sx={{ display: 'flex', gap: '18px' }}>
         <StepperCard
           label="快进步长"
           sub="SEEK STEP · ← / →"
@@ -384,81 +357,6 @@ const ShortcutsPage = () => {
           max={50}
           onChange={(v) => updatePlaybackSettings({ volumeStep: v / 100 })}
         />
-        {/* Third card: skip OP/ED mode (design shows 自动/询问/关 switch) */}
-        <Box
-          sx={{
-            flex: 1,
-            border: LINE_STRONG,
-            background: alpha(PAPER, 0.04),
-            padding: '14px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px',
-          }}
-        >
-          <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-            <Typography sx={{ fontSize: 14, fontWeight: 900, color: PAPER }}>
-              跳过 OP / ED
-            </Typography>
-            <Typography
-              sx={{
-                fontFamily: MONO,
-                fontSize: 9,
-                letterSpacing: '0.16em',
-                color: alpha(PAPER, 0.45),
-                textTransform: 'uppercase',
-              }}
-            >
-              SKIP OPENING · 90s
-            </Typography>
-          </Box>
-          <Box
-            sx={{
-              display: 'flex',
-              border: LINE_STRONG,
-              cursor: 'pointer',
-              alignSelf: 'flex-start',
-            }}
-          >
-            {(['自动', '询问', '关'] as const).map((mode) => {
-              const active =
-                (mode === '自动' && playback.skipOpEd === 'auto') ||
-                (mode === '询问' && playback.skipOpEd === 'ask') ||
-                (mode === '关' && playback.skipOpEd === 'off')
-              return (
-                <Box
-                  key={mode}
-                  component="button"
-                  type="button"
-                  onClick={() =>
-                    updatePlaybackSettings({
-                      skipOpEd:
-                        mode === '自动'
-                          ? 'auto'
-                          : mode === '询问'
-                            ? 'ask'
-                            : 'off',
-                    })
-                  }
-                  sx={{
-                    appearance: 'none',
-                    border: 0,
-                    padding: '5px 10px',
-                    fontFamily: MONO,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    background: active ? VERMILION : 'transparent',
-                    color: active ? PAPER : alpha(PAPER, 0.4),
-                    transition: 'all 100ms steps(1)',
-                  }}
-                >
-                  {mode}
-                </Box>
-              )
-            })}
-          </Box>
-        </Box>
         <StepperCard
           label="长按倍速"
           sub="HOLD SPEED · → HOLD"
@@ -469,10 +367,92 @@ const ShortcutsPage = () => {
           step={0.5}
           onChange={(v) => updatePlaybackSettings({ holdSpeed: v })}
         />
-      </Box>
+      </Stack>
+
+      <ToggleRow
+        label="自动连播"
+        hint="一集放完自动打开播放列表里的下一个"
+        on={playback.autoAdvance}
+        onToggle={() =>
+          updatePlaybackSettings({ autoAdvance: !playback.autoAdvance })
+        }
+      />
+      <ToggleRow
+        label="自动加入同系列剧集"
+        hint="打开一集时，把同目录里同一批的其它集排到它前后（按文件名前缀判定；认不出集数的文件不动）"
+        on={playback.autoAddSiblings}
+        onToggle={() =>
+          updatePlaybackSettings({
+            autoAddSiblings: !playback.autoAddSiblings,
+          })
+        }
+      />
+      <SkipOpEdCard />
     </Stack>
   )
 }
+
+const ShortcutsPage = () => (
+  <Stack spacing={3}>
+    <Box
+      sx={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: '10px 26px',
+      }}
+    >
+      {SHORTCUTS.map((sc) => (
+        <Box
+          key={sc.key}
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            borderBottom: `1px dashed ${alpha(PAPER, 0.18)}`,
+            paddingBottom: '9px',
+          }}
+        >
+          <Box
+            sx={{
+              minWidth: 74,
+              padding: '5px 9px',
+              border: LINE_STRONG,
+              background: alpha(PAPER, 0.08),
+              textAlign: 'center',
+              boxShadow: `3px 3px 0 ${alpha(PAPER, 0.25)}`,
+            }}
+          >
+            <Typography
+              sx={{
+                fontFamily: MONO,
+                fontSize: 13,
+                fontWeight: 700,
+                color: PAPER,
+              }}
+            >
+              {sc.key}
+            </Typography>
+          </Box>
+          <Typography
+            sx={{ flex: 1, fontSize: 13, fontWeight: 700, color: PAPER }}
+          >
+            {sc.zh}
+          </Typography>
+          <Typography
+            sx={{
+              fontFamily: MONO,
+              fontSize: 10,
+              color: alpha(PAPER, 0.4),
+              letterSpacing: '0.1em',
+            }}
+          >
+            {sc.en}
+          </Typography>
+        </Box>
+      ))}
+    </Box>
+  </Stack>
+)
 
 const AboutPage = () => (
   <Stack spacing={2}>
@@ -534,14 +514,13 @@ export const SettingsDrawer = () => {
   const page = usePlayerStore((s) => s.settingsSection) as SettingsPage
   const setPage = usePlayerStore((s) => s.setSettingsSection)
 
-  const navItems: Array<{ id: SettingsPage; zh: string }> = [
-    { id: 'shortcuts', zh: '快捷键' },
-    { id: 'playback', zh: '播放' },
-    { id: 'danmaku', zh: '弹幕' },
-    { id: 'patterns', zh: '命名格式' },
-    { id: 'upscale', zh: '画质增强' },
-    { id: 'subtitle', zh: '字幕' },
-    { id: 'about', zh: '关于' },
+  const navItems: Array<{ id: SettingsPage; zh: string; en: string }> = [
+    { id: 'playback', zh: '播放', en: 'PLAYBACK' },
+    { id: 'danmaku', zh: '弹幕', en: 'DANMAKU' },
+    { id: 'subtitle', zh: '字幕', en: 'SUBTITLE' },
+    { id: 'upscale', zh: '画质增强', en: 'ENHANCE' },
+    { id: 'shortcuts', zh: '快捷键', en: 'SHORTCUTS' },
+    { id: 'about', zh: '关于', en: 'ABOUT' },
   ]
 
   const getTitle = (): string => {
@@ -616,25 +595,42 @@ export const SettingsDrawer = () => {
                   component="button"
                   key={item.id}
                   type="button"
+                  aria-label={item.zh}
+                  aria-current={isSelected ? 'page' : undefined}
                   onClick={() => setPage(item.id)}
                   sx={{
                     appearance: 'none',
                     cursor: 'pointer',
-                    padding: '10px 12px',
+                    padding: '8px 12px',
                     border: isSelected ? `5px solid ${VERMILION}` : 'none',
                     background: isSelected ? PAPER : 'transparent',
                     color: isSelected ? INK : alpha(PAPER, 0.5),
-                    fontSize: 12,
-                    fontWeight: 700,
                     textAlign: 'left',
                     transition: 'all 100ms steps(1)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1px',
                     '&:hover': {
-                      background: alpha(PAPER, 0.08),
-                      color: PAPER,
+                      background: isSelected ? PAPER : alpha(PAPER, 0.08),
+                      color: isSelected ? INK : PAPER,
                     },
                   }}
                 >
-                  {item.zh}
+                  <Box component="span" sx={{ fontSize: 12, fontWeight: 700 }}>
+                    {item.zh}
+                  </Box>
+                  <Box
+                    component="span"
+                    sx={{
+                      fontFamily: MONO,
+                      fontSize: 8,
+                      fontWeight: 700,
+                      letterSpacing: '0.16em',
+                      color: isSelected ? alpha(INK, 0.55) : alpha(PAPER, 0.3),
+                    }}
+                  >
+                    {item.en}
+                  </Box>
                 </Box>
               )
             })}
@@ -729,6 +725,8 @@ export const SettingsDrawer = () => {
 
           {/* Content area */}
           <Box
+            key={page}
+            data-settings-content
             sx={{
               flex: 1,
               overflowY: 'auto',
@@ -736,12 +734,11 @@ export const SettingsDrawer = () => {
               minWidth: 0,
             }}
           >
-            {page === 'shortcuts' && <ShortcutsPage />}
             {page === 'playback' && <PlaybackSettingsPage />}
             {page === 'danmaku' && <DanmakuSettings />}
-            {page === 'patterns' && <FilenameRulesSettings />}
-            {page === 'upscale' && <UpscaleSettings />}
             {page === 'subtitle' && <SubtitleSettings />}
+            {page === 'upscale' && <UpscaleSettings />}
+            {page === 'shortcuts' && <ShortcutsPage />}
             {page === 'about' && <AboutPage />}
           </Box>
         </Box>

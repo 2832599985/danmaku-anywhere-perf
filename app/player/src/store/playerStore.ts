@@ -483,7 +483,7 @@ export const usePlayerStore = create<PlayerStore>()(
 
       osd: null,
       settingsOpen: false,
-      settingsSection: 'shortcuts',
+      settingsSection: 'playback',
       danmakuDialogOpen: false,
       danmakuSearchPrefill: null,
 

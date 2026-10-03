@@ -33,6 +33,7 @@ export const VolumeControl = () => {
         alignItems: 'center',
         gap: '8px',
         marginLeft: '14px',
+        '@media (max-width: 1000px)': { marginLeft: 0 },
         flexShrink: 0,
       }}
     >
@@ -90,6 +91,7 @@ export const VolumeControl = () => {
         sx={{
           position: 'relative',
           width: 96,
+          '@media (max-width: 1000px)': { width: 56 },
           height: 8,
           border: `2px solid ${PAPER}`,
           background: INK,

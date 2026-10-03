@@ -1,6 +1,12 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test } from '@playwright/test'
+import type { PlayerCommands } from '../src/player/commands'
+import type { usePlayerStore } from '../src/store/playerStore'
+
+type PlayerWindow = Window & {
+  __player: { commands: PlayerCommands; store: typeof usePlayerStore }
+}
 
 const videoBase64 = readFileSync(
   path.join(import.meta.dirname, 'fixtures/test.mp4')
@@ -302,4 +308,228 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
     (e) => !/favicon|ERR_|Failed to load resource/i.test(e)
   )
   expect(fatal, `console errors:\n${fatal.join('\n')}`).toEqual([])
+})
+
+test.use({ headless: process.env.PLAYER_HEADLESS === '1' })
+
+test.describe('quick panels and settings navigation', () => {
+  test.use({ viewport: { width: 1280, height: 800 } })
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => !!(window as PlayerWindow).__player)
+    await page.evaluate((b64) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+      ;(window as PlayerWindow).__player.commands.openVideoFromFile(
+        new File([bytes], 'test.mp4', { type: 'video/mp4' })
+      )
+    }, videoBase64)
+    await page.waitForFunction(() => {
+      const video = document.querySelector('video')
+      return video && video.readyState >= 2
+    })
+    await page.evaluate(() =>
+      (window as PlayerWindow).__player.commands.pause()
+    )
+  })
+
+  test('subtitle file, visibility, live slider and full settings share state', async ({
+    page,
+  }) => {
+    await page.getByRole('button', { name: '选择字幕', exact: true }).click()
+    const panel = page.locator('[data-quick-panel="subtitle"]')
+    await expect(panel).toBeVisible()
+    await expect(panel.getByRole('button', { name: '移除字幕' })).toBeDisabled()
+
+    const picker = page.waitForEvent('filechooser')
+    await panel.getByRole('button', { name: '加载字幕文件…' }).click()
+    await (await picker).setFiles({
+      name: 'sample.srt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('1\n00:00:00,000 --> 00:00:10,000\n字幕测试\n'),
+    })
+    await expect(panel.getByText(/当前 · sample.srt/)).toBeVisible()
+    const slider = panel.getByRole('slider', { name: '字号', exact: true })
+    await slider.focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(slider).toHaveAttribute('aria-valuenow', '32')
+    await expect
+      .poll(() =>
+        page.evaluate(() => document.querySelector('video')?.currentTime ?? 0)
+      )
+      .toBeLessThan(1)
+    await panel.getByRole('switch', { name: '显示字幕' }).click()
+    await expect(
+      panel.getByRole('switch', { name: '显示字幕' })
+    ).toHaveAttribute('aria-checked', 'false')
+    await page.keyboard.press('Escape')
+    await expect(panel).not.toBeVisible()
+    await page
+      .getByRole('button', { name: '显示字幕 (S)', exact: true })
+      .click()
+    await expect(
+      page.getByRole('button', { name: '隐藏字幕 (S)', exact: true })
+    ).toHaveAttribute('aria-pressed', 'true')
+
+    await page.getByRole('button', { name: '字幕快捷设置' }).click()
+    await panel.getByRole('button', { name: '更多设置 →' }).click()
+    await expect(panel).not.toBeVisible()
+    const settings = page.locator('[data-settings-page]')
+    await expect(
+      settings.getByRole('button', { name: '字幕', exact: true })
+    ).toHaveAttribute('aria-current', 'page')
+    await expect(
+      settings.getByRole('slider', { name: '字号', exact: true })
+    ).toHaveAttribute('aria-valuenow', '32')
+    await settings.getByRole('button', { name: '移除字幕' }).click()
+    await expect(
+      settings.getByText('当前没有字幕', { exact: true })
+    ).toBeVisible()
+    await settings.getByRole('button', { name: '返回播放' }).click()
+    await expect(panel).not.toBeVisible()
+    await expect(
+      page.getByRole('button', { name: '选择字幕', exact: true })
+    ).toBeVisible()
+  })
+
+  test('settings land on playback, group matching under danmaku and reset scroll', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 880, height: 560 })
+    await page.getByRole('button', { name: '設 设置' }).click()
+    const settings = page.locator('[data-settings-page]')
+    await expect(
+      settings.getByRole('button', { name: '播放', exact: true })
+    ).toHaveAttribute('aria-current', 'page')
+    await expect(settings.getByText('快进步长', { exact: true })).toBeVisible()
+    await settings.getByRole('button', { name: '快捷键', exact: true }).click()
+    await expect(settings.getByText('快进步长', { exact: true })).toHaveCount(0)
+    await settings.getByRole('button', { name: '弹幕', exact: true }).click()
+    await expect(
+      settings.getByText('记住文件名格式', { exact: true })
+    ).toHaveCount(1)
+    const content = page.locator('[data-settings-content]')
+    await content.evaluate((el) => {
+      el.scrollTop = el.scrollHeight
+    })
+    await expect
+      .poll(() => content.evaluate((el) => el.scrollTop))
+      .toBeGreaterThan(0)
+    await settings.getByRole('button', { name: '字幕', exact: true }).click()
+    await expect.poll(() => content.evaluate((el) => el.scrollTop)).toBe(0)
+    await expect(settings.getByText('来源', { exact: true })).toBeVisible()
+    for (const name of ['播放', '弹幕', '字幕', '画质增强', '快捷键']) {
+      await settings.getByRole('button', { name, exact: true }).click()
+      expect(
+        await content.evaluate((el) => el.scrollWidth - el.clientWidth),
+        name
+      ).toBeLessThanOrEqual(1)
+    }
+    await page.screenshot({ path: test.info().outputPath('settings-880.png') })
+  })
+
+  test('quick panels fit the minimum window and stay inside fullscreen', async ({
+    page,
+  }) => {
+    for (const size of [
+      { width: 880, height: 560 },
+      { width: 1280, height: 800 },
+    ]) {
+      await page.setViewportSize(size)
+      const buttons = page.locator('[data-controls-bar] button')
+      const bounds = await buttons.evaluateAll((items) =>
+        items.map((el) => {
+          const r = el.getBoundingClientRect()
+          return {
+            text: el.getAttribute('aria-label') ?? el.textContent,
+            left: r.left,
+            right: r.right,
+          }
+        })
+      )
+      expect(bounds.filter((r) => r.left < 0 || r.right > size.width)).toEqual(
+        []
+      )
+      for (const label of ['画质', '弹幕', '字幕']) {
+        await page.getByRole('button', { name: `${label}快捷设置` }).click()
+        const panel = page.locator('[data-quick-panel]')
+        await expect(panel).toBeVisible()
+        await expect(panel).toHaveCSS('opacity', '1')
+        const rect = await panel.boundingBox()
+        expect(rect).not.toBeNull()
+        if (rect) {
+          expect(rect.x).toBeGreaterThanOrEqual(0)
+          expect(rect.y).toBeGreaterThanOrEqual(0)
+          expect(rect.x + rect.width).toBeLessThanOrEqual(size.width)
+          expect(rect.y + rect.height).toBeLessThanOrEqual(size.height)
+        }
+        if (label === '画质') {
+          await expect(
+            panel.getByRole('button', { name: '快速', exact: true })
+          ).toBeDisabled()
+          await expect(
+            panel.getByRole('switch', { name: '补帧', exact: true })
+          ).toBeDisabled()
+        }
+        await page.screenshot({
+          path: test.info().outputPath(`quick-${label}-${size.width}.png`),
+        })
+        await page.keyboard.press('Escape')
+        await expect(panel).not.toBeVisible()
+      }
+    }
+    await page
+      .getByRole('button', { name: '全屏 / Fullscreen', exact: true })
+      .click()
+    await expect
+      .poll(() => page.evaluate(() => !!document.fullscreenElement))
+      .toBe(true)
+    await page.getByRole('button', { name: '字幕快捷设置' }).click()
+    const panel = page.locator('[data-quick-panel="subtitle"]')
+    await expect(panel).toBeVisible()
+    await expect(panel).toHaveCSS('opacity', '1')
+    expect(
+      await panel.evaluate((el) => document.fullscreenElement?.contains(el))
+    ).toBe(true)
+    expect(
+      await panel.evaluate((el) => {
+        const r = el.getBoundingClientRect()
+        const top = document.elementFromPoint(
+          r.x + r.width / 2,
+          r.y + r.height / 2
+        )
+        return top !== null && el.contains(top)
+      })
+    ).toBe(true)
+  })
+
+  test('opening full settings externally dismisses the quick panel', async ({
+    page,
+  }) => {
+    await page.getByRole('button', { name: '字幕快捷设置' }).click()
+    await expect(page.locator('[data-quick-panel="subtitle"]')).toBeVisible()
+    await page.evaluate(() =>
+      (window as PlayerWindow).__player.store
+        .getState()
+        .openSettingsAt('subtitle')
+    )
+    await expect(
+      page.locator('[data-quick-panel="subtitle"]')
+    ).not.toBeVisible()
+    await page.getByRole('button', { name: '返回播放' }).click()
+    await expect(
+      page.locator('[data-quick-panel="subtitle"]')
+    ).not.toBeVisible()
+    await page.getByRole('button', { name: '弹幕快捷设置' }).click()
+    await page.getByRole('button', { name: '挂载弹幕…' }).click()
+    await expect(page.locator('[data-quick-panel="danmaku"]')).not.toBeVisible()
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as PlayerWindow).__player.store.getState().danmakuDialogOpen
+        )
+      )
+      .toBe(true)
+  })
 })

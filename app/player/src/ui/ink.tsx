@@ -109,6 +109,8 @@ export const InkToggleGroup = <T extends string | number>({
           key={String(opt.value)}
           component="button"
           type="button"
+          disabled={disabled}
+          aria-pressed={selected}
           onClick={() => onChange(opt.value)}
           sx={{
             appearance: 'none',

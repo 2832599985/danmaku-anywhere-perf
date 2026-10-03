@@ -7,14 +7,11 @@ import {
   useRef,
   useState,
 } from 'react'
-import { getPlatform } from '@/platform'
 import { usePlayerCommands } from '@/player/commands'
 import { useOpEdMarks } from '@/player/useOpEdMarks'
 import { usePlayerStore } from '@/store/playerStore'
 import type { TargetResolution } from '@/store/settings'
-import { cancelGeneration, startGeneration } from '@/subtitle/generate'
 import {
-  GOLD,
   INK,
   MONO,
   OVERLAY_GRADIENT,
@@ -23,12 +20,17 @@ import {
   VERMILION,
 } from '@/theme/theme'
 import { ProgressBar } from './ProgressBar'
+import {
+  DanmakuQuickButton,
+  SubtitleQuickButton,
+  UpscaleQuickButton,
+} from './QuickButtons'
 import { TimeDisplay } from './TimeDisplay'
 import { VolumeControl } from './VolumeControl'
 
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2] as const
 
-/** Human label for the render target shown in the status capsule. */
+/** Human label for the render target shown in the HUD. */
 const SCALE_LABEL: Record<TargetResolution, string> = {
   x2: '2×',
   x4: '4×',
@@ -39,6 +41,10 @@ const SCALE_LABEL: Record<TargetResolution, string> = {
   '4k': '4K',
   native: '原生',
 }
+
+// Keep stage overlays below the top bar's 48px hit area.
+const TOP_BAR_HEIGHT = 48
+const OVERLAY_TOP = TOP_BAR_HEIGHT + 14
 
 /** 38×38 outlined square — the secondary control shape. */
 const squareSx = {
@@ -62,22 +68,6 @@ const squareSx = {
   '&:disabled:hover': { background: 'transparent', color: PAPER },
 } as const
 
-/** Pill-shaped status capsule (danmaku/subtitle/upscale buttons share it). */
-const capsuleSx = {
-  appearance: 'none',
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  padding: '8px 12px',
-  fontSize: 13,
-  fontWeight: 700,
-  cursor: 'pointer',
-  flexShrink: 0,
-  whiteSpace: 'nowrap',
-  color: PAPER,
-  transition: 'background-color 100ms steps(1), color 100ms steps(1)',
-} as const
-
 interface ControlsProps {
   /** When false, the bar fades and slides out (parent owns the hide timer). */
   visible: boolean
@@ -96,22 +86,16 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
   const fullscreen = usePlayerStore((s) => s.playback.fullscreen)
   const playbackRate = usePlayerStore((s) => s.playback.playbackRate)
   const duration = usePlayerStore((s) => s.playback.duration)
-  const danmakuVisible = usePlayerStore((s) => s.danmakuSettings.visible)
   const danmakuSource = usePlayerStore((s) => s.danmakuSource)
   const comments = usePlayerStore((s) => s.comments)
   const playlist = usePlayerStore((s) => s.playlist)
   const playlistIndex = usePlayerStore((s) => s.playlistIndex)
   const upscale = usePlayerStore((s) => s.upscale)
   const upscaleStatus = usePlayerStore((s) => s.upscaleStatus)
-  const openSettingsAt = usePlayerStore((s) => s.openSettingsAt)
-  const subtitleSource = usePlayerStore((s) => s.subtitleSource)
-  const sttStatus = usePlayerStore((s) => s.sttStatus)
-  const sttProgress = usePlayerStore((s) => s.sttProgress)
-  const subtitleVisible = usePlayerStore((s) => s.subtitleSettings.visible)
-  const isTauri = getPlatform().isTauri
 
   const [rateAnchor, setRateAnchor] = useState<HTMLElement | null>(null)
   const barRef = useRef<HTMLDivElement | null>(null)
+  const [barHeight, setBarHeight] = useState(0)
 
   // The bar's height depends on its own content (the danmaku density strip
   // appears once comments load, the status capsules come and go), so the
@@ -127,10 +111,13 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
   // actually arrives.
   const measureBar = useCallback(() => {
     const bar = barRef.current
-    if (!bar || !onHeightChange) return
+    if (!bar) return
     // `offsetHeight` rounds to an integer and includes padding + border.
     const height = bar.offsetHeight
-    if (height > 0) onHeightChange(height)
+    if (height > 0) {
+      onHeightChange?.(height)
+      setBarHeight((prev) => (prev === height ? prev : height))
+    }
   }, [onHeightChange])
 
   useLayoutEffect(() => {
@@ -181,20 +168,25 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
   const interpolationStatus = usePlayerStore((s) => s.interpolationStatus)
   const playbackSettings = usePlayerStore((s) => s.playbackSettings)
   const currentTime = usePlayerStore((s) => s.playback.currentTime)
-  const statusText =
-    upscaleStatus === 'active'
-      ? 'ACTIVE'
-      : upscaleStatus === 'initializing'
-        ? 'INIT'
-        : upscaleStatus === 'error'
-          ? 'ERR'
-          : 'OFF'
-  const statusColor =
-    upscaleStatus === 'active'
-      ? VERMILION
-      : upscaleStatus === 'initializing'
-        ? GOLD
-        : alpha(PAPER, 0.5)
+
+  // The "弹幕已挂载" banner confirms a mount, then gets out of the picture.
+  // It used to stay up every time the controls showed, parked over the top
+  // centre of the video, repeating what the top-bar badge and the danmaku
+  // button already say.
+  const [bannerVisible, setBannerVisible] = useState(false)
+  const sourceKey = danmakuSource
+    ? `${danmakuSource.label}|${danmakuSource.count}`
+    : null
+  useEffect(() => {
+    if (!sourceKey) {
+      setBannerVisible(false)
+      return
+    }
+    setBannerVisible(true)
+    const timer = window.setTimeout(() => setBannerVisible(false), 3500)
+    return () => window.clearTimeout(timer)
+  }, [sourceKey])
+  const showBanner = danmakuSource !== null && bannerVisible
 
   // OP/ED marks for the skip-OP button.
   const { opEnd } = useOpEdMarks(comments, duration)
@@ -274,12 +266,13 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
         </Box>
       )}
 
-      {/* mounted-danmaku banner */}
-      {danmakuSource && (
+      {/* mounted-danmaku confirmation: shown for a few seconds after a mount,
+          on its own timer (independent of the controls' fade) */}
+      {showBanner && danmakuSource && (
         <Box
           sx={{
             position: 'absolute',
-            top: 68,
+            top: OVERLAY_TOP,
             left: '50%',
             transform: 'translateX(-50%)',
             zIndex: 15,
@@ -290,7 +283,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             background: alpha(INK, 0.7),
             border: `2px solid ${PAPER}`,
             padding: '4px 12px 6px',
-            ...fade,
+            pointerEvents: 'none',
           }}
         >
           <Box
@@ -323,12 +316,12 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
         </Box>
       )}
 
-      {/* Real-time HUD (top-right, per design: OUTPUT FPS / SCALE + mini bars) */}
+      {/* Real-time HUD (top-right, below the top bar) */}
       {upscaleStatus === 'active' && upscaleStats !== null && (
         <Box
           sx={{
             position: 'absolute',
-            top: 22,
+            top: OVERLAY_TOP,
             right: 26,
             zIndex: 15,
             background: alpha(INK, 0.82),
@@ -441,7 +434,10 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
         </Box>
       )}
 
-      {/* Skip OP button (top-right, below HUD) */}
+      {/* Skip OP: bottom-right, just above the control bar — where streaming
+          players put it. It does NOT fade with the controls: in 询问 mode the
+          point is to offer the skip during the OP, and the controls hide 2.6 s
+          after the mouse stops, long before the OP ends. */}
       {showSkipOp && (
         <Box
           component="button"
@@ -451,9 +447,9 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
           }}
           sx={{
             position: 'absolute',
-            top: upscaleStatus === 'active' && upscaleStats !== null ? 74 : 22,
-            right: 26,
-            zIndex: 15,
+            right: 30,
+            bottom: (visible ? barHeight : 0) + 18,
+            zIndex: 31,
             appearance: 'none',
             border: `2px solid ${PAPER}`,
             background: alpha(INK, 0.78),
@@ -464,9 +460,8 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             cursor: 'pointer',
             letterSpacing: '0.06em',
             boxShadow: `4px 4px 0 ${VERMILION}`,
-            ...fade,
             transition:
-              'background-color 100ms steps(1), color 100ms steps(1), opacity 220ms ease',
+              'background-color 100ms steps(1), color 100ms steps(1), bottom 220ms ease',
             '&:hover': { background: PAPER, color: INK },
           }}
         >
@@ -569,6 +564,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
+            '@media (max-width: 1000px)': { gap: '6px' },
             margin: '0 6px',
           }}
         >
@@ -627,82 +623,6 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
 
           <Box sx={{ flex: 1, minWidth: 8 }} />
 
-          {upscale.enabled && (
-            <Box
-              component="button"
-              type="button"
-              title="打开画质增强设置"
-              onClick={() => openSettingsAt('upscale')}
-              sx={{
-                appearance: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                border: `2px solid ${VERMILION}`,
-                background: alpha(VERMILION, 0.1),
-                padding: '5px 10px',
-                cursor: 'pointer',
-                flexShrink: 0,
-                whiteSpace: 'nowrap',
-                transition: 'background-color 100ms steps(1)',
-                '&:hover': { background: alpha(VERMILION, 0.24) },
-              }}
-            >
-              <Box
-                component="span"
-                sx={{
-                  width: 7,
-                  height: 7,
-                  background: VERMILION,
-                  borderRadius: '50%',
-                  animation:
-                    upscaleStatus === 'active'
-                      ? 'ink-blink 1.2s steps(1) infinite'
-                      : 'none',
-                }}
-              />
-              <Box
-                component="span"
-                sx={{ fontSize: 12, fontWeight: 700, color: PAPER }}
-              >
-                {SCALE_LABEL[upscale.targetResolution]} 超分
-              </Box>
-              {fi.enabled && (
-                <>
-                  <Box
-                    component="span"
-                    sx={{
-                      // '1px' not 1 — MUI treats bare 0..1 as a percentage.
-                      width: '1px',
-                      height: 14,
-                      background: alpha(PAPER, 0.3),
-                    }}
-                  />
-                  <Box
-                    component="span"
-                    sx={{ fontSize: 12, fontWeight: 700, color: PAPER }}
-                  >
-                    补帧{' '}
-                    {fi.mode === 'multiplier'
-                      ? `${fi.multiplier}×`
-                      : fi.targetFps}
-                  </Box>
-                </>
-              )}
-              <Box
-                component="span"
-                sx={{
-                  fontFamily: MONO,
-                  fontSize: 10,
-                  color: statusColor,
-                  letterSpacing: '0.1em',
-                }}
-              >
-                {statusText}
-              </Box>
-            </Box>
-          )}
-
           <Box
             component="button"
             type="button"
@@ -752,113 +672,9 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             ))}
           </Menu>
 
-          <Box
-            component="button"
-            type="button"
-            onClick={() => commands.toggleDanmaku()}
-            sx={{
-              appearance: 'none',
-              border: `2px solid ${danmakuVisible ? PAPER : alpha(PAPER, 0.6)}`,
-              background: danmakuVisible ? PAPER : 'transparent',
-              color: danmakuVisible ? INK : PAPER,
-              fontSize: 13,
-              fontWeight: 700,
-              padding: '8px 12px',
-              cursor: 'pointer',
-              flexShrink: 0,
-              whiteSpace: 'nowrap',
-              transition:
-                'background-color 100ms steps(1), color 100ms steps(1)',
-              '&:hover': { background: VERMILION, color: PAPER },
-            }}
-          >
-            弾 弹幕 {danmakuVisible ? 'ON' : 'OFF'}
-          </Box>
-
-          <Box
-            component="button"
-            type="button"
-            aria-label="弹幕设置 / Danmaku settings"
-            onClick={() => openSettingsAt('danmaku')}
-            sx={squareSx}
-          >
-            ≡
-          </Box>
-
-          {sttStatus !== 'idle' ? (
-            <Box
-              component="button"
-              type="button"
-              aria-label="取消生成字幕 / Cancel subtitle generation"
-              title="点击取消"
-              onClick={() => void cancelGeneration()}
-              sx={{
-                ...capsuleSx,
-                border: `2px solid ${VERMILION}`,
-                background: alpha(VERMILION, 0.1),
-              }}
-            >
-              <Box
-                component="span"
-                sx={{
-                  width: 7,
-                  height: 7,
-                  background: VERMILION,
-                  borderRadius: '50%',
-                  animation: 'ink-blink 1.2s steps(1) infinite',
-                }}
-              />
-              <Box
-                component="span"
-                sx={{ fontSize: 12, fontWeight: 700, color: PAPER }}
-              >
-                {sttStatus === 'extracting' ? '提取音频' : '语音识别'}{' '}
-                {Math.round(sttProgress * 100)}%
-              </Box>
-            </Box>
-          ) : subtitleSource ? (
-            <>
-              <Box
-                component="button"
-                type="button"
-                onClick={() => commands.toggleSubtitles()}
-                sx={{
-                  ...capsuleSx,
-                  border: `2px solid ${subtitleVisible ? PAPER : alpha(PAPER, 0.6)}`,
-                  background: subtitleVisible ? PAPER : 'transparent',
-                  color: subtitleVisible ? INK : PAPER,
-                  '&:hover': { background: VERMILION, color: PAPER },
-                }}
-              >
-                字 字幕 {subtitleVisible ? 'ON' : 'OFF'}
-              </Box>
-              <Box
-                component="button"
-                type="button"
-                aria-label="字幕设置 / Subtitle settings"
-                onClick={() => openSettingsAt('subtitle')}
-                sx={squareSx}
-              >
-                ≡
-              </Box>
-            </>
-          ) : isTauri ? (
-            <Box
-              component="button"
-              type="button"
-              aria-label="生成字幕 / Generate subtitles"
-              title="语音识别生成字幕（本地模型）"
-              onClick={() => void startGeneration()}
-              sx={{
-                ...capsuleSx,
-                border: `2px solid ${alpha(PAPER, 0.6)}`,
-                background: 'transparent',
-                '&:hover': { background: PAPER, color: INK },
-              }}
-            >
-              字 生成字幕
-            </Box>
-          ) : null}
+          <UpscaleQuickButton />
+          <DanmakuQuickButton />
+          <SubtitleQuickButton />
 
           <Box
             component="button"

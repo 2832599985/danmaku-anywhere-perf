@@ -84,7 +84,7 @@ export const TopBar = ({ visible, platform }: TopBarProps) => {
       onClick: () => commands.togglePlaylist(),
     },
     { label: '超 增强', onClick: () => openSettingsAt('upscale') },
-    { label: '設 设置', onClick: () => openSettingsAt('shortcuts') },
+    { label: '設 设置', onClick: () => openSettingsAt('playback') },
   ]
 
   const chrome = [

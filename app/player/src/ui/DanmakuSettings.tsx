@@ -12,6 +12,7 @@ import {
   PAPER,
   VERMILION,
 } from '@/theme/theme'
+import { FilenameRulesSettings } from './FilenameRulesSettings'
 import {
   InkLabel,
   InkLabeledSlider,
@@ -134,241 +135,187 @@ export const DanmakuSettings = () => {
         </Typography>
       </Box>
 
-      {/* Visible section */}
-      <Box sx={{ border: LINE_STRONG, padding: '12px' }}>
-        <Stack
-          direction="row"
-          alignItems="center"
-          justifyContent="space-between"
-        >
-          <InkLabel zh="显示弹幕" en="VISIBLE · 快捷键 D" size={13} />
-          <InkSwitch
-            checked={danmaku.visible}
-            onChange={() => toggleDanmakuVisible()}
-            label="显示弹幕"
-          />
-        </Stack>
-        {danmakuSource && (
+      {/* ---------------------------------------------------------------- */}
+      <InkSection zh="来源" en="SOURCE">
+        <Box sx={{ border: LINE_STRONG, padding: '12px' }}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+          >
+            <InkLabel zh="显示弹幕" en="VISIBLE · 快捷键 D" size={13} />
+            <InkSwitch
+              checked={danmaku.visible}
+              onChange={() => toggleDanmakuVisible()}
+              label="显示弹幕"
+            />
+          </Stack>
           <Typography
             sx={{
               fontFamily: MONO,
               fontSize: 10,
               fontWeight: 700,
-              color: alpha(PAPER, 0.6),
+              color: danmakuSource ? alpha(PAPER, 0.7) : alpha(PAPER, 0.4),
               marginTop: '8px',
-              textTransform: 'uppercase',
               letterSpacing: '0.06em',
             }}
           >
-            {danmakuSource.label} · {danmakuSource.count}
+            {danmakuSource
+              ? `当前 · ${danmakuSource.label} · ${danmakuSource.count} 条`
+              : '当前没有挂载弹幕'}
           </Typography>
-        )}
-      </Box>
-
-      {/* Online AI auto-match toggle (Tauri; free built-in AI -> DanDanPlay) */}
-      <Box sx={{ border: LINE_STRONG, padding: '12px' }}>
-        <Stack
-          direction="row"
-          alignItems="center"
-          justifyContent="space-between"
-        >
-          <InkLabel zh="在线匹配" en="AUTO · AI + DANDANPLAY" size={13} />
-          <InkSwitch
-            checked={danmaku.autoOnlineMatch}
-            onChange={(v) => updateDanmakuSettings({ autoOnlineMatch: v })}
-            label="在线匹配"
-          />
+        </Box>
+        <Stack direction="row" spacing={1}>
+          <Button
+            fullWidth
+            variant="outlined"
+            startIcon={<PlaylistAddRounded />}
+            onClick={() => setDanmakuDialogOpen(true)}
+            sx={{ textTransform: 'none', fontWeight: 700 }}
+          >
+            {danmakuSource ? '换弹幕源…' : '挂载弹幕…'}
+          </Button>
+          <Button
+            fullWidth
+            variant="outlined"
+            color="error"
+            startIcon={<DeleteOutlineRounded />}
+            disabled={!danmakuSource}
+            onClick={() => clearDanmaku()}
+            sx={{ textTransform: 'none', fontWeight: 700 }}
+          >
+            清除弹幕
+          </Button>
         </Stack>
-        <Typography
-          sx={{
-            fontFamily: MONO,
-            fontSize: 10,
-            fontWeight: 700,
-            color: alpha(PAPER, 0.5),
-            marginTop: '8px',
-            letterSpacing: '0.04em',
-            lineHeight: 1.5,
-          }}
-        >
-          无同名弹幕文件时,用文件名经 AI 解析番名/集数并自动挂载
-        </Typography>
-      </Box>
-
-      {/* Four main sliders */}
-      <InkLabeledSlider
-        zh="不透明度"
-        en="OPACITY"
-        display={`${Math.round(danmaku.opacity * 100)}%`}
-        value={danmaku.opacity}
-        min={0}
-        max={1}
-        step={0.05}
-        onChange={(v) => updateDanmakuSettings({ opacity: v })}
-      />
-
-      <InkLabeledSlider
-        zh="字号"
-        en="FONT SIZE"
-        display={`${danmaku.fontSize}px`}
-        value={danmaku.fontSize}
-        min={12}
-        max={48}
-        step={1}
-        onChange={(v) => updateDanmakuSettings({ fontSize: v })}
-      />
-
-      <InkLabeledSlider
-        zh="滚动速度"
-        en="SPEED"
-        display={`${danmaku.speed.toFixed(1)}×`}
-        value={danmaku.speed}
-        min={0.5}
-        max={2}
-        step={0.1}
-        onChange={(v) => updateDanmakuSettings({ speed: v })}
-      />
-
-      <InkLabeledSlider
-        zh="时间偏移"
-        en="OFFSET"
-        display={`${danmaku.offset > 0 ? '+' : ''}${(danmaku.offset / 1000).toFixed(1)}s`}
-        value={danmaku.offset}
-        min={-10000}
-        max={10000}
-        step={100}
-        onChange={(v) => updateDanmakuSettings({ offset: v })}
-        centerTick
-      />
-
-      {/* Density and other sliders */}
-      <InkLabeledSlider
-        zh="密度上限"
-        en="MAX ON SCREEN"
-        display={`${danmaku.maxOnScreen}`}
-        value={danmaku.maxOnScreen}
-        min={50}
-        max={1000}
-        step={50}
-        onChange={(v) => updateDanmakuSettings({ maxOnScreen: v })}
-      />
-
-      {/* Display area */}
-      <InkSection zh="显示区域" en="AREA">
-        <InkToggleGroup
-          options={AREA_OPTIONS}
-          value={danmaku.area}
-          onChange={(v) => updateDanmakuSettings({ area: v })}
-          columns={4}
-        />
       </InkSection>
 
-      {/* Overlap and merge duplicate toggle cards */}
-      <Box
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(2, 1fr)',
-          gap: '8px',
-        }}
-      >
-        {/* Overlap toggle card */}
+      {/* ---------------------------------------------------------------- */}
+      <InkSection zh="显示" en="DISPLAY">
+        <InkLabeledSlider
+          zh="不透明度"
+          en="OPACITY"
+          display={`${Math.round(danmaku.opacity * 100)}%`}
+          value={danmaku.opacity}
+          min={0}
+          max={1}
+          step={0.05}
+          onChange={(v) => updateDanmakuSettings({ opacity: v })}
+        />
+
+        <InkLabeledSlider
+          zh="字号"
+          en="FONT SIZE"
+          display={`${danmaku.fontSize}px`}
+          value={danmaku.fontSize}
+          min={12}
+          max={48}
+          step={1}
+          onChange={(v) => updateDanmakuSettings({ fontSize: v })}
+        />
+
+        <InkLabeledSlider
+          zh="滚动速度"
+          en="SPEED"
+          display={`${danmaku.speed.toFixed(1)}×`}
+          value={danmaku.speed}
+          min={0.5}
+          max={2}
+          step={0.1}
+          onChange={(v) => updateDanmakuSettings({ speed: v })}
+        />
+
+        <InkLabeledSlider
+          zh="时间偏移"
+          en="OFFSET"
+          display={`${danmaku.offset > 0 ? '+' : ''}${(danmaku.offset / 1000).toFixed(1)}s`}
+          value={danmaku.offset}
+          min={-10000}
+          max={10000}
+          step={100}
+          onChange={(v) => updateDanmakuSettings({ offset: v })}
+          centerTick
+        />
+
+        <InkLabeledSlider
+          zh="密度上限"
+          en="MAX ON SCREEN"
+          display={`${danmaku.maxOnScreen}`}
+          value={danmaku.maxOnScreen}
+          min={50}
+          max={1000}
+          step={50}
+          onChange={(v) => updateDanmakuSettings({ maxOnScreen: v })}
+        />
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <InkLabel zh="显示区域" en="AREA · 屏幕高度占比" size={12} />
+          <InkToggleGroup
+            options={AREA_OPTIONS}
+            value={danmaku.area}
+            onChange={(v) => updateDanmakuSettings({ area: v })}
+            columns={4}
+          />
+        </Box>
+
         <Box
-          component="button"
-          type="button"
-          onClick={() =>
-            updateDanmakuSettings({
-              overlap: danmaku.overlap === 0 ? 100 : 0,
-            })
-          }
           sx={{
-            appearance: 'none',
-            cursor: 'pointer',
-            padding: '12px 10px',
-            border: danmaku.overlap > 0 ? `2px solid ${VERMILION}` : LINE_WEAK,
-            background:
-              danmaku.overlap > 0 ? alpha(VERMILION, 0.1) : 'transparent',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            transition:
-              'border 100ms steps(1), background-color 100ms steps(1)',
-            '&:hover': danmaku.overlap > 0 ? {} : { borderColor: PAPER },
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, 1fr)',
+            gap: '8px',
           }}
         >
-          <Typography
-            sx={{
-              fontSize: 12,
-              fontWeight: 700,
-              color: PAPER,
-            }}
+          <LabeledSwitch
+            label="允许重叠"
+            en="OVERLAP"
+            checked={danmaku.overlap > 0}
+            onChange={(next) =>
+              updateDanmakuSettings({ overlap: next ? 100 : 0 })
+            }
+          />
+          <LabeledSwitch
+            label="合并重复"
+            en="MERGE DUP"
+            checked={danmaku.mergeDuplicates}
+            onChange={(next) =>
+              updateDanmakuSettings({ mergeDuplicates: next })
+            }
+          />
+        </Box>
+      </InkSection>
+
+      {/* ---------------------------------------------------------------- */}
+      <InkSection zh="匹配" en="MATCHING">
+        <Box sx={{ border: LINE_STRONG, padding: '12px' }}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
           >
-            允许重叠
-          </Typography>
+            <InkLabel zh="在线匹配" en="AI + DANDANPLAY" size={13} />
+            <InkSwitch
+              checked={danmaku.autoOnlineMatch}
+              onChange={(v) => updateDanmakuSettings({ autoOnlineMatch: v })}
+              label="在线匹配"
+            />
+          </Stack>
           <Typography
             sx={{
               fontFamily: MONO,
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: 700,
-              color: danmaku.overlap > 0 ? VERMILION : alpha(PAPER, 0.4),
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
+              color: alpha(PAPER, 0.5),
+              marginTop: '8px',
+              letterSpacing: '0.04em',
+              lineHeight: 1.5,
             }}
           >
-            {danmaku.overlap > 0 ? 'ON' : 'OFF'}
+            无同名弹幕文件时，用文件名解析番名/集数并自动挂载
           </Typography>
         </Box>
+        <FilenameRulesSettings />
+      </InkSection>
 
-        {/* Merge duplicates toggle card */}
-        <Box
-          component="button"
-          type="button"
-          onClick={() =>
-            updateDanmakuSettings({
-              mergeDuplicates: !danmaku.mergeDuplicates,
-            })
-          }
-          sx={{
-            appearance: 'none',
-            cursor: 'pointer',
-            padding: '12px 10px',
-            border: danmaku.mergeDuplicates
-              ? `2px solid ${VERMILION}`
-              : LINE_WEAK,
-            background: danmaku.mergeDuplicates
-              ? alpha(VERMILION, 0.1)
-              : 'transparent',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            transition:
-              'border 100ms steps(1), background-color 100ms steps(1)',
-            '&:hover': danmaku.mergeDuplicates ? {} : { borderColor: PAPER },
-          }}
-        >
-          <Typography
-            sx={{
-              fontSize: 12,
-              fontWeight: 700,
-              color: PAPER,
-            }}
-          >
-            合并重复
-          </Typography>
-          <Typography
-            sx={{
-              fontFamily: MONO,
-              fontSize: 11,
-              fontWeight: 700,
-              color: danmaku.mergeDuplicates ? VERMILION : alpha(PAPER, 0.4),
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-            }}
-          >
-            {danmaku.mergeDuplicates ? 'ON' : 'OFF'}
-          </Typography>
-        </Box>
-      </Box>
-
-      {/* Filter section */}
+      {/* ---------------------------------------------------------------- */}
       <InkSection
         zh="屏蔽词"
         en={`FILTER · ${danmaku.filters.length}`}
@@ -535,36 +482,35 @@ export const DanmakuSettings = () => {
           </Box>
         </Stack>
       </InkSection>
-
-      {/* Action buttons */}
-      <Stack direction="row" spacing={1}>
-        <Button
-          fullWidth
-          variant="outlined"
-          startIcon={<PlaylistAddRounded />}
-          onClick={() => setDanmakuDialogOpen(true)}
-          sx={{
-            textTransform: 'none',
-            fontWeight: 700,
-          }}
-        >
-          加载弹幕…
-        </Button>
-        <Button
-          fullWidth
-          variant="outlined"
-          color="error"
-          startIcon={<DeleteOutlineRounded />}
-          disabled={!danmakuSource}
-          onClick={() => clearDanmaku()}
-          sx={{
-            textTransform: 'none',
-            fontWeight: 700,
-          }}
-        >
-          清除弹幕
-        </Button>
-      </Stack>
     </Stack>
   )
 }
+
+/** Bordered card: text label on the left, ON/OFF pill on the right. */
+const LabeledSwitch = ({
+  label,
+  en,
+  checked,
+  onChange,
+}: {
+  label: string
+  en: string
+  checked: boolean
+  onChange: (next: boolean) => void
+}) => (
+  <Box
+    sx={{
+      border: checked ? `2px solid ${VERMILION}` : LINE_WEAK,
+      background: checked ? alpha(VERMILION, 0.1) : 'transparent',
+      padding: '10px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 1,
+      transition: 'border 100ms steps(1), background-color 100ms steps(1)',
+    }}
+  >
+    <InkLabel zh={label} en={en} size={12} />
+    <InkSwitch checked={checked} onChange={onChange} label={label} />
+  </Box>
+)
