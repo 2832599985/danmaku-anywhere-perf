@@ -5,6 +5,8 @@ import {
   cleanFilenameTitle,
   episodeFromFilename,
   keywordCandidates,
+  REASON_BATCH,
+  resolveEpisodeTarget,
   targetEpisode,
 } from './autoMatch'
 import type { DdpEpisode, DdpSeason } from './ddp'
@@ -34,21 +36,26 @@ const episode = (
 })
 
 describe('episodeFromFilename', () => {
-  it('reads the explicit episode marker, NOT the trailing resolution', () => {
-    // The regression: "last number wins" turned this into episode 1080 and
-    // then fell back to episode 1.
+  it('reads fansub markers without mistaking metadata for the episode', () => {
     expect(
       episodeFromFilename(
         '[Sakurato] BLEACH 千年血战篇-诀别谭- [11][AVC AAC][1080p].mkv'
       )
-    ).toBe(0) // no 第N话/E11 marker → unknown, the AI supplies it
+    ).toBe(11)
     expect(
       episodeFromFilename(
         '【幻樱字幕组】[咒术回战 第二季][第11话][1920X1080].mp4'
       )
     ).toBe(11)
     expect(episodeFromFilename('Spy x Family S01E11 1080p WEB-DL.mkv')).toBe(11)
-    expect(episodeFromFilename('葬送的芙莉莲 - 07 [WebRip 1080p].mkv')).toBe(0)
+    expect(episodeFromFilename('葬送的芙莉莲 - 07 [WebRip 1080p].mkv')).toBe(7)
+    expect(
+      episodeFromFilename(
+        '[LoliHouse] Futsutsuka na Akujo dewa Gozaimasu ga - 11 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv'
+      )
+    ).toBe(11)
+    // 1080 is a resolution here, not an episode.
+    expect(episodeFromFilename('Show [1080p] [x264].mkv')).toBe(0)
   })
 
   it('understands Chinese numerals', () => {
@@ -76,13 +83,18 @@ describe('cleanFilenameTitle', () => {
       cleanFilenameTitle(
         '[Sakurato] BLEACH 千年血战篇-诀别谭- [11][AVC AAC][1080p].mkv'
       )
-    ).toBe('Sakurato BLEACH 千年血战篇-诀别谭')
+    ).toBe('BLEACH 千年血战篇-诀别谭')
+    expect(
+      cleanFilenameTitle(
+        '[LoliHouse] Futsutsuka na Akujo dewa Gozaimasu ga - 11 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv'
+      )
+    ).toBe('Futsutsuka na Akujo dewa Gozaimasu ga')
   })
 
   it('leaves an already-clean name alone', () => {
     expect(cleanFilenameTitle('葬送的芙莉莲.mp4')).toBe('葬送的芙莉莲')
     expect(cleanFilenameTitle('Spy x Family S01E11 1080p WEB-DL.mkv')).toBe(
-      'Spy x Family S01E11'
+      'Spy x Family S01'
     )
   })
 })
@@ -202,7 +214,7 @@ describe('autoMatch', () => {
     expect(outcome.keyword).toBe('不存在的番')
   })
 
-  it('falls through to the next candidate keyword when one finds nothing', async () => {
+  it('uses the candidate that returns results when another finds nothing', async () => {
     const s = season('1', '葬送的芙莉莲')
     const search = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([s])
     const outcome = await autoMatch(
@@ -210,7 +222,250 @@ describe('autoMatch', () => {
       { title: 'Sousou no Frieren', episode: 7, altTitles: ['葬送的芙莉莲'] },
       { search, episodes: vi.fn().mockResolvedValue([episode(7, 7)]) }
     )
-    expect(search).toHaveBeenCalledTimes(2)
+    expect(search).toHaveBeenCalled()
     expect(outcome.status).toBe('matched')
+  })
+})
+
+describe('resolveEpisodeTarget', () => {
+  it('matches the episode number exactly', () => {
+    const eps = [episode(1, 1), episode(11, 11)]
+    expect(resolveEpisodeTarget(eps, 11)).toMatchObject({
+      mode: 'exact',
+      episode: { episodeId: 11 },
+    })
+  })
+
+  it('maps a local episode onto absolute sequel numbering', () => {
+    // DanDanPlay numbers 咒术回战 第二季 as 25–47; the file says 第11话.
+    const eps = Array.from({ length: 23 }, (_, i) => episode(2500 + i, 25 + i))
+    expect(resolveEpisodeTarget(eps, 11)).toMatchObject({
+      mode: 'offset',
+      episode: { episodeNumber: 35 },
+    })
+    expect(resolveEpisodeTarget(eps, 24)).toBeNull()
+  })
+
+  it('does not shift a season that starts at episode 1', () => {
+    const eps = [episode(1, 1), episode(2, 2)]
+    expect(resolveEpisodeTarget(eps, 3)).toBeNull()
+  })
+})
+
+describe('autoMatch season scoring', () => {
+  it('resolves absolute sequel numbering end to end', async () => {
+    const s = season('17196', '咒术回战 第二季')
+    const eps = Array.from({ length: 23 }, (_, i) => episode(2500 + i, 25 + i))
+    const outcome = await autoMatch(
+      '【幻樱字幕组】[咒术回战 第二季][第11话][1080p].mp4',
+      { title: '咒术回战 第二季', episode: 11, altTitles: [] },
+      {
+        search: vi.fn().mockResolvedValue([s]),
+        episodes: vi.fn().mockResolvedValue(eps),
+      }
+    )
+    expect(outcome.status).toBe('matched')
+    if (outcome.status !== 'matched') return
+    expect(outcome.episodeMode).toBe('offset')
+    expect(outcome.episode.episodeNumber).toBe(35)
+  })
+
+  it('picks a fuzzy match only when one non-future season has the episode', async () => {
+    const real = {
+      ...season('19226', '恶女不才，请多关照~雏宫蝶鼠换身传~'),
+      year: 2026,
+    }
+    const future = {
+      ...season(
+        '20407',
+        'ふつつかな悪女ではございますが ~雛宮蝶鼠とりかえ伝~ (2027)'
+      ),
+      year: 2027,
+    }
+    const eps = Array.from({ length: 12 }, (_, i) => episode(i + 1, i + 1))
+    const outcome = await autoMatch(
+      '[LoliHouse] Futsutsuka na Akujo dewa Gozaimasu ga - 11 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv',
+      {
+        title: 'Futsutsuka na Akujo dewa Gozaimasu ga',
+        episode: 11,
+        altTitles: [],
+      },
+      {
+        search: vi.fn().mockResolvedValue([real, future]),
+        episodes: vi.fn().mockResolvedValue(eps),
+        now: () => new Date('2026-10-20T00:00:00Z'),
+      }
+    )
+    expect(outcome.status).toBe('matched')
+    if (outcome.status !== 'matched') return
+    expect(outcome.matchMode).toBe('fuzzy')
+    expect(outcome.season.bangumiId).toBe('19226')
+    expect(outcome.episode.episodeNumber).toBe(11)
+  })
+
+  it('defaults to the base season when the file name has no season', async () => {
+    const seasons = [
+      { ...season('17870', '药屋少女的呢喃'), year: 2023 },
+      { ...season('18562', '药屋少女的呢喃 第二季'), year: 2025 },
+      { ...season('19444', '药屋少女的呢喃 续篇'), year: 2026 },
+    ]
+    const eps = Array.from({ length: 24 }, (_, i) => episode(i + 1, i + 1))
+    const outcome = await autoMatch(
+      'Kusuriya no Hitorigoto - 12 [1080p].mkv',
+      { title: 'Kusuriya no Hitorigoto', episode: 12, altTitles: [] },
+      {
+        search: vi.fn().mockResolvedValue(seasons),
+        episodes: vi.fn().mockResolvedValue(eps),
+        now: () => new Date('2026-10-20T00:00:00Z'),
+      }
+    )
+    expect(outcome.status).toBe('matched')
+    if (outcome.status !== 'matched') return
+    expect(outcome.matchMode).toBe('default-season')
+    expect(outcome.season.bangumiId).toBe('17870')
+  })
+
+  it('asks when the file names a season the candidates do not mark', async () => {
+    const seasons = [
+      { ...season('17870', '药屋少女的呢喃'), year: 2023 },
+      { ...season('18562', '药屋少女的呢喃 第二季'), year: 2025 },
+    ]
+    const eps = Array.from({ length: 24 }, (_, i) => episode(i + 1, i + 1))
+    const outcome = await autoMatch(
+      'Kusuriya no Hitorigoto S3 - 12 [1080p].mkv',
+      { title: 'Kusuriya no Hitorigoto', episode: 12, altTitles: [] },
+      {
+        search: vi.fn().mockResolvedValue(seasons),
+        episodes: vi.fn().mockResolvedValue(eps),
+        now: () => new Date('2026-10-20T00:00:00Z'),
+      }
+    )
+    expect(outcome.status).toBe('ambiguous')
+  })
+
+  it('uses the episode search as a last resort', async () => {
+    const s = season('1', '葬送的芙莉莲')
+    const outcome = await autoMatch(
+      '葬送的芙莉莲 - 07 [1080p].mkv',
+      { title: '葬送的芙莉莲', episode: 7, altTitles: [] },
+      {
+        search: vi.fn().mockResolvedValue([]),
+        episodes: vi.fn().mockResolvedValue([episode(7, 7)]),
+        searchEpisodes: vi.fn().mockResolvedValue([s]),
+      }
+    )
+    expect(outcome.status).toBe('matched')
+  })
+
+  it('never auto-mounts a season pack', async () => {
+    const outcome = await autoMatch('[Group] Show - 01-12 [1080p].mkv', null, {
+      search: vi.fn().mockResolvedValue([]),
+      episodes: vi.fn(),
+    })
+    expect(outcome.status).toBe('ambiguous')
+    if (outcome.status !== 'ambiguous') return
+    expect(outcome.reason).toBe(REASON_BATCH)
+  })
+
+  it('mounts the single episode of a movie', async () => {
+    const s = {
+      ...season('9', '葬送的芙莉莲 剧场版'),
+      type: 'movie',
+      year: 2024,
+      episodeCount: 1,
+    }
+    const outcome = await autoMatch(
+      '[Group] 葬送的芙莉莲 剧场版 [2024] [BDRip 1080p].mkv',
+      null,
+      {
+        search: vi.fn().mockResolvedValue([s]),
+        episodes: vi.fn().mockResolvedValue([episode(1, 1)]),
+        now: () => new Date('2026-10-20T00:00:00Z'),
+      }
+    )
+    expect(outcome.status).toBe('matched')
+  })
+
+  it('never mounts a TV episode for a movie release', async () => {
+    const tv = season('1', '葬送的芙莉莲')
+    const outcome = await autoMatch(
+      '[Group] 葬送的芙莉莲 剧场版 [2024] [BDRip 1080p].mkv',
+      null,
+      {
+        search: vi.fn().mockResolvedValue([tv]),
+        episodes: vi.fn().mockResolvedValue([episode(1, 1)]),
+        now: () => new Date('2026-10-20T00:00:00Z'),
+      }
+    )
+    expect(outcome.status).toBe('ambiguous')
+  })
+
+  it('ignores unrelated hits produced by the raw filename search', async () => {
+    const real = season('17870', '药屋少女的呢喃')
+    const noise = { ...season('4710', '妖怪传 猫目小僧'), year: 1976 }
+    const eps = Array.from({ length: 24 }, (_, i) => episode(i + 1, i + 1))
+    const search = vi.fn(async (keyword: string) =>
+      keyword.includes('Kusuriya') ? [real] : [noise]
+    )
+    const outcome = await autoMatch(
+      '[Nekomoe kissaten] Kusuriya no Hitorigoto - 12 [1080p].mkv',
+      { title: 'Kusuriya no Hitorigoto', episode: 12, altTitles: [] },
+      {
+        search,
+        episodes: vi.fn().mockResolvedValue(eps),
+        now: () => new Date('2026-10-20T00:00:00Z'),
+      }
+    )
+    expect(outcome.status).toBe('matched')
+    if (outcome.status !== 'matched') return
+    expect(outcome.season.bangumiId).toBe('17870')
+  })
+
+  it('prefers a resolvable local title over an arc title without the episode', async () => {
+    const arc = { ...season('19524', 'ONE PIECE novel HEROINES'), year: 2026 }
+    const real = { ...season('69', '海贼王'), year: 1999, episodeCount: 1100 }
+    const search = vi.fn(async (keyword: string) =>
+      keyword === 'One Piece' ? [arc, real] : [arc]
+    )
+    const episodes = vi.fn(async (s: DdpSeason) =>
+      s.bangumiId === '69'
+        ? [episode(1080, 1080)]
+        : [episode(1, 1), episode(2, 2)]
+    )
+    const outcome = await autoMatch(
+      '[Lilith-Raws] One Piece - 1080 [Baha][WEB-DL][1080p][AVC AAC][CHT][MP4].mp4',
+      { title: 'One Piece', episode: 1080, altTitles: [] },
+      {
+        search,
+        episodes,
+        now: () => new Date('2026-10-20T00:00:00Z'),
+      }
+    )
+    expect(outcome.status).toBe('matched')
+    if (outcome.status !== 'matched') return
+    expect(outcome.season.bangumiId).toBe('69')
+  })
+
+  it('uses the episode title to tell two seasons apart', async () => {
+    const s1 = { ...season('17870', '药屋少女的呢喃'), year: 2023 }
+    const s2 = { ...season('18562', '药屋少女的呢喃 第二季'), year: 2025 }
+    const search = vi.fn().mockResolvedValue([s1, s2])
+    const episodes = vi.fn(async (s: DdpSeason) =>
+      s.bangumiId === '17870'
+        ? [{ ...episode(17870012, 12), title: '第12话 宦官与妓女' }]
+        : [{ ...episode(18562012, 12), title: '第12话 華瑞月' }]
+    )
+    const outcome = await autoMatch(
+      'Kusuriya no Hitorigoto 第12话 華瑞月 [1080p].mkv',
+      { title: 'Kusuriya no Hitorigoto', episode: 12, altTitles: [] },
+      {
+        search,
+        episodes,
+        now: () => new Date('2026-10-20T00:00:00Z'),
+      }
+    )
+    expect(outcome.status).toBe('matched')
+    if (outcome.status !== 'matched') return
+    expect(outcome.season.bangumiId).toBe('18562')
   })
 })

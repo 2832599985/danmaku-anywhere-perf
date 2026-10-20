@@ -1,21 +1,27 @@
-import { findEpisodeByNumber } from '@danmaku-anywhere/media-parser'
 import { Alert, Box, createTheme, ThemeProvider, useTheme } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { aiExtractTitle } from '@/danmaku/ai'
-import { autoMatch } from '@/danmaku/autoMatch'
+import {
+  autoMatch,
+  resolveEpisodeTarget,
+  targetEpisode,
+} from '@/danmaku/autoMatch'
 import {
   fetchEpisodeComments,
   fetchSeasonEpisodes,
+  searchEpisodesByNumber,
   searchSeasons,
 } from '@/danmaku/ddp'
 import {
   dirname,
+  learnRule,
   matchRule,
   REASON_RULE_EPISODE_MISSING,
   unmatchedRuleHint,
 } from '@/danmaku/filenameRules'
 import { filterComments } from '@/danmaku/filter'
 import { parseDanmakuText } from '@/danmaku/parse'
+import { parseReleaseName } from '@/danmaku/releaseName'
 import {
   extOf,
   type Platform,
@@ -411,7 +417,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         }
       }
 
-      // --- AI auto-match fallback (no sibling file was mounted) ---
+      // --- online auto-match fallback (no sibling file was mounted) ---
       // Parse the filename, search DanDanPlay, resolve season + episode with
       // the SAME helpers the extension uses, and mount. Runs ONLY inside this
       // IIFE so it inherits the sibling effect's `stale` guard and ordering
@@ -421,8 +427,8 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       //
       // When the match is not decisive we OPEN THE PICKER instead of guessing:
       // the dialog comes up pre-searched on the parsed title with the episode
-      // we believe we want highlighted. A filename the AI does not recognise as
-      // a show (a lecture recording, say) stays silent — no picker for those.
+      // we believe we want highlighted. A filename with no episode/season/movie
+      // signal AND no AI title (a lecture recording, say) stays silent.
       let s = usePlayerStore.getState()
       if (
         stale ||
@@ -444,8 +450,8 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             s = usePlayerStore.getState()
             if (stale || s.media?.path !== videoPath || s.danmakuSource) return
 
-            const episode = findEpisodeByNumber(list, hit.episode)
-            if (!episode) {
+            const resolved = resolveEpisodeTarget(list, hit.episode)
+            if (!resolved) {
               // The shape matched but that number is not in the learned season:
               // ask, prefilled on the season we know — never guess.
               s.setDanmakuDialogOpen(true, {
@@ -456,6 +462,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
               s.showOsd(`${REASON_RULE_EPISODE_MISSING} · 请选择`, '❓')
               return
             }
+            const episode = resolved.episode
 
             const comments = await fetchEpisodeComments(episode.episodeId)
             s = usePlayerStore.getState()
@@ -473,25 +480,40 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             })
             s.recordFilenameRuleHit(hit.rule.id)
             s.showOsd(
-              `${hit.exact ? '按命名格式匹配' : '按命名格式匹配（宽松）'} · 第${hit.episode}集 · ${comments.length} 条`,
+              `${hit.exact ? '按命名格式匹配' : '按命名格式匹配（宽松）'} · 第${hit.episode}集${
+                resolved.mode === 'offset'
+                  ? `（站内第${episode.episodeNumber}话）`
+                  : ''
+              } · ${comments.length} 条`,
               '📐'
             )
             return
           } catch {
-            // Season gone / offline: fall through to the AI path, which ends in
-            // the picker rather than in nothing.
+            // Season gone / offline: fall through to the deterministic
+            // pipeline, which ends in the picker rather than in nothing.
           }
         }
       }
 
+      // The AI is an ENHANCER, not a gate. A 500 from the proxy (which
+      // `[LoliHouse]` filenames trigger) or an offline machine used to abort
+      // this whole block; the deterministic parser + search below still work.
+      const release = parseReleaseName(videoPath)
       const info = await aiExtractTitle(basename(videoPath))
-      if (!info) return
       s = usePlayerStore.getState()
       if (stale || s.media?.path !== videoPath || s.danmakuSource) return
+
+      const looksEpisodic =
+        release.episode > 0 ||
+        release.isMovie ||
+        release.season !== null ||
+        info !== null
+      if (!looksEpisodic) return
 
       const outcome = await autoMatch(basename(videoPath), info, {
         search: searchSeasons,
         episodes: fetchSeasonEpisodes,
+        searchEpisodes: searchEpisodesByNumber,
       })
       s = usePlayerStore.getState()
       if (stale || s.media?.path !== videoPath || s.danmakuSource) return
@@ -505,7 +527,9 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         s.setDanmakuDialogOpen(true, {
           keyword: outcome.keyword,
           targetEpisode:
-            outcome.status === 'ambiguous' ? outcome.targetEpisode : 0,
+            outcome.status === 'ambiguous'
+              ? outcome.targetEpisode
+              : release.episode,
           note: hint ? `${outcome.reason} · ${hint}` : outcome.reason,
         })
         s.showOsd(`${outcome.reason} · 请选择`, '❓')
@@ -520,15 +544,53 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       }
       s = usePlayerStore.getState()
       if (stale || s.media?.path !== videoPath || s.danmakuSource) return
+      const localEpisode =
+        release.episode || targetEpisode(basename(videoPath), info)
       if (!comments.length) {
-        s.showOsd(`${outcome.episode.title || '该集'}暂无弹幕`, '💬')
+        s.showOsd(
+          `${localEpisode > 0 ? `第${localEpisode}集` : '该集'}暂无弹幕`,
+          '💬'
+        )
         return
       }
       s.setComments(comments, {
         label: `${outcome.season.title} · ${outcome.episode.title}`,
         count: comments.length,
       })
-      s.showOsd(`AI 匹配弹幕 · ${comments.length} 条`, '🤖')
+
+      // A confident match is knowledge worth keeping: the next file of this
+      // batch then resolves through the learned rule (no AI, no search).
+      // `default-season` is excluded — the season was inferred from the search
+      // order, so it must not become a permanent rule before the user confirms.
+      if (
+        s.danmakuSettings.learnFilenamePatterns &&
+        localEpisode > 0 &&
+        outcome.matchMode !== 'default-season'
+      ) {
+        const rule = learnRule({
+          filePath: videoPath,
+          episode: localEpisode,
+          season: {
+            bangumiId: outcome.season.bangumiId,
+            title: outcome.season.title,
+            episodeCount: outcome.season.episodeCount,
+          },
+        })
+        if (rule) s.addFilenameRule(rule)
+      }
+
+      s.showOsd(
+        `自动匹配 · ${outcome.season.title} · ${
+          localEpisode > 0 ? `第${localEpisode}集` : '该集'
+        }${
+          outcome.episodeMode === 'offset'
+            ? `（站内第${outcome.episode.episodeNumber}话）`
+            : ''
+        }${outcome.matchMode === 'default-season' ? '（未标季）' : ''} · ${
+          comments.length
+        } 条`,
+        '🤖'
+      )
     })()
     return () => {
       stale = true

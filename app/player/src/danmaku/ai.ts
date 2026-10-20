@@ -1,5 +1,6 @@
 import { extractTitle } from '@danmaku-anywhere/danmaku-provider/genAi'
 import { ensureConfigured } from './ddp'
+import { aiInputForFilename } from './releaseName'
 
 export interface AiTitleInfo {
   /** Parsed show title (season included, episode number stripped). */
@@ -10,32 +11,42 @@ export interface AiTitleInfo {
   altTitles: string[]
 }
 
+/** Beyond this the deterministic pipeline is better than waiting. */
+const AI_TIMEOUT_MS = 6000
+
 /**
  * Parse an anime title + episode out of a video filename using the project's
- * free built-in AI (a proxy-hosted Gemini; no API key on the client). The
- * endpoint is the same `api.danmaku.weeblify.app` host the DanDanPlay calls
- * already use, so the Tauri fetch bridge + capability scope cover it as-is.
+ * free built-in AI (a proxy-hosted Gemini; no API key on the client).
  *
- * The request is tagged `filename` so the proxy picks the prompt written for
- * video file names instead of the extension's "HTML from a website" one.
- * `altTitles` matters here: the model often returns the romaji title as the
- * primary and the Chinese one as an alt, and DanDanPlay searches far better on
- * the Chinese title.
+ * The input is the SANITIZED release name (`title - episode`), not the raw
+ * file name: fansub group tags are what made the HTML-oriented proxy prompt
+ * garble CJK titles, and a leading `[LoliHouse]`/`[Loli]` even made it return
+ * HTTP 500 (Gemini safety filter). The prompt has no filename mode yet
+ * (`inputType` is ignored by the deployed proxy), so the cleaner the text,
+ * the better the answer.
  *
- * Returns null on ANY failure — network error, non-200, "not a show", empty
- * title, or a too-short filename (the worker rejects inputs under 10 chars).
- * Callers must surface that to the user (open the picker) rather than assume
- * "no danmaku".
+ * Returns null on ANY failure — the caller must CONTINUE with the
+ * deterministic filename pipeline; this function is an enhancer, not a gate.
  */
 export const aiExtractTitle = async (
   filename: string
 ): Promise<AiTitleInfo | null> => {
-  const input = filename.trim()
+  const input = aiInputForFilename(filename).trim()
   if (input.length < 10) return null
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
     ensureConfigured()
-    const result = await extractTitle(input, 'filename')
-    if (!result.success) return null
+    // A dead/slow AI must not hold the deterministic pipeline hostage. The
+    // request itself is not cancellable (the provider owns its fetch), so it
+    // simply finishes in the background.
+    const timeout = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), AI_TIMEOUT_MS)
+    })
+    const result = await Promise.race([
+      extractTitle(input, 'filename'),
+      timeout,
+    ])
+    if (!result || !result.success) return null
     const { isShow, title, episode, altTitles } = result.data
     if (!isShow || title.trim().length === 0) return null
     return {
@@ -46,8 +57,10 @@ export const aiExtractTitle = async (
         .filter((t) => t.length > 0 && t !== title.trim()),
     }
   } catch {
-    // Offline / unreachable proxy: degrade to "no match" — the caller decides
-    // how to tell the user.
+    // Offline / unreachable proxy: the deterministic filename pipeline runs
+    // anyway; the caller only loses the extra title candidates.
     return null
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
 }

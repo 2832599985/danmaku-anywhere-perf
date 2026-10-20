@@ -1570,3 +1570,85 @@ identically on the unmodified baseline** and are unrelated.
 - `SHERPA_ONNX_LIB_DIR` must point at the local sherpa libs or `tauri build`
   tries to download them and fails on a blocked network; the libs are already at
   `C:/_DEV/sherpa-onnx/sherpa-onnx-v1.13.7-win-x64-static-MT-Release-lib/lib`.
+
+## 29. Auto-match reliability rewrite: the AI stopped being the gate (2026-10-20 — DONE)
+
+**Symptom.** On a first-ever file of a show, auto-match often did nothing at all;
+the user had to open the picker by hand. The web extension felt far smoother.
+
+**Root causes found by probing the real endpoints (not inferred).**
+
+1. **The AI call gated the whole pipeline.** `PlayerHost` did
+   `if (!info) return` after `aiExtractTitle`. A security-filtered or offline
+   AI meant no search, no picker, no OSD — total silence.
+2. **`[LoliHouse]` filenames made the proxy return HTTP 500.** Verified by curl:
+   any leading bracket containing `Loli` (`[LoliHouse]`, `[Loli]`, `[LoliSub]`,
+   `[LoliHouseX]`) → `500 {"message":"Internal server error"}`; the same name
+   without the bracket → 200. Gemini's safety filter rejects the token; the
+   proxy's unguarded `JSON.parse` turns that into a 500. The deployed proxy also
+   **ignores `inputType: 'filename'`** and still uses the HTML prompt.
+3. **The filename fallback could not parse the common fansub shape.** The shared
+   parser only knew `E11` / `Episode 11` / `第11话` / `SxxEyy`, so
+   `Show - 11 [WebRip…]` parsed as episode 0; `cleanFilenameTitle` also kept
+   `[LoliHouse]` and `HEVC-10bit`, so its search returned zero rows. The AI was
+   the only hope, and §2 killed it.
+4. **DanDanPlay numbers sequels absolutely.** `咒术回战 第二季` = 25–47,
+   `转生史莱姆 第三季` = 49–72. `findEpisodeByNumber(list, 11)` misses; the old
+   code then said "未能确定是第几集" even though the season was exact.
+5. **Romaji titles don't lexically match localized DDP titles.** `Kusuriya no
+   Hitorigoto` → `药屋少女的呢喃`; the old `findBestMatchingSeason` returned null
+   and every romaji release fell back to the picker.
+6. **The web extension has more inputs.** It sends up to 4000 chars of page
+   `meta`/`title`/`h1`–`h6` to the AI, many sites use XPath integration instead
+   of AI at all, and it searches DDP + Bilibili + Tencent in parallel with a
+   persisted title map. The player has one filename and DDP.
+
+**New pipeline** (`src/danmaku/releaseName.ts` + `autoMatch.ts`):
+
+- `parseReleaseName()` deterministically strips the leading fansub group and
+  release metadata, recognizes `- 11`, `[11]`, `第11话`, `SxxEyy`, `E11`, season
+  markers (`第N季/期/部`, `Season N`, `2nd Season`, `Part N`, `S1`), years,
+  movies and batch packs. The AI input is now `title - episode` (no group tag),
+  which both avoids the 500 and stops CJK garbling.
+- The AI is an **enhancer**: `autoMatch(name, null, …)` must still resolve.
+  Both paths are audited live (see below).
+- All candidate keywords are searched in parallel; seasons are scored by
+  lexical title (exact; prefix only when the extra text is a season/edition
+  marker, so `ONE PIECE novel HEROINES` no longer beats `海贼王`), season hint,
+  year (future placeholder seasons penalized — DDP carries a 2027 duplicate of
+  a 2026 show), and type (movie vs TV). Episodes are probed for the top
+  candidates; `resolveEpisodeTarget()` tries exact then
+  `firstEpisodeNumber + localEpisode - 1` (the absolute-numbering fix).
+- Decisions: lexical match with a margin → `title`; one non-future strong-keyword
+  result with the episode → `fuzzy`; several seasons, no season in the filename
+  → `default-season` (base season, OSD says `未标季`, never auto-learned);
+  otherwise the picker opens pre-searched with the reason.
+- **Episode title matching.** When the release carries a title after
+  `第N集/话` (e.g. `… 第12话 華瑞月`), it is compared with each candidate's
+  episode title (CJK/Latin bigram overlap). Exactly one match outranks every
+  other signal — it is the only way to tell two seasons apart when both contain
+  episode 12. Live example: `Kusuriya no Hitorigoto 第12话 華瑞月` picks
+  `药屋少女的呢喃 第二季`, not the base season.
+- **`default-season` is not written into the learned filename rules** — it is
+  an inference from search order, so a wrong guess must not become permanent.
+- The rule path now uses the same `resolveEpisodeTarget`, so a learned
+  `第11话` rule keeps working for absolute-numbered sequels.
+- New OSD: `自动匹配 · <season> · 第11集（站内第35话） · N 条`; failures open the
+  picker instead of staying silent.
+
+**Live audit** (`src/danmaku/autoMatch.live.test.ts`, opt-in):
+
+```
+LIVE_AUTO_MATCH=1 corepack pnpm -C app/player exec vitest run \
+  src/danmaku/autoMatch.live.test.ts --disableConsoleIntercept
+```
+
+11-file corpus (LoliHouse / Nekomoe / Airota / Sakurato / Chinese season
+markers / romaji / absolute sequels / One Piece 1080 / episode-title case /
+movie): **10 matched, 1 ambiguous (a movie DDP does not carry), 0 not found —
+with AI and with the AI forced to `null`.** The ambiguous movie case must stay
+ambiguous: mounting the TV season's episode 1 for a `剧场版` is exactly the kind
+of wrong answer the "never guess" rule forbids.
+
+**Gates.** player `tsc` clean, 165 unit tests + 1 opt-in live audit; media-parser
+54; extension 360; biome clean; vite build; Playwright 7/7.

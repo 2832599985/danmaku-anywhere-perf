@@ -8,7 +8,7 @@ import {
 } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { chooseSeason } from '@/danmaku/autoMatch'
+import { chooseSeason, episodeFromFilename } from '@/danmaku/autoMatch'
 import type { DdpEpisode, DdpSeason } from '@/danmaku/ddp'
 import {
   fetchEpisodeComments,
@@ -195,15 +195,22 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
       // batch then mounts without asking (see `filenameRules`).
       const path = store.media?.path
       if (path && store.danmakuSettings.learnFilenamePatterns) {
-        const rule = learnRule({
-          filePath: path,
-          episode: Number(ep.episodeNumber),
-          season: {
-            bangumiId: season.bangumiId,
-            title: season.title,
-            episodeCount: season.episodeCount,
-          },
-        })
+        // Learn the LOCAL episode number from the file name, not DanDanPlay's
+        // number: sequels are often numbered absolutely there (S2E11 = 35), and
+        // a rule looking for `35` in `Show - 11` could never fire again.
+        const localEpisode =
+          episodeFromFilename(path) || prefill?.targetEpisode || 0
+        const rule = localEpisode
+          ? learnRule({
+              filePath: path,
+              episode: localEpisode,
+              season: {
+                bangumiId: season.bangumiId,
+                title: season.title,
+                episodeCount: season.episodeCount,
+              },
+            })
+          : null
         if (rule) {
           store.addFilenameRule(rule)
           store.showOsd('已记住此命名格式 · 下次自动匹配', '📐')

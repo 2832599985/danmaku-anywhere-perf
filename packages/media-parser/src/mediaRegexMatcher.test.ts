@@ -86,6 +86,39 @@ describe('mediaRegexMatcher', () => {
       )
     })
 
+    it('should handle fansub "- 11" and "[11]" markers', () => {
+      expect(
+        mediaRegexMatcher.findCommonEpisode(
+          '[LoliHouse] Futsutsuka na Akujo dewa Gozaimasu ga - 11 [WebRip 1080p].mkv'
+        )?.value
+      ).toBe('11')
+      expect(
+        mediaRegexMatcher.findCommonEpisode(
+          '[Airota][Sousou no Frieren][07][1080p][CHS].mkv'
+        )?.value
+      ).toBe('07')
+      expect(
+        mediaRegexMatcher.findCommonEpisode(
+          '[Sakurato] BLEACH 千年血战篇-诀别谭- [11][AVC AAC][1080p].mkv'
+        )?.value
+      ).toBe('11')
+      expect(
+        mediaRegexMatcher.findCommonEpisode('One Piece - 1080 [Baha]')?.value
+      ).toBe('1080')
+    })
+
+    it('should not treat years or resolutions as episodes', () => {
+      expect(mediaRegexMatcher.findCommonEpisode('Show - 2024 [1080p]')).toBe(
+        null
+      )
+      expect(mediaRegexMatcher.findCommonEpisode('[Group] Show [1080p]')).toBe(
+        null
+      )
+      expect(mediaRegexMatcher.findCommonEpisode('[Group] Show [1080]')).toBe(
+        null
+      )
+    })
+
     it('should be strict', () => {
       // Testing the updated standard logic
       expect(mediaRegexMatcher.findCommonEpisode('Apple12')).toBe(null)

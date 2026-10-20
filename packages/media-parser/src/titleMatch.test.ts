@@ -46,6 +46,13 @@ describe('extractSeasonHint', () => {
     expect(extractSeasonHint('Show S03')).toBe(3)
   })
 
+  it('extracts 期/部, Nth Season and Part N', () => {
+    expect(extractSeasonHint('某动漫 第2期')).toBe(2)
+    expect(extractSeasonHint('某动漫 第二部')).toBe(2)
+    expect(extractSeasonHint('Attack on Titan 2nd Season')).toBe(2)
+    expect(extractSeasonHint('Attack on Titan Part 3')).toBe(3)
+  })
+
   it('extracts Roman numerals', () => {
     expect(extractSeasonHint('Show III')).toBe(3)
     expect(extractSeasonHint('Show IV')).toBe(4)

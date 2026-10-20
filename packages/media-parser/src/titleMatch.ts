@@ -11,15 +11,22 @@ const seasonPatterns: {
   pattern: RegExp
   extract: (m: RegExpMatchArray) => number
 }[] = [
-  // Chinese: 第一季, 第二季, ..., 第十季
+  // Chinese: 第一季/第二期, ..., 第十部
   {
-    pattern: /第([一二三四五六七八九十百千]+)季/,
+    pattern: /第([一二三四五六七八九十百千]+)[季期部]/,
     extract: (m) => chineseToNumber(m[1]) ?? 0,
   },
-  // Chinese: 第1季, 第2季
-  { pattern: /第(\d+)季/, extract: (m) => Number.parseInt(m[1], 10) },
+  // Chinese: 第1季 / 第2期 / 第3部
+  { pattern: /第(\d+)[季期部]/, extract: (m) => Number.parseInt(m[1], 10) },
   // English: Season 3, season 3
   { pattern: /season\s*(\d+)/i, extract: (m) => Number.parseInt(m[1], 10) },
+  // English: 2nd Season, 3rd season
+  {
+    pattern: /(\d+)(?:st|nd|rd|th)\s*season/i,
+    extract: (m) => Number.parseInt(m[1], 10),
+  },
+  // English: Part 2
+  { pattern: /\bpart\s*(\d+)/i, extract: (m) => Number.parseInt(m[1], 10) },
   // Short: S3, S03
   { pattern: /\bS(\d+)\b/i, extract: (m) => Number.parseInt(m[1], 10) },
   // Roman numerals: II, III, IV (at word boundary or end)

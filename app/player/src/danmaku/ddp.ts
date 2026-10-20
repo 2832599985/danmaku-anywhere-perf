@@ -4,6 +4,7 @@ import {
   commentGetComment,
   getBangumiAnime,
   searchSearchAnime,
+  searchSearchEpisodes,
 } from '@danmaku-anywhere/danmaku-provider/ddp'
 
 /**
@@ -109,13 +110,42 @@ export const fetchSeasonEpisodes = async (
   }))
 }
 
-/** Fetch the comments for a specific DanDanPlay episode. */
-export const fetchEpisodeComments = async (
-  episodeId: number
-): Promise<CommentEntity[]> => {
+/**
+ * Search DanDanPlay by title + episode number (`/v2/search/episodes`).
+ * This endpoint already filters out shows that do not have the requested
+ * episode, so it is a useful last resort when the season search ranks the
+ * right show poorly. The response has no bangumi metadata; `animeId` is the
+ * bangumi id on this API.
+ */
+export const searchEpisodesByNumber = async (
+  keyword: string,
+  episode: number
+): Promise<DdpSeason[]> => {
   ensureConfigured()
-  const result = await commentGetComment(episodeId)
+  const trimmed = keyword.trim()
+  if (!trimmed || episode <= 0) return []
+  const result = await searchSearchEpisodes({
+    anime: trimmed,
+    episode: String(episode),
+  })
   if (!result.success) throw result.error
-  // CommentData ({cid?,p,m}) is structurally a CommentEntity.
-  return result.data
+  return result.data.map((anime) => ({
+    animeId: anime.animeId,
+    bangumiId: String(anime.animeId),
+    title: anime.animeTitle,
+    type: String(anime.type),
+    typeDescription: anime.typeDescription,
+    imageUrl: '',
+    year: Number.NaN,
+    episodeCount: anime.episodes.length,
+  }))
 }
+
+/** Fetch the comments for a specific DanDanPlay episode. */ export const fetchEpisodeComments =
+  async (episodeId: number): Promise<CommentEntity[]> => {
+    ensureConfigured()
+    const result = await commentGetComment(episodeId)
+    if (!result.success) throw result.error
+    // CommentData ({cid?,p,m}) is structurally a CommentEntity.
+    return result.data
+  }

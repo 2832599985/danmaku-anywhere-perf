@@ -79,6 +79,27 @@ describe('MediaParser', () => {
         })
       })
 
+      it('should handle fansub "- 11" and "[11]" markers', () => {
+        expect(
+          parser.parse(
+            createInput(
+              '[LoliHouse] Futsutsuka na Akujo dewa Gozaimasu ga - 11 [WebRip 1080p].mkv'
+            )
+          )
+        ).toMatchObject({
+          searchTitle: '[LoliHouse] Futsutsuka na Akujo dewa Gozaimasu ga',
+          episode: 11,
+        })
+        expect(
+          parser.parse(
+            createInput('[Airota][Sousou no Frieren][07][1080p][CHS].mkv')
+          )
+        ).toMatchObject({
+          searchTitle: '[Airota][Sousou no Frieren]',
+          episode: 7,
+        })
+      })
+
       it('should handle condensed SxE format and re-append season', () => {
         const input = createInput('Arcane S2E1 Heavy Is The Crown')
 
