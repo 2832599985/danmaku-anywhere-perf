@@ -408,28 +408,32 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
               {SCALE_LABEL[upscale.targetResolution]}
             </Box>
           </Box>
-          {/* Mini EQ bars (decorative) */}
-          <Box
-            sx={{
-              display: 'flex',
-              gap: '2px',
-              alignItems: 'flex-end',
-              height: 30,
-            }}
-          >
-            {[0, 1, 2, 3].map((i) => (
-              <Box
-                key={`hud-bar-${i}`}
-                component="span"
-                sx={{
-                  width: 4,
-                  height: '100%',
-                  background: i < 2 ? VERMILION : PAPER,
-                  transformOrigin: 'bottom',
-                  animation: `ink-bar 0.9s ease-in-out ${i * 0.15}s infinite`,
-                }}
-              />
-            ))}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+            <Box
+              component="span"
+              sx={{
+                fontFamily: MONO,
+                fontSize: 9,
+                letterSpacing: '0.22em',
+                color: alpha(PAPER, 0.5),
+              }}
+            >
+              CPU ms/帧
+            </Box>
+            <Box
+              component="span"
+              sx={{
+                fontFamily: MONO,
+                fontSize: 15,
+                fontWeight: 700,
+                color: PAPER,
+                lineHeight: 1.6,
+              }}
+            >
+              {upscaleStats.cpuFrameMs > 0
+                ? upscaleStats.cpuFrameMs.toFixed(1)
+                : '—'}
+            </Box>
           </Box>
         </Box>
       )}

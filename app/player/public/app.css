@@ -25,6 +25,15 @@ body,
     transform: translateX(-2100px);
   }
 }
+/* Travel spans the text plus its inline-size container, not the viewport. */
+@keyframes ink-dm-box {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(-100% - 100cqw));
+  }
+}
 @keyframes ink-blink {
   0%,
   60% {
@@ -33,15 +42,6 @@ body,
   61%,
   100% {
     opacity: 0.25;
-  }
-}
-@keyframes ink-bar {
-  0%,
-  100% {
-    transform: scaleY(0.45);
-  }
-  50% {
-    transform: scaleY(1);
   }
 }
 @keyframes ink-tone {

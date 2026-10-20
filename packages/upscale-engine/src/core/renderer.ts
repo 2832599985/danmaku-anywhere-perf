@@ -216,6 +216,8 @@ export class Renderer {
   private diagnosticsSubmitMax = 0
   private diagnosticsCpuTotal = 0
   private diagnosticsCpuMax = 0
+  // CPU samples include interpolated outputs, not just video callbacks.
+  private diagnosticsProcessedFrames = 0
   private diagnosticsLastCallbackAt: number | null = null
   private diagnosticsLastPresentedFrames: number | null = null
   private diagnosticsLatestQueueDrainMs: number | null = null
@@ -1294,6 +1296,7 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
     this.diagnosticsSubmitMax = Math.max(this.diagnosticsSubmitMax, submitMs)
     this.diagnosticsCpuTotal += cpuMs
     this.diagnosticsCpuMax = Math.max(this.diagnosticsCpuMax, cpuMs)
+    this.diagnosticsProcessedFrames++
   }
 
   private maybeProbeQueue(): void {
@@ -1381,7 +1384,8 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       maximumEncodeMs: this.diagnosticsEncodeMax,
       averageSubmitMs: this.diagnosticsSubmitTotal / frames,
       maximumSubmitMs: this.diagnosticsSubmitMax,
-      averageCpuFrameMs: this.diagnosticsCpuTotal / frames,
+      averageCpuFrameMs:
+        this.diagnosticsCpuTotal / Math.max(1, this.diagnosticsProcessedFrames),
       maximumCpuFrameMs: this.diagnosticsCpuMax,
       latestQueueDrainMs: this.diagnosticsLatestQueueDrainMs,
       videoDroppedFrames: quality?.droppedVideoFrames ?? 0,
@@ -1406,6 +1410,7 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
     this.diagnosticsSubmitMax = 0
     this.diagnosticsCpuTotal = 0
     this.diagnosticsCpuMax = 0
+    this.diagnosticsProcessedFrames = 0
   }
 
   private notifyFirstFrameRendered(): void {
@@ -1462,10 +1467,15 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
     if (!frame) return false
 
     try {
+      const cpuStartedAt = this.diagnosticsEnabled ? performance.now() : 0
       const commandEncoder = this.device.createCommandEncoder()
       this.encodeInterpolationInput(commandEncoder, frame.texture)
       this.pipelines.forEach((pipeline) => pipeline.pass(commandEncoder))
       this.device.queue.submit([commandEncoder.finish()])
+      if (this.diagnosticsEnabled) {
+        const cpuMs = performance.now() - cpuStartedAt
+        this.recordCpuTimings(0, 0, 0, cpuMs)
+      }
       this.hasProcessedFrame = true
       this.lastPresentedGenerated = frame.generated
       this.processedFrameGeneration++

@@ -106,7 +106,7 @@ export const EmptyState = () => {
         }}
       />
 
-      {/* Faint drifting danmaku strip at top (4 lines, staggered). */}
+      {/* Keep the decorative lines below the top bar. */}
       <Box
         aria-hidden
         sx={{
@@ -114,9 +114,9 @@ export const EmptyState = () => {
           top: 0,
           left: 0,
           right: 0,
-          height: 320,
+          height: 340,
           overflow: 'hidden',
-          opacity: 0.28,
+          opacity: 0.45,
           pointerEvents: 'none',
         }}
       >
@@ -131,7 +131,7 @@ export const EmptyState = () => {
             aria-hidden
             sx={{
               position: 'absolute',
-              top: `${24 + idx * 68}px`,
+              top: `${58 + idx * 66}px`,
               // Start off-screen right; ink-dm translates -2100px so the line
               // sweeps right→left. left:0 (the old value) parked them stacked
               // at the left edge, never moving.

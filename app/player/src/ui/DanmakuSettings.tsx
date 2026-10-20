@@ -70,6 +70,7 @@ export const DanmakuSettings = () => {
       {/* Live preview window */}
       <Box sx={{ border: LINE_STRONG, position: 'relative', ...hatchSx() }}>
         <Box
+          data-danmaku-preview
           sx={{
             height: 96,
             display: 'flex',
@@ -77,9 +78,10 @@ export const DanmakuSettings = () => {
             justifyContent: 'center',
             overflow: 'hidden',
             position: 'relative',
+            containerType: 'inline-size',
           }}
         >
-          {/* First scrolling comment — left:100% so ink-dm sweeps R→L. */}
+          {/* First scrolling comment — left:100% so the line sweeps R→L. */}
           <Typography
             sx={{
               position: 'absolute',
@@ -91,7 +93,8 @@ export const DanmakuSettings = () => {
               textShadow: `1px 1px 0 ${INK}, -1px -1px 0 ${INK}`,
               whiteSpace: 'nowrap',
               opacity: danmaku.opacity,
-              animation: `ink-dm ${7 / danmaku.speed}s linear infinite`,
+              animation: `ink-dm-box ${7 / danmaku.speed}s linear infinite`,
+              animationDelay: `${-2 / danmaku.speed}s`,
             }}
           >
             预览:这就是当前样式
@@ -109,8 +112,8 @@ export const DanmakuSettings = () => {
               textShadow: `1px 1px 0 ${INK}, -1px -1px 0 ${INK}`,
               whiteSpace: 'nowrap',
               opacity: danmaku.opacity,
-              animation: `ink-dm ${9 / danmaku.speed}s linear infinite`,
-              animationDelay: '-3s',
+              animation: `ink-dm-box ${9 / danmaku.speed}s linear infinite`,
+              animationDelay: `${-3 / danmaku.speed}s`,
             }}
           >
             草 www

@@ -294,6 +294,22 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
           { timeout: 60_000 }
         )
         .toMatch(/^[1-9]\d*$/)
+      // Let a complete diagnostics window run on the interpolation path.
+      await page.waitForTimeout(1200)
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as PlayerWindow).__player.store.getState().upscaleStats
+                ?.cpuFrameMs ?? 0
+          )
+        )
+        .toBeGreaterThan(0)
+      await page.mouse.move(640, 400)
+      await expect(page.getByText('CPU ms/帧', { exact: true })).toBeVisible()
+      await page.screenshot({
+        path: test.info().outputPath('hud-cpu-timing.png'),
+      })
     }
   } else {
     test.info().annotations.push({
@@ -531,5 +547,111 @@ test.describe('quick panels and settings navigation', () => {
         )
       )
       .toBe(true)
+  })
+})
+
+test.describe('visual polish', () => {
+  test.use({ viewport: { width: 1280, height: 800 } })
+
+  test('idle decoration clears the top bar and labels have a real gap', async ({
+    page,
+  }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => !!(window as PlayerWindow).__player)
+    await page.evaluate(() => document.fonts.ready)
+    const greeting = page.getByText('また会えたね', { exact: true })
+    await expect(greeting).toHaveCSS('top', '58px')
+    await expect(greeting.locator('..')).toHaveCSS('opacity', '0.45')
+    await expect(page.getByRole('button', { name: '設 设置' })).toHaveCSS(
+      'column-gap',
+      '6px'
+    )
+    await page.evaluate(() => {
+      for (const el of document.querySelectorAll('p')) {
+        if (getComputedStyle(el).animationName !== 'ink-dm') continue
+        const animation = el.getAnimations()[0]
+        const timing = animation.effect?.getTiming()
+        if (!timing || typeof timing.duration !== 'number') continue
+        animation.pause()
+        animation.currentTime = timing.delay + timing.duration * 1.4
+      }
+    })
+    const rect = await greeting.boundingBox()
+    expect(rect?.y).toBeGreaterThanOrEqual(48)
+    await page.screenshot({ path: test.info().outputPath('idle-polished.png') })
+  })
+
+  test('preview lines start visible and traverse their own container', async ({
+    page,
+  }) => {
+    await page.goto('/')
+    await page.waitForFunction(() => !!(window as PlayerWindow).__player)
+    await page.getByRole('button', { name: '設 设置' }).click()
+    await page.getByRole('button', { name: '弹幕', exact: true }).click()
+    await page.evaluate(() => document.fonts.ready)
+    await expect(
+      page.getByRole('button', { name: '弹幕', exact: true })
+    ).toHaveCSS('background-color', 'rgb(244, 241, 232)')
+    const preview = page.locator('[data-danmaku-preview]')
+    const lines = preview.locator('p')
+    await expect(lines).toHaveCount(2)
+    const initiallyInside = await preview.evaluate((el) => {
+      const box = el.getBoundingClientRect()
+      return Array.from(el.querySelectorAll('p')).every((line) => {
+        const rect = line.getBoundingClientRect()
+        return rect.left >= box.left && rect.right <= box.right
+      })
+    })
+    expect(initiallyInside).toBe(true)
+    for (const width of [880, 1280, 1920]) {
+      await page.setViewportSize({ width, height: 800 })
+      for (const speed of [0.5, 1, 2]) {
+        await page.evaluate(
+          (speed) =>
+            (window as PlayerWindow).__player.store
+              .getState()
+              .updateDanmakuSettings({ speed }),
+          speed
+        )
+        await expect(lines.first()).toHaveCSS(
+          'animation-duration',
+          String(7 / speed) + 's'
+        )
+        const visibility = await preview.evaluate((el) => {
+          const box = el.getBoundingClientRect()
+          return Array.from(el.querySelectorAll('p')).map((line) => {
+            const animation = line.getAnimations()[0]
+            const timing = animation?.effect?.getTiming()
+            if (!timing || typeof timing.duration !== 'number') return []
+            animation.pause()
+            const duration = timing.duration
+            return [0.01, 0.25, 0.5, 0.75, 0.99].map((phase) => {
+              // Sample a full iteration after time zero, including negative delays.
+              animation.currentTime = timing.delay + duration * (1 + phase)
+              const rect = line.getBoundingClientRect()
+              return rect.right > box.left && rect.left < box.right
+            })
+          })
+        })
+        expect(visibility).toEqual([
+          [true, true, true, true, true],
+          [true, true, true, true, true],
+        ])
+      }
+      await preview.evaluate((el) => {
+        for (const [i, line] of Array.from(
+          el.querySelectorAll('p')
+        ).entries()) {
+          const animation = line.getAnimations()[0]
+          const timing = animation.effect?.getTiming()
+          if (!timing || typeof timing.duration !== 'number') continue
+          animation.currentTime =
+            timing.delay + timing.duration * (i === 0 ? 0.3 : 0.65)
+        }
+      })
+      await page.screenshot({
+        path: test.info().outputPath('preview-' + width + '.png'),
+      })
+    }
   })
 })

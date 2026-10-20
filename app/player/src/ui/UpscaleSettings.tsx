@@ -706,37 +706,9 @@ export const UpscaleSettings = () => {
                     textTransform: 'uppercase',
                   }}
                 >
-                  MS / FRAME
+                  CPU ms/帧
                 </Typography>
               </Box>
-
-              <Stack
-                direction="row"
-                spacing={0.5}
-                sx={{
-                  flex: 1,
-                  alignItems: 'flex-end',
-                  height: 40,
-                  gap: '2px',
-                }}
-              >
-                {Array.from({ length: 14 }).map((_, i) => {
-                  const height = 30 + ((i * 37) % 60)
-                  const delay = i * 0.15
-                  return (
-                    <Box
-                      key={i}
-                      sx={{
-                        flex: 1,
-                        height: `${height}%`,
-                        background: PAPER,
-                        animation: 'ink-bar 0.8s ease-in-out infinite',
-                        animationDelay: `${delay}s`,
-                      }}
-                    />
-                  )
-                })}
-              </Stack>
             </Stack>
           </Stack>
         </Box>

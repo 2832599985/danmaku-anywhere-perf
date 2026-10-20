@@ -104,9 +104,19 @@ export const FeatureSplitButton = ({
         >
           <Box
             component="span"
-            sx={{ fontSize: 13, fontWeight: 700, lineHeight: 1.2 }}
+            sx={{
+              fontSize: 13,
+              fontWeight: 700,
+              lineHeight: 1.2,
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: '6px',
+            }}
           >
-            {glyph} {label}
+            <Box component="span" sx={{ opacity: 0.7 }}>
+              {glyph}
+            </Box>
+            {label}
           </Box>
           {status && (
             <Box
