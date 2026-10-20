@@ -7,12 +7,6 @@ import {
   targetEpisode,
 } from '@/danmaku/autoMatch'
 import {
-  fetchEpisodeComments,
-  fetchSeasonEpisodes,
-  searchEpisodesByNumber,
-  searchSeasons,
-} from '@/danmaku/ddp'
-import {
   dirname,
   learnRule,
   matchRule,
@@ -22,6 +16,15 @@ import {
 import { filterComments } from '@/danmaku/filter'
 import { parseDanmakuText } from '@/danmaku/parse'
 import { parseReleaseName } from '@/danmaku/releaseName'
+import {
+  adapterFor,
+  dedupeByPM,
+  enabledSources,
+  SOURCE_LABELS,
+  searchAll,
+  searchEpisodesAcross,
+  seasonFromRule,
+} from '@/danmaku/sources'
 import {
   extOf,
   type Platform,
@@ -446,7 +449,8 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         const hit = matchRule(s.filenameRules, videoPath)
         if (hit) {
           try {
-            const list = await fetchSeasonEpisodes(hit.rule.season)
+            const adapter = adapterFor(hit.rule.season.source)
+            const list = await adapter.episodes(seasonFromRule(hit.rule.season))
             s = usePlayerStore.getState()
             if (stale || s.media?.path !== videoPath || s.danmakuSource) return
 
@@ -464,7 +468,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             }
             const episode = resolved.episode
 
-            const comments = await fetchEpisodeComments(episode.episodeId)
+            const comments = await adapter.comments(episode)
             s = usePlayerStore.getState()
             if (stale || s.media?.path !== videoPath || s.danmakuSource) return
             if (!comments.length) {
@@ -510,10 +514,12 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         info !== null
       if (!looksEpisodic) return
 
+      const sources = enabledSources(s.danmakuSettings, platform.isTauri)
       const outcome = await autoMatch(basename(videoPath), info, {
-        search: searchSeasons,
-        episodes: fetchSeasonEpisodes,
-        searchEpisodes: searchEpisodesByNumber,
+        search: (keyword, index) => searchAll(keyword, sources, index),
+        episodes: (season) => adapterFor(season.source).episodes(season),
+        searchEpisodes: searchEpisodesAcross,
+        mergeSources: s.danmakuSettings.mergeSources,
       })
       s = usePlayerStore.getState()
       if (stale || s.media?.path !== videoPath || s.danmakuSource) return
@@ -536,20 +542,31 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         return
       }
 
-      let comments
-      try {
-        comments = await fetchEpisodeComments(outcome.episode.episodeId)
-      } catch {
-        return
-      }
+      const matches = [
+        { season: outcome.season, episode: outcome.episode },
+        ...outcome.extraMatches,
+      ]
+      const settled = await Promise.allSettled(
+        matches.map((match) =>
+          adapterFor(match.season.source).comments(match.episode)
+        )
+      )
       s = usePlayerStore.getState()
       if (stale || s.media?.path !== videoPath || s.danmakuSource) return
+      const comments = dedupeByPM(
+        settled.flatMap((result) =>
+          result.status === 'fulfilled' ? result.value : []
+        )
+      )
       const localEpisode =
         release.episode || targetEpisode(basename(videoPath), info)
       if (!comments.length) {
+        const failed = settled.every((result) => result.status === 'rejected')
         s.showOsd(
-          `${localEpisode > 0 ? `第${localEpisode}集` : '该集'}暂无弹幕`,
-          '💬'
+          failed
+            ? '弹幕获取失败 · 请检查网络'
+            : `${localEpisode > 0 ? `第${localEpisode}集` : '该集'}暂无弹幕`,
+          failed ? '⚠' : '💬'
         )
         return
       }
@@ -571,7 +588,8 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
           filePath: videoPath,
           episode: localEpisode,
           season: {
-            bangumiId: outcome.season.bangumiId,
+            source: outcome.season.source,
+            bangumiId: outcome.season.id,
             title: outcome.season.title,
             episodeCount: outcome.season.episodeCount,
           },
@@ -579,8 +597,11 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         if (rule) s.addFilenameRule(rule)
       }
 
+      const sourceLabel = [
+        ...new Set(matches.map((match) => SOURCE_LABELS[match.season.source])),
+      ].join(' + ')
       s.showOsd(
-        `自动匹配 · ${outcome.season.title} · ${
+        `自动匹配 · ${sourceLabel} · ${outcome.season.title} · ${
           localEpisode > 0 ? `第${localEpisode}集` : '该集'
         }${
           outcome.episodeMode === 'offset'

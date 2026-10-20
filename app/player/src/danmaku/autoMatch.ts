@@ -6,8 +6,8 @@ import {
 } from '@danmaku-anywhere/media-parser'
 import type { AiTitleInfo } from './ai'
 import { basenameWithoutExt } from './basename'
-import type { DdpEpisode, DdpSeason } from './ddp'
 import { parseReleaseName, type ReleaseInfo } from './releaseName'
+import type { SourceEpisode, SourceId, SourceSeason } from './sources'
 
 export { basenameWithoutExt }
 
@@ -35,7 +35,7 @@ export interface SearchAttempt {
 
 /** One season considered by the matcher (diagnostics + picker ordering). */
 export interface ScoredSeason {
-  season: DdpSeason
+  season: SourceSeason
   score: number
   titleScore: number
   /** 0-based rank in the search that surfaced it (best over all keywords). */
@@ -46,7 +46,7 @@ export interface ScoredSeason {
   /** Which keyword surfaced it. */
   keyword: string
   /** Resolved episode in this season, when one exists. */
-  episode: DdpEpisode | null
+  episode: SourceEpisode | null
   /** `exact` or `offset` (DanDanPlay numbers sequels by absolute episode). */
   episodeMode: 'exact' | 'offset' | null
   /** The release's episode title matches this episode's title. */
@@ -58,8 +58,9 @@ export interface AutoMatchAttempts {
   keywords: string[]
   aiTitle: string | null
   seasons: {
+    source: SourceId
     title: string
-    bangumiId: string
+    id: string
     score: number
     titleScore: number
     rank: number
@@ -75,19 +76,21 @@ export type AutoMatchOutcome =
   | {
       status: 'matched'
       keyword: string
-      season: DdpSeason
-      episode: DdpEpisode
+      season: SourceSeason
+      episode: SourceEpisode
       /** How the episode number was mapped onto the site's numbering. */
       episodeMode: 'exact' | 'offset'
       /** `title` = lexical title match; `fuzzy` = search result + episode;
        *  `default-season` = no season in the file name, base season chosen. */
       matchMode: 'title' | 'fuzzy' | 'default-season'
+      /** Other sources that confidently resolved the SAME episode (merge mode). */
+      extraMatches: { season: SourceSeason; episode: SourceEpisode }[]
       attempts: AutoMatchAttempts
     }
   | {
       status: 'ambiguous'
       keyword: string
-      seasons: DdpSeason[]
+      seasons: SourceSeason[]
       targetEpisode: number
       reason: string
       attempts: AutoMatchAttempts
@@ -165,9 +168,9 @@ const numericEpisode = (value: number | string): number | null => {
  * episode.
  */
 export const resolveEpisodeTarget = (
-  episodes: DdpEpisode[],
+  episodes: SourceEpisode[],
   target: number
-): { episode: DdpEpisode; mode: 'exact' | 'offset' } | null => {
+): { episode: SourceEpisode; mode: 'exact' | 'offset' } | null => {
   if (target <= 0) return null
 
   const exact = findEpisodeByNumber(episodes, target)
@@ -176,7 +179,8 @@ export const resolveEpisodeTarget = (
   const numeric = episodes
     .map((episode) => ({ episode, n: numericEpisode(episode.episodeNumber) }))
     .filter(
-      (entry): entry is { episode: DdpEpisode; n: number } => entry.n !== null
+      (entry): entry is { episode: SourceEpisode; n: number } =>
+        entry.n !== null
     )
     .sort((a, b) => a.n - b.n)
   if (numeric.length === 0) return null
@@ -195,10 +199,10 @@ export const resolveEpisodeTarget = (
  * Used by the manual picker to expand the likely season.
  */
 export const chooseSeason = (
-  seasons: DdpSeason[],
+  seasons: SourceSeason[],
   keyword: string,
   sample: string
-): DdpSeason | null => {
+): SourceSeason | null => {
   if (seasons.length === 0) return null
   if (seasons.length === 1) return seasons[0]
   const hint = extractSeasonHint(keyword) ?? extractSeasonHint(sample)
@@ -310,7 +314,7 @@ interface RankedSeason extends ScoredSeason {
  * verdict: the caller still requires a margin before auto-mounting.
  */
 const scoreOne = (
-  season: DdpSeason,
+  season: SourceSeason,
   keywords: ReadonlySet<string>,
   ranks: ReadonlyMap<string, number>,
   strong: ReadonlySet<string>,
@@ -365,8 +369,8 @@ const scoreOne = (
       reasons.push('候选未标季')
     }
   } else if (seasonNo !== null) {
-    // A titled season cannot be assumed to be the one the file means.
-    score -= 10
+    // `第1季` is just an explicit spelling of the base season.
+    if (seasonNo !== 1) score -= 10
   } else {
     score += 10
   }
@@ -412,11 +416,14 @@ const scoreOne = (
 }
 
 export interface AutoMatchDeps {
-  /** Injected so the resolution logic stays unit-testable. */
-  search: (keyword: string) => Promise<DdpSeason[]>
-  episodes: (season: DdpSeason) => Promise<DdpEpisode[]>
+  /** Injected so the resolution logic stays unit-testable. `index` is the
+   *  keyword's position (external sources only search the first few). */
+  search: (keyword: string, index: number) => Promise<SourceSeason[]>
+  episodes: (season: SourceSeason) => Promise<SourceEpisode[]>
   /** Optional DDP `/v2/search/episodes` (title + episode) last resort. */
-  searchEpisodes?: (keyword: string, episode: number) => Promise<DdpSeason[]>
+  searchEpisodes?: (keyword: string, episode: number) => Promise<SourceSeason[]>
+  /** Merge comments from every confident source for the matched episode. */
+  mergeSources?: boolean
   /** Injectable clock (tests use a fixed date). */
   now?: () => Date
 }
@@ -430,8 +437,9 @@ const attemptsFor = (
   keywords,
   aiTitle: ai?.title ?? null,
   seasons: ranked.slice(0, 8).map((entry) => ({
+    source: entry.season.source,
     title: entry.season.title,
-    bangumiId: entry.season.bangumiId,
+    id: entry.season.id,
     score: entry.score,
     titleScore: entry.titleScore,
     rank: entry.rank,
@@ -443,11 +451,11 @@ const attemptsFor = (
   reason,
 })
 
-/** Merge search results, keeping the best (lowest) rank per bangumiId. */
+/** Merge search results, keeping the best (lowest) rank per source+id. */
 const mergeSeasons = (
-  groups: { keyword: string; seasons: DdpSeason[] }[]
+  groups: { keyword: string; seasons: SourceSeason[] }[]
 ): {
-  season: DdpSeason
+  season: SourceSeason
   keywords: Set<string>
   ranks: Map<string, number>
   rank: number
@@ -455,7 +463,7 @@ const mergeSeasons = (
   const byId = new Map<
     string,
     {
-      season: DdpSeason
+      season: SourceSeason
       keywords: Set<string>
       ranks: Map<string, number>
       rank: number
@@ -464,9 +472,10 @@ const mergeSeasons = (
   for (const { keyword, seasons } of groups) {
     if (!Array.isArray(seasons)) continue
     seasons.forEach((season, rank) => {
-      const existing = byId.get(season.bangumiId)
+      const key = `${season.source}:${season.id}`
+      const existing = byId.get(key)
       if (!existing) {
-        byId.set(season.bangumiId, {
+        byId.set(key, {
           season,
           keywords: new Set([keyword]),
           ranks: new Map([[keyword, rank]]),
@@ -542,12 +551,12 @@ export const autoMatch = async (
   // Every candidate is searched in parallel: the first keyword that returns
   // something is no longer "the answer" — the ranking below decides.
   const searches = await Promise.allSettled(
-    keywords.map(async (keyword) => ({
+    keywords.map(async (keyword, index) => ({
       keyword,
-      seasons: await deps.search(keyword),
+      seasons: await deps.search(keyword, index),
     }))
   )
-  const groups: { keyword: string; seasons: DdpSeason[] }[] = []
+  const groups: { keyword: string; seasons: SourceSeason[] }[] = []
   let firstError: string | null = null
   for (const result of searches) {
     if (result.status === 'fulfilled') {
@@ -659,7 +668,14 @@ export const autoMatch = async (
   // contain the same episode number, so it outranks everything else.
   const titled = mountable.filter((entry) => entry.episodeTitleMatch)
   if (titled.length === 1) {
-    return matched(titled[0], 'title', keywords, ai, ranked)
+    return matched(
+      titled[0],
+      'title',
+      keywords,
+      ai,
+      ranked,
+      deps.mergeSources ?? false
+    )
   }
 
   // A. Lexical title match with a clear margin.
@@ -668,7 +684,14 @@ export const autoMatch = async (
     best.titleScore >= 60 &&
     (!second || best.score - second.score >= 25)
   ) {
-    return matched(best, 'title', keywords, ai, ranked)
+    return matched(
+      best,
+      'title',
+      keywords,
+      ai,
+      ranked,
+      deps.mergeSources ?? false
+    )
   }
 
   // B. Best title match resolves the episode while its closest rival does not.
@@ -677,7 +700,14 @@ export const autoMatch = async (
     best.titleScore >= 60 &&
     (!second || best.score >= second.score)
   ) {
-    return matched(best, 'title', keywords, ai, ranked)
+    return matched(
+      best,
+      'title',
+      keywords,
+      ai,
+      ranked,
+      deps.mergeSources ?? false
+    )
   }
 
   // C/D only trust results from a STRONG keyword (AI title / cleaned title).
@@ -693,7 +723,14 @@ export const autoMatch = async (
 
     // C. Exactly one non-future strong result has the episode.
     if (eligible.length === 1) {
-      return matched(eligible[0], 'fuzzy', keywords, ai, ranked)
+      return matched(
+        eligible[0],
+        'fuzzy',
+        keywords,
+        ai,
+        ranked,
+        deps.mergeSources ?? false
+      )
     }
 
     // D. The file name carries no season, and several seasons have the
@@ -706,7 +743,14 @@ export const autoMatch = async (
           entry.strongRank === 0 && seasonNumberOf(entry.season.title) === null
       )
       if (base) {
-        return matched(base, 'default-season', keywords, ai, ranked)
+        return matched(
+          base,
+          'default-season',
+          keywords,
+          ai,
+          ranked,
+          deps.mergeSources ?? false
+        )
       }
     }
   }
@@ -724,12 +768,56 @@ export const autoMatch = async (
   }
 }
 
+/**
+ * Other sources that resolved the SAME episode. Only confident, same-show,
+ * same-season candidates are merged; a `Show` vs `Show 第二季` mismatch is
+ * rejected even though the title score is high.
+ */
+const collectExtras = (
+  ranked: RankedSeason[],
+  entry: RankedSeason
+): { season: SourceSeason; episode: SourceEpisode }[] => {
+  const base = entry.season.title
+  const baseTitle = normalizeTitle(base)
+  const baseSeason = seasonNumberOf(base)
+  const bySource = new Map<SourceId, RankedSeason>()
+  for (const candidate of ranked) {
+    if (candidate === entry || !candidate.episode) continue
+    if (candidate.season.source === entry.season.source) continue
+    const title = candidate.season.title
+    const normalized = normalizeTitle(title)
+    const sameTitle = normalized === baseTitle
+    const candidateSeason = seasonNumberOf(title)
+    // `第1季` and "no marker" mean the same season; two explicit different
+    // seasons (or an unmarked base vs `第二季`) must never be merged.
+    const sameSeason =
+      candidateSeason === baseSeason ||
+      (baseSeason === null && candidateSeason === 1) ||
+      (baseSeason === 1 && candidateSeason === null)
+    const compatible =
+      sameTitle || (sameSeason && titleScore(title, base) >= 85)
+    if (!compatible) continue
+    const confident =
+      candidate.titleScore >= 85 ||
+      (candidate.strongRank !== null && candidate.strongRank <= 1)
+    if (!confident) continue
+    if (!bySource.has(candidate.season.source)) {
+      bySource.set(candidate.season.source, candidate)
+    }
+  }
+  return [...bySource.values()].map((candidate) => ({
+    season: candidate.season,
+    episode: candidate.episode as SourceEpisode,
+  }))
+}
+
 const matched = (
   entry: RankedSeason,
   matchMode: 'title' | 'fuzzy' | 'default-season',
   keywords: string[],
   ai: AiTitleInfo | null,
-  ranked: RankedSeason[]
+  ranked: RankedSeason[],
+  mergeSources: boolean
 ): AutoMatchOutcome => {
   if (!entry.episode) {
     // Defensive: callers only call this after `resolvable`.
@@ -749,6 +837,7 @@ const matched = (
     episode: entry.episode,
     episodeMode: entry.episodeMode ?? 'exact',
     matchMode,
+    extraMatches: mergeSources ? collectExtras(ranked, entry) : [],
     attempts: attemptsFor(keywords, ai, ranked),
   }
 }

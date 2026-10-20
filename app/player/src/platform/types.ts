@@ -139,4 +139,11 @@ export interface Platform {
   minimizeWindow(): void
   toggleMaximizeWindow(): void
   closeWindow(): void
+
+  /**
+   * Open the source's login page in a real WebView2 window (Bilibili/Tencent).
+   * The cookie jar is shared with the hidden source bridge. No-op in the
+   * browser, where the sources are unavailable.
+   */
+  sourceLogin(provider: 'bilibili' | 'tencent'): Promise<void>
 }

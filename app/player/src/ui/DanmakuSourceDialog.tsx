@@ -9,13 +9,16 @@ import {
 import { alpha } from '@mui/material/styles'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { chooseSeason, episodeFromFilename } from '@/danmaku/autoMatch'
-import type { DdpEpisode, DdpSeason } from '@/danmaku/ddp'
-import {
-  fetchEpisodeComments,
-  fetchSeasonEpisodes,
-  searchSeasons,
-} from '@/danmaku/ddp'
 import { learnRule } from '@/danmaku/filenameRules'
+import {
+  adapterFor,
+  enabledSources,
+  SOURCE_LABELS,
+  type SourceEpisode,
+  type SourceSeason,
+  searchAll,
+} from '@/danmaku/sources'
+import { getPlatform } from '@/platform'
 import { usePlayerCommands } from '@/player/commands'
 import { useFullscreenPortalContainer } from '@/player/fullscreenPortal'
 import { usePlayerStore } from '@/store/playerStore'
@@ -107,18 +110,22 @@ const LocalTab = ({ onDone }: { onDone: () => void }) => {
   )
 }
 
+/** Stable key across sources (season ids are only unique per source). */
+const seasonKey = (season: SourceSeason): string =>
+  `${season.source}:${season.id}`
+
 const OnlineTab = ({ onDone }: { onDone: () => void }) => {
   const prefill = usePlayerStore((s) => s.danmakuSearchPrefill)
   const dialogOpen = usePlayerStore((s) => s.danmakuDialogOpen)
   const [keyword, setKeyword] = useState('')
   const [searching, setSearching] = useState(false)
-  const [results, setResults] = useState<DdpSeason[]>([])
+  const [results, setResults] = useState<SourceSeason[]>([])
   const [searched, setSearched] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [episodes, setEpisodes] = useState<Record<string, DdpEpisode[]>>({})
+  const [episodes, setEpisodes] = useState<Record<string, SourceEpisode[]>>({})
   const [loadingSeason, setLoadingSeason] = useState<string | null>(null)
-  const [fetchingId, setFetchingId] = useState<number | null>(null)
+  const [fetchingId, setFetchingId] = useState<string | null>(null)
 
   const searchingRef = useRef(false)
   // The prefill we have already acted on — the dialog stays mounted between
@@ -127,12 +134,13 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
   const episodesRef = useRef(episodes)
   episodesRef.current = episodes
 
-  const loadEpisodes = useCallback(async (season: DdpSeason) => {
-    if (episodesRef.current[season.bangumiId]) return
-    setLoadingSeason(season.bangumiId)
+  const loadEpisodes = useCallback(async (season: SourceSeason) => {
+    const key = seasonKey(season)
+    if (episodesRef.current[key]) return
+    setLoadingSeason(key)
     try {
-      const list = await fetchSeasonEpisodes(season)
-      setEpisodes((prev) => ({ ...prev, [season.bangumiId]: list }))
+      const list = await adapterFor(season.source).episodes(season)
+      setEpisodes((prev) => ({ ...prev, [key]: list }))
     } catch (e) {
       setError(errorMessage(e))
     } finally {
@@ -148,13 +156,15 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
       setSearching(true)
       setError(null)
       try {
-        const seasons = await searchSeasons(trimmed)
+        const settings = usePlayerStore.getState().danmakuSettings
+        const sources = enabledSources(settings, getPlatform().isTauri)
+        const seasons = await searchAll(trimmed, sources, 0)
         setResults(seasons)
         setSearched(true)
         // Expand the season the shared matcher would have chosen, so the
         // episode grid for the likely show is on screen immediately.
         const best = chooseSeason(seasons, trimmed, trimmed)
-        setExpanded(best ? best.bangumiId : null)
+        setExpanded(best ? seasonKey(best) : null)
         if (best) void loadEpisodes(best)
       } catch (e) {
         setError(errorMessage(e))
@@ -179,12 +189,12 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
     void runSearch(prefill.keyword)
   }, [dialogOpen, prefill, runSearch])
 
-  const handlePickEpisode = async (season: DdpSeason, ep: DdpEpisode) => {
+  const handlePickEpisode = async (season: SourceSeason, ep: SourceEpisode) => {
     if (fetchingId !== null) return
-    setFetchingId(ep.episodeId)
+    setFetchingId(`${ep.source}:${ep.id}`)
     setError(null)
     try {
-      const comments = await fetchEpisodeComments(ep.episodeId)
+      const comments = await adapterFor(ep.source).comments(ep)
       const store = usePlayerStore.getState()
       store.setComments(comments, {
         label: `${season.title} · ${ep.title}`,
@@ -195,7 +205,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
       // batch then mounts without asking (see `filenameRules`).
       const path = store.media?.path
       if (path && store.danmakuSettings.learnFilenamePatterns) {
-        // Learn the LOCAL episode number from the file name, not DanDanPlay's
+        // Learn the LOCAL episode number from the file name, not the source's
         // number: sequels are often numbered absolutely there (S2E11 = 35), and
         // a rule looking for `35` in `Show - 11` could never fire again.
         const localEpisode =
@@ -205,7 +215,8 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
               filePath: path,
               episode: localEpisode,
               season: {
-                bangumiId: season.bangumiId,
+                source: season.source,
+                bangumiId: season.id,
                 title: season.title,
                 episodeCount: season.episodeCount,
               },
@@ -228,12 +239,13 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
   const bestSeasonId = useMemo(() => {
     if (results.length === 0) return null
     const probe = keyword.trim() || prefill?.keyword || ''
-    return chooseSeason(results, probe, probe)?.bangumiId ?? null
+    const best = chooseSeason(results, probe, probe)
+    return best ? seasonKey(best) : null
   }, [results, keyword, prefill])
 
   const target = prefill?.targetEpisode ?? 0
 
-  const episodeLabel = (ep: DdpEpisode): string =>
+  const episodeLabel = (ep: SourceEpisode): string =>
     typeof ep.episodeNumber === 'number'
       ? `第${ep.episodeNumber}集`
       : ep.title || String(ep.episodeNumber)
@@ -389,15 +401,16 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
       {!searching && results.length > 0 && (
         <Stack spacing={1} sx={{ maxHeight: 360, overflowY: 'auto' }}>
           {results.map((season) => {
-            const isExpanded = expanded === season.bangumiId
-            const isBest = season.bangumiId === bestSeasonId
-            const list = episodes[season.bangumiId]
-            const loading = loadingSeason === season.bangumiId
+            const key = seasonKey(season)
+            const isExpanded = expanded === key
+            const isBest = key === bestSeasonId
+            const list = episodes[key]
+            const loading = loadingSeason === key
 
             return isExpanded ? (
               // Expanded card
               <Box
-                key={season.bangumiId}
+                key={key}
                 sx={{
                   border: `3px solid ${isBest ? GREEN : PAPER}`,
                   padding: '12px',
@@ -458,6 +471,19 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                     <Stack direction="row" gap={1} sx={{ flexWrap: 'wrap' }}>
                       <Typography
                         sx={{
+                          fontFamily: MONO,
+                          fontSize: 9,
+                          fontWeight: 700,
+                          letterSpacing: '0.08em',
+                          color: GOLD,
+                          border: `1px solid ${alpha(GOLD, 0.7)}`,
+                          padding: '0 4px',
+                        }}
+                      >
+                        {SOURCE_LABELS[season.source]}
+                      </Typography>
+                      <Typography
+                        sx={{
                           fontSize: 10,
                           fontWeight: 700,
                           color: alpha(PAPER, 0.6),
@@ -510,10 +536,10 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                       const isTarget =
                         target > 0 &&
                         String(ep.episodeNumber) === String(target)
-                      const isFetching = fetchingId === ep.episodeId
+                      const isFetching = fetchingId === `${ep.source}:${ep.id}`
                       return (
                         <Box
-                          key={ep.episodeId}
+                          key={`${ep.source}:${ep.id}`}
                           component="button"
                           type="button"
                           onClick={() => void handlePickEpisode(season, ep)}
@@ -594,11 +620,11 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
             ) : (
               // Collapsed row
               <Box
-                key={season.bangumiId}
+                key={key}
                 component="button"
                 type="button"
                 onClick={() => {
-                  setExpanded(season.bangumiId)
+                  setExpanded(key)
                   void loadEpisodes(season)
                 }}
                 sx={{
@@ -710,7 +736,7 @@ export const DanmakuSourceDialog = () => {
         {/* Tab buttons */}
         <Stack direction="row" sx={{ borderBottom: LINE_STRONG }}>
           {[
-            { value: 1 as const, label: '在线搜索 · DanDanPlay' },
+            { value: 1 as const, label: '在线搜索 · 多源' },
             { value: 0 as const, label: '本地文件 · XML / JSON / ASS' },
           ].map((btn) => (
             <Box

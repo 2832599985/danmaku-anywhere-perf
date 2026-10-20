@@ -1,5 +1,7 @@
 import { basenameWithoutExt } from './autoMatch'
 
+import type { SourceId } from './sources'
+
 /**
  * "Learned" file-naming rules: the persistent half of the AI auto-match.
  *
@@ -21,7 +23,9 @@ import { basenameWithoutExt } from './autoMatch'
 
 /** The season a learned rule points at (the parts needed to re-fetch it). */
 export interface RuleSeason {
-  /** Season id for DanDanPlay's bangumi detail endpoint. */
+  /** Which danmaku source the season belongs to. */
+  source: SourceId
+  /** Season id for that source's episode endpoint. */
   bangumiId: string
   /** Season title, shown in the picker prefill and in the settings list. */
   title: string

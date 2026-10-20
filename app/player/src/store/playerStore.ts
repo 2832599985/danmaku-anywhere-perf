@@ -333,6 +333,10 @@ const normalizeFilenameRule = (value: unknown): FilenameRule | null => {
     sample: typeof rule.sample === 'string' ? rule.sample : '',
     folder: typeof rule.folder === 'string' ? rule.folder : '',
     season: {
+      source:
+        season.source === 'bilibili' || season.source === 'tencent'
+          ? season.source
+          : 'ddp',
       bangumiId: season.bangumiId,
       title: typeof season.title === 'string' ? season.title : '',
       episodeCount:
@@ -956,7 +960,14 @@ export const usePlayerStore = create<PlayerStore>()(
               ...p.upscale?.frameInterpolation,
             },
           },
-          danmakuSettings: { ...current.danmakuSettings, ...p.danmakuSettings },
+          danmakuSettings: {
+            ...current.danmakuSettings,
+            ...p.danmakuSettings,
+            sources: {
+              ...current.danmakuSettings.sources,
+              ...p.danmakuSettings?.sources,
+            },
+          },
           playbackSettings: {
             ...current.playbackSettings,
             ...p.playbackSettings,

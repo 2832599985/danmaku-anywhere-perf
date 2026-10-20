@@ -1652,3 +1652,93 @@ of wrong answer the "never guess" rule forbids.
 
 **Gates.** player `tsc` clean, 165 unit tests + 1 opt-in live audit; media-parser
 54; extension 360; biome clean; vite build; Playwright 7/7.
+
+## 30. Multi-source danmaku: Bilibili + Tencent through a hidden WebView (2026-10-20 — DONE)
+
+**Goal.** Search/mount Bilibili and Tencent danmaku in addition to DanDanPlay,
+and merge every confident source for the same episode.
+
+**The Tauri `http` plugin cannot do it.** Verified in the real exe:
+
+| Request | Result |
+|---|---|
+| Bilibili `spi` | 200 (unprotected) |
+| Bilibili search | **412 `request was banned`** (with or without buvid cookies) |
+| Bilibili season | **403** risk-control HTML |
+| Bilibili XML | 200 but **deflate-compressed**, plugin did not decompress |
+| Tencent search | 200 `{"ret":20607}` |
+| Tencent page details | `{"ret":35013}` |
+| Tencent danmaku CDN | 200 (unprotected) |
+
+The rejection is client fingerprint/behaviour, not a missing header. A hidden
+WebView2 page on the API's own origin is accepted exactly like the extension.
+
+**Validated path.** One hidden WebView2 window per source parked on
+`https://www.bilibili.com/robots.txt` / `https://v.qq.com/robots.txt` (plain
+text, no site JS, minimal memory). The page's own `fetch` supplies Chromium's
+network stack, the correct `Origin`/`Referer`, and the cookie jar. Confirmed
+CORS: Bilibili `ACAO = https://www.bilibili.com`, Tencent search
+`ACAO = https://v.qq.com`, Tencent danmaku `ACAO = *`.
+
+**Architecture.**
+- `src-tauri/src/source_bridge.rs`: hidden windows, URL allowlist, and
+  DevTools `Runtime.evaluate` with `awaitPromise: true`. The expression runs the
+  fetch in the page and returns `JSON.stringify({status,text})`; Rust parses the
+  CDP result and returns it to the renderer. No page script, no WebMessage.
+- Bilibili bootstrap: the expression calls `/x/frontend/finger/spi` once per
+  page (`window.__DA_BILI_READY`), sets `buvid3/buvid4` via `document.cookie`
+  (`domain=.bilibili.com`), and resets the flag on a 412 so the next call retries.
+- Tencent danmaku uses `credentials: 'omit'`: its CDN answers `ACAO: *`, which
+  the browser rejects for credentialed requests. Everything else uses `include`.
+- `src/platform/tauri.ts`: `window.fetch` routes `api.bilibili.com` and
+  `*.video.qq.com` to `invoke('source_fetch')` and reconstructs a `Response`;
+  the existing provider functions (`searchMedia`, `getBangumiInfo`,
+  `getDanmakuXml`, `listEpisodes`, `getDanmakuSegments`, `zTencentComment`) run
+  unchanged.
+- `src/danmaku/sources.ts`: one `SourceSeason`/`SourceEpisode` shape for DDP /
+  Bilibili / Tencent, adapters, bounded search (external sources only for the
+  first 3 keywords — Tencent search is ~316 KB), parallel Tencent segment fetch
+  (4 at a time), cross-source dedupe by `p+m`.
+- `autoMatch.ts`: sources are scored together; `collectExtras` merges another
+  source only when it is the same show AND same season (unmarked base ≡
+  `第1季`, never `Show` vs `Show 第二季`) and the episode resolves. The matched
+  outcome carries `extraMatches`; `PlayerHost` fetches them in parallel, merges,
+  and the OSD names the sources.
+- Settings: `sources.{ddp,bilibili,tencent}` (default all on), `mergeSources`
+  (default on), and 登录 B站/腾讯 buttons (`source_login` opens a real WebView2
+  login window; cookies persist in the app profile). The picker badges every
+  result with its source and searches all enabled sources.
+- Learned filename rules now carry `source`; old persisted rules default to
+  `ddp` in `normalizeFilenameRule`.
+- `vite.config.ts` needs the `danmaku-provider/bilibili` and `/tencent` aliases
+  **before** the bare package alias (same trap as `/ddp` and `/genAi`).
+
+**Verification (real exe, temp WebView2 profile).**
+- Bridge: Bilibili spi/search/season/XML and Tencent search/danmaku all 200 with
+  the expected payloads (XML 322,334 bytes; Tencent search 316,612 bytes).
+- End-to-end, opening a fixture named `葬送的芙莉莲 - 11.mp4`:
+  `自动匹配 · 哔哩哔哩 + 腾讯视频 + DanDanPlay · 葬送的芙莉莲 · 第11集 ·
+  5795 条` in 6.1 s.
+- `咒术回战 第二季 第11话.mp4`: `哔哩哔哩 + DanDanPlay · 咒术回战 第二季 ·
+  第11集 · 3608 条`; Bilibili uses local numbering, DDP resolves the absolute
+  episode 35 as an extra.
+- Gates: player `tsc` clean, 166 unit tests + 1 opt-in live audit; media-parser
+  54; extension 360; biome clean; vite build; Playwright 7/7.
+
+**Traps.**
+- Page→host `WebMessage` never fired on the remote `robots.txt` document in this
+  WebView2 build (host→page did). CDP `Runtime.evaluate` is the reliable path.
+- `CallDevToolsProtocolMethod` returns the method's **result object**, not the
+  `{id, result}` envelope: `Runtime.evaluate` is at `/result/value`.
+- Registering the WebMessage handler right after `build()` can run before
+  CoreWebView2 is ready; the CDP path waits for `PageLoadEvent::Finished`
+  instead.
+- The hidden pages must be on the site origin, not `api.*`/`dm.*`; only then do
+  the CORS allowlists and the cookie jar match.
+- Never forward `Cookie`/`Origin`/`Referer`/`User-Agent` from the app fetch;
+  they are forbidden headers in the page. The page supplies them.
+- `dm.video.qq.com` with `credentials: 'include'` fails (`ACAO: *`); use `omit`.
+- Bilibili `第1季` means the base season; treating it as "season 1 ≠ unmarked"
+  made Tencent silently drop out of every merge.
+- Old learned rules have no `source`; normalizing them to `ddp` is required or
+  every existing rule becomes unusable.

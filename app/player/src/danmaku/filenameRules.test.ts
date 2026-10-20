@@ -10,6 +10,7 @@ import {
 } from './filenameRules'
 
 const SEASON = {
+  source: 'ddp' as const,
   bangumiId: '12345',
   title: 'BLEACH 千年血战篇-诀别谭-',
   episodeCount: 13,

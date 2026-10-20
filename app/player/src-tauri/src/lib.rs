@@ -1,3 +1,4 @@
+mod source_bridge;
 mod stream;
 pub mod subtitle;
 
@@ -24,6 +25,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
         .manage(TaskRegistry::default())
+        .manage(std::sync::Arc::new(source_bridge::SourceBridge::new()))
         .setup(|app| {
             subtitle::logging::init(app.handle());
             Ok(())
@@ -38,6 +40,8 @@ pub fn run() {
             subtitle_list_tracks,
             subtitle_extract_track,
             subtitle_extract_focus,
+            source_bridge::source_fetch,
+            source_bridge::source_login,
         ])
         // Async variant so large-file range reads happen off the UI thread.
         .register_asynchronous_uri_scheme_protocol("stream", |_ctx, request, responder| {

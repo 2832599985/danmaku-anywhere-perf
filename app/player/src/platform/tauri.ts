@@ -55,7 +55,10 @@ export const tauriPlatform: Platform = {
 
   async init() {
     // Route DanDanPlay/proxy requests through the http plugin to bypass CORS.
-    // Only those hosts — a blanket window.fetch swap breaks Tauri's own IPC
+    // Bilibili/Tencent go through the hidden-WebView bridge instead: their
+    // risk control rejects the plugin's reqwest requests (Bilibili 412,
+    // Tencent ret 20607), while a real page on their own origin is accepted.
+    // Only these hosts — a blanket window.fetch swap breaks Tauri's own IPC
     // custom-protocol probe and same-origin asset fetches (framegen weights),
     // because plugin-http rejects URLs outside the capability scope.
     try {
@@ -66,19 +69,73 @@ export const tauriPlatform: Platform = {
         if (input instanceof URL) return input.href
         return input.url
       }
-      const needsCorsBypass = (input: RequestInfo | URL): boolean => {
+      const hostOf = (input: RequestInfo | URL): string | null => {
         try {
-          const { host } = new URL(urlOf(input), window.location.href)
-          return (
-            host === 'api.danmaku.weeblify.app' ||
-            host.endsWith('.dandanplay.net')
-          )
+          return new URL(urlOf(input), window.location.href).host
         } catch {
-          return false
+          return null
         }
       }
+      const needsCorsBypass = (host: string | null): boolean =>
+        host === 'api.danmaku.weeblify.app' ||
+        (host?.endsWith('.dandanplay.net') ?? false)
+      const needsSourceBridge = (host: string | null): boolean =>
+        host === 'api.bilibili.com' ||
+        (host?.endsWith('.video.qq.com') ?? false)
+
+      const sourceFetch = async (
+        input: RequestInfo | URL,
+        init?: RequestInit
+      ): Promise<Response> => {
+        if (init?.signal?.aborted) {
+          throw new DOMException('Aborted', 'AbortError')
+        }
+        const { invoke } = await import('@tauri-apps/api/core')
+        const request = input instanceof Request ? input : null
+        const method = init?.method ?? request?.method ?? 'GET'
+        const headerSource = init?.headers ?? request?.headers
+        const headers: [string, string][] = []
+        new Headers(headerSource).forEach((value, key) =>
+          headers.push([key, value])
+        )
+        const body =
+          init?.body == null
+            ? undefined
+            : typeof init.body === 'string'
+              ? init.body
+              : String(init.body)
+        try {
+          const result = await invoke<{
+            status: number
+            text: string
+            error?: string | null
+          }>('source_fetch', {
+            url: urlOf(input),
+            method,
+            headers,
+            body,
+          })
+          if (result.error) {
+            return new Response(result.error, {
+              status: 500,
+              statusText: result.error,
+            })
+          }
+          return new Response(result.text, { status: result.status || 200 })
+        } catch (error) {
+          return new Response(
+            error instanceof Error ? error.message : String(error),
+            {
+              status: 500,
+            }
+          )
+        }
+      }
+
       const bridged = (input: RequestInfo | URL, init?: RequestInit) => {
-        if (needsCorsBypass(input)) {
+        const host = hostOf(input)
+        if (needsSourceBridge(host)) return sourceFetch(input, init)
+        if (needsCorsBypass(host)) {
           return (tauriFetch as unknown as typeof window.fetch)(input, init)
         }
         return nativeFetch(input, init)
@@ -183,6 +240,11 @@ export const tauriPlatform: Platform = {
     void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
       getCurrentWindow().close()
     )
+  },
+
+  async sourceLogin(provider: 'bilibili' | 'tencent'): Promise<void> {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('source_login', { provider })
   },
 
   onFileDrop(cb: (paths: string[]) => void): () => void {

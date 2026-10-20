@@ -616,8 +616,13 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-http",
+ "tokio",
  "ureq",
+ "url",
  "urlencoding",
+ "uuid",
+ "webview2-com",
+ "windows",
 ]
 
 [[package]]

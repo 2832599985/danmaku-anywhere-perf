@@ -1,11 +1,7 @@
 import { describe, it } from 'vitest'
 import { aiExtractTitle } from './ai'
 import { autoMatch } from './autoMatch'
-import {
-  fetchSeasonEpisodes,
-  searchEpisodesByNumber,
-  searchSeasons,
-} from './ddp'
+import { adapterFor, searchEpisodesAcross } from './sources'
 
 /**
  * Opt-in live audit against the real DanDanPlay + AI endpoints.
@@ -50,10 +46,12 @@ describe.skipIf(env?.LIVE_AUTO_MATCH !== '1')('live auto-match', () => {
 
     for (const name of CORPUS) {
       const info = await aiExtractTitle(name)
+      const ddp = adapterFor('ddp')
       const deps = {
-        search: searchSeasons,
-        episodes: fetchSeasonEpisodes,
-        searchEpisodes: searchEpisodesByNumber,
+        search: (keyword: string) => ddp.search(keyword),
+        episodes: (season: Parameters<typeof ddp.episodes>[0]) =>
+          ddp.episodes(season),
+        searchEpisodes: searchEpisodesAcross,
       }
       const outcome = await autoMatch(name, info, deps)
       // The AI is an enhancer: the same file must still resolve when the

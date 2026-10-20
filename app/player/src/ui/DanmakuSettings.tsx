@@ -2,6 +2,8 @@ import { DeleteOutlineRounded, PlaylistAddRounded } from '@mui/icons-material'
 import { Box, Button, Stack, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import { useState } from 'react'
+import { SOURCE_LABELS, type SourceId } from '@/danmaku/sources'
+import { getPlatform } from '@/platform'
 import { usePlayerStore } from '@/store/playerStore'
 import {
   hatchSx,
@@ -294,7 +296,7 @@ export const DanmakuSettings = () => {
             alignItems="center"
             justifyContent="space-between"
           >
-            <InkLabel zh="在线匹配" en="AI + DANDANPLAY" size={13} />
+            <InkLabel zh="在线匹配" en="AI + 多源" size={13} />
             <InkSwitch
               checked={danmaku.autoOnlineMatch}
               onChange={(v) => updateDanmakuSettings({ autoOnlineMatch: v })}
@@ -313,6 +315,84 @@ export const DanmakuSettings = () => {
             }}
           >
             无同名弹幕文件时，用文件名解析番名/集数并自动挂载
+          </Typography>
+        </Box>
+
+        <Box
+          sx={{
+            border: LINE_STRONG,
+            padding: '12px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
+        >
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            gap={1}
+          >
+            <InkLabel zh="弹幕渠道" en="SOURCES" size={13} />
+            {getPlatform().isTauri && (
+              <Stack direction="row" spacing={1}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => void getPlatform().sourceLogin('bilibili')}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  登录 B站
+                </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => void getPlatform().sourceLogin('tencent')}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  登录腾讯
+                </Button>
+              </Stack>
+            )}
+          </Stack>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+              gap: '8px',
+            }}
+          >
+            {(['ddp', 'bilibili', 'tencent'] as SourceId[]).map((source) => (
+              <LabeledSwitch
+                key={source}
+                label={SOURCE_LABELS[source]}
+                en={source.toUpperCase()}
+                checked={danmaku.sources[source]}
+                onChange={(next) =>
+                  updateDanmakuSettings({
+                    sources: { ...danmaku.sources, [source]: next },
+                  })
+                }
+              />
+            ))}
+          </Box>
+          <LabeledSwitch
+            label="合并多源弹幕"
+            en="MERGE SOURCES"
+            checked={danmaku.mergeSources}
+            onChange={(next) => updateDanmakuSettings({ mergeSources: next })}
+          />
+          <Typography
+            sx={{
+              fontFamily: MONO,
+              fontSize: 10,
+              fontWeight: 700,
+              color: alpha(PAPER, 0.5),
+              letterSpacing: '0.04em',
+              lineHeight: 1.5,
+            }}
+          >
+            合并开启时会同时挂载同一集在多个渠道的弹幕并去重；B站/腾讯仅桌面版可用
           </Typography>
         </Box>
         <FilenameRulesSettings />

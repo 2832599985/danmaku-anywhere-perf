@@ -9,15 +9,15 @@ import {
   resolveEpisodeTarget,
   targetEpisode,
 } from './autoMatch'
-import type { DdpEpisode, DdpSeason } from './ddp'
+import type { SourceEpisode, SourceSeason } from './sources'
 
 const season = (
-  bangumiId: string,
+  id: string,
   title: string,
   episodeCount = 12
-): DdpSeason => ({
-  animeId: Number(bangumiId),
-  bangumiId,
+): SourceSeason => ({
+  source: 'ddp',
+  id,
   title,
   type: 'tvseries',
   typeDescription: 'TV动画',
@@ -29,8 +29,10 @@ const season = (
 const episode = (
   episodeId: number,
   episodeNumber: number | string
-): DdpEpisode => ({
-  episodeId,
+): SourceEpisode => ({
+  source: 'ddp',
+  id: String(episodeId),
+  seasonId: '1',
   episodeNumber,
   title: `第${episodeNumber}话`,
 })
@@ -158,7 +160,7 @@ describe('chooseSeason', () => {
 })
 
 describe('autoMatch', () => {
-  const deps = (seasons: DdpSeason[], episodes: DdpEpisode[]) => ({
+  const deps = (seasons: SourceSeason[], episodes: SourceEpisode[]) => ({
     search: vi.fn().mockResolvedValue(seasons),
     episodes: vi.fn().mockResolvedValue(episodes),
   })
@@ -173,7 +175,7 @@ describe('autoMatch', () => {
     )
     expect(outcome.status).toBe('matched')
     if (outcome.status !== 'matched') return
-    expect(outcome.episode.episodeId).toBe(102)
+    expect(outcome.episode.id).toBe('102')
   })
 
   it('NEVER falls back to the first episode when the number is missing', async () => {
@@ -232,7 +234,7 @@ describe('resolveEpisodeTarget', () => {
     const eps = [episode(1, 1), episode(11, 11)]
     expect(resolveEpisodeTarget(eps, 11)).toMatchObject({
       mode: 'exact',
-      episode: { episodeId: 11 },
+      episode: { id: '11' },
     })
   })
 
@@ -299,7 +301,7 @@ describe('autoMatch season scoring', () => {
     expect(outcome.status).toBe('matched')
     if (outcome.status !== 'matched') return
     expect(outcome.matchMode).toBe('fuzzy')
-    expect(outcome.season.bangumiId).toBe('19226')
+    expect(outcome.season.id).toBe('19226')
     expect(outcome.episode.episodeNumber).toBe(11)
   })
 
@@ -322,7 +324,7 @@ describe('autoMatch season scoring', () => {
     expect(outcome.status).toBe('matched')
     if (outcome.status !== 'matched') return
     expect(outcome.matchMode).toBe('default-season')
-    expect(outcome.season.bangumiId).toBe('17870')
+    expect(outcome.season.id).toBe('17870')
   })
 
   it('asks when the file names a season the candidates do not mark', async () => {
@@ -418,7 +420,7 @@ describe('autoMatch season scoring', () => {
     )
     expect(outcome.status).toBe('matched')
     if (outcome.status !== 'matched') return
-    expect(outcome.season.bangumiId).toBe('17870')
+    expect(outcome.season.id).toBe('17870')
   })
 
   it('prefers a resolvable local title over an arc title without the episode', async () => {
@@ -427,10 +429,8 @@ describe('autoMatch season scoring', () => {
     const search = vi.fn(async (keyword: string) =>
       keyword === 'One Piece' ? [arc, real] : [arc]
     )
-    const episodes = vi.fn(async (s: DdpSeason) =>
-      s.bangumiId === '69'
-        ? [episode(1080, 1080)]
-        : [episode(1, 1), episode(2, 2)]
+    const episodes = vi.fn(async (s: SourceSeason) =>
+      s.id === '69' ? [episode(1080, 1080)] : [episode(1, 1), episode(2, 2)]
     )
     const outcome = await autoMatch(
       '[Lilith-Raws] One Piece - 1080 [Baha][WEB-DL][1080p][AVC AAC][CHT][MP4].mp4',
@@ -443,15 +443,15 @@ describe('autoMatch season scoring', () => {
     )
     expect(outcome.status).toBe('matched')
     if (outcome.status !== 'matched') return
-    expect(outcome.season.bangumiId).toBe('69')
+    expect(outcome.season.id).toBe('69')
   })
 
   it('uses the episode title to tell two seasons apart', async () => {
     const s1 = { ...season('17870', '药屋少女的呢喃'), year: 2023 }
     const s2 = { ...season('18562', '药屋少女的呢喃 第二季'), year: 2025 }
     const search = vi.fn().mockResolvedValue([s1, s2])
-    const episodes = vi.fn(async (s: DdpSeason) =>
-      s.bangumiId === '17870'
+    const episodes = vi.fn(async (s: SourceSeason) =>
+      s.id === '17870'
         ? [{ ...episode(17870012, 12), title: '第12话 宦官与妓女' }]
         : [{ ...episode(18562012, 12), title: '第12话 華瑞月' }]
     )
@@ -466,6 +466,35 @@ describe('autoMatch season scoring', () => {
     )
     expect(outcome.status).toBe('matched')
     if (outcome.status !== 'matched') return
-    expect(outcome.season.bangumiId).toBe('18562')
+    expect(outcome.season.id).toBe('18562')
+  })
+
+  it('merges a Tencent 第1季 into the unmarked base season', async () => {
+    const ddp = season('17617', '葬送的芙莉莲')
+    const tencent = {
+      ...season('tx-1', '葬送的芙莉莲 第1季'),
+      source: 'tencent' as const,
+    }
+    const search = vi.fn(async () => [ddp, tencent])
+    const episodes = vi.fn(async (s: SourceSeason) =>
+      s.source === 'tencent'
+        ? [{ ...episode(1101, 11), source: 'tencent' as const, seasonId: s.id }]
+        : [episode(1100, 11)]
+    )
+    const outcome = await autoMatch(
+      '葬送的芙莉莲 - 11 [1080p].mkv',
+      { title: '葬送的芙莉莲', episode: 11, altTitles: [] },
+      {
+        search,
+        episodes,
+        mergeSources: true,
+        now: () => new Date('2026-10-20T00:00:00Z'),
+      }
+    )
+    expect(outcome.status).toBe('matched')
+    if (outcome.status !== 'matched') return
+    expect(outcome.extraMatches).toHaveLength(1)
+    expect(outcome.extraMatches[0].season.source).toBe('tencent')
+    expect(outcome.extraMatches[0].episode.episodeNumber).toBe(11)
   })
 })

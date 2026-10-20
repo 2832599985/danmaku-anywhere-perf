@@ -97,6 +97,13 @@ export interface DanmakuSettings {
    * AI). Off = neither learn nor apply; rules already learned are kept.
    */
   learnFilenamePatterns: boolean
+  /**
+   * Online sources searched by auto-match. DanDanPlay is the plain HTTP API;
+   * Bilibili/Tencent go through the hidden-WebView bridge (Tauri only).
+   */
+  sources: { ddp: boolean; bilibili: boolean; tencent: boolean }
+  /** Merge comments from every confident source for the matched episode. */
+  mergeSources: boolean
 }
 
 /** How the player handles detected OP/ED segments. */
@@ -176,6 +183,8 @@ export const DEFAULT_DANMAKU: DanmakuSettings = {
   filters: [],
   autoOnlineMatch: true,
   learnFilenamePatterns: true,
+  sources: { ddp: true, bilibili: true, tencent: true },
+  mergeSources: true,
 }
 
 export const DEFAULT_PLAYBACK: PlaybackSettings = {

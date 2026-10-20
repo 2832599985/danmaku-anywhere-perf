@@ -28,6 +28,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Percent-decodes the absolute file path carried in `stream://` URLs.
 urlencoding = "2"
+# Hidden-WebView network bridge for Bilibili/Tencent (src/source_bridge.rs).
+# The Tauri http plugin (reqwest) is rejected by their risk control; the hidden
+# WebView2 page uses Chromium's network stack and the site's own origin/cookies.
+tokio = { version = "1", features = ["sync", "time"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows = "0.61"
 
 # --- subtitle speech-to-text pipeline (src/subtitle/) ---
 # Offline ASR (SenseVoice/Whisper) + silero VAD over onnxruntime. The build
