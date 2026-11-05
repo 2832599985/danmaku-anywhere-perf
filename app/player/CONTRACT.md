@@ -1742,3 +1742,79 @@ CORS: Bilibili `ACAO = https://www.bilibili.com`, Tencent search
   made Tencent silently drop out of every merge.
 - Old learned rules have no `source`; normalizing them to `ddp` is required or
   every existing rule becomes unusable.
+
+## 31. Upscale chain wasted work: fixed 4x/8x templates vs a 1.33x target (2026-11-06 — DONE)
+
+**Reported as** "看看现状" about compute acceleration. The investigation started
+as "should Anime4K use fp16?" and ended somewhere else entirely.
+
+### fp16 was measured and rejected
+
+Converted the real `Restore-CNN-(VL)-Conv-4x3x3x16` layer to f16 (f16 weight
+matrices + f16 MAC, sampled textures staying `texture_2d<f32>` because WGSL
+forbids f16 texel types) and timed it against the f32 original with
+`timestamp-query`, interleaved 24 rounds × 40 dispatches at 1920x1080:
+
+| variant | p10 | p50 | mean |
+|---|---|---|---|
+| f32 (current) | 0.275 ms | 0.305 ms | 0.379 ms |
+| f16 weights + MAC | 0.283 ms | 0.311 ms | 0.368 ms |
+
+**0.98× — no gain.** A synthetic probe isolated why: 36 `mat4x4` MACs with no
+texture traffic went 0.187 ms → 0.170 ms (**1.10×**), while 4 texture loads +
+1 store ran at **1808 GB/s**. So the layer is ALU-dominated, but Tint does not
+pack these `mat4x4 * vec4` ops into `f16x2` pairs — scalar f16 runs on the same
+pipe as f32. Reaching the real 2× would mean rewriting all 270 inlined WGSL
+layers into a packed `vec2<f16>` layout, i.e. maintaining a private Anime4K port.
+Not worth it, and the GPU was never the bottleneck (see below).
+
+### The real waste: the chain upscaled past the target, then undid it
+
+The built-in templates are fixed multiples — A/B/C reach 4× (two 2× upscalers),
+the doubled modes 8× (three). That only fits a target that is exactly 4×/8× the
+source. A 1080p file on a 2560x1440 display (x2 setting, clamped to the screen)
+asks for **1.33×**, so `buildEffectChain` ran every upscaler anyway and inserted
+its intermediate `Downscale`:
+
+```
+CNNx2VL    1920x1080 -> 3840x2160   upscale to 4K
+Downscale  3840x2160 -> 1280x720    ...then drop BELOW the source
+CNNx2M     1280x720  -> 2560x1440   ...and upscale the blur back up
+```
+
+The intermediate landed **below the source resolution**, so the file's own
+detail was discarded and re-guessed. Measured in the packaged exe on a 1080p
+24fps source, before the fix:
+
+| config | passes | fps | GPU |
+|---|---|---|---|
+| A/balanced | 5 | 24 | **100%** |
+| A/ultra | 5 | 22 | 100% |
+| A+A/ultra | 8 | **20** | 100% |
+
+### Fix
+
+`packages/upscale-engine/src/utils/effect-chain-prune.ts` keeps only the
+upscalers the target actually needs (fewest 2× steps whose product reaches it;
+none when the target is not larger than the source). Overshoot is free — the
+presentation pass already samples the final texture into the canvas with a
+bilinear sampler. `renderer.ts` prunes before building and additionally floors
+any intermediate `Downscale` at the chain's real input size (which is the
+interpolator's working texture when interpolation is on, not `sourceDimensions`).
+
+**After, same exe and same source:**
+
+| config | passes | fps | GPU |
+|---|---|---|---|
+| A/balanced | **3** | 25 | **52%** |
+| A/ultra | **3** | 24 | 68% |
+| A+A/ultra | **3** | 25 | **57%** |
+
+Image quality improved rather than degraded: Laplacian detail energy over a
+face/glasses crop is **1.6×** the old path's (5.69 vs 3.57), because the final
+frame is now built from the 1080p source instead of a 720p intermediate.
+
+Engine tests **37/37** (9 new prune tests), type-check + biome clean, packaged
+exe acceptance **30/30**. Note the 640x360 fixture still builds 5 passes for a
+1280x720 target — that is a genuine 2× target, so no pruning applies; pruning
+only engages when the requested factor is not a whole 2× step.

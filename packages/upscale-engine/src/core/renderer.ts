@@ -4,6 +4,10 @@ import type {
   EnhancementEffect,
   FrameInterpolationOptions,
 } from '../types'
+import {
+  chainUpscaleFactor,
+  pruneRedundantUpscalers,
+} from '../utils/effect-chain-prune'
 import { waitForVideoReady } from '../utils/video-ready'
 import {
   type FrameInterpolationStats,
@@ -779,6 +783,11 @@ export class Renderer {
     let currentTexture = this.videoFrameTexture
     let curWidth = this.videoFrameTexture.width
     let curHeight = this.videoFrameTexture.height
+    // The chain's real input. With interpolation on this is the interpolator's
+    // working texture, not the video's own size, so `sourceDimensions` must not
+    // be used as the floor for intermediate downscales.
+    const chainInputWidth = curWidth
+    const chainInputHeight = curHeight
 
     // 使用缓存的模块，避免重复动态导入
     if (!Renderer.cachedAnime4KModule) {
@@ -786,23 +795,33 @@ export class Renderer {
     }
     const anime4kModule = Renderer.cachedAnime4KModule
 
-    // 如果需要，获取 Downscale 类
-    const needsDownscaling = this.effects.some((effect, i) => {
-      const remainingFactor = this.effects
-        .slice(i + 1)
-        .reduce((acc, val) => acc * (val.upscaleFactor ?? 1), 1)
-      return (effect.upscaleFactor ?? 1) > 1 && remainingFactor > 1
-    })
+    // 裁掉目标分辨率用不上的 upscaler。模板链固定为 4x/8x，而 1080p 源配
+    // 2560x1440 目标只要 1.33x：多出来的那一级会先升到 4K、再被中间的
+    // Downscale 降回 720p（比源还低），等于丢掉源文件细节再猜回去。
+    const effects = pruneRedundantUpscalers(
+      this.effects,
+      { width: curWidth, height: curHeight },
+      this.targetDimensions
+    )
+    // 剪枝后的链尾可能仍略大于目标（最多一个 2x 级差）。这不需要额外
+    // pass：呈现管线本来就用双线性采样器把最终纹理画到 canvas，顺带完成
+    // 缩放。只有链尾仍大于目标时才需要中间 Downscale 把后续 pass 的
+    // 尺寸拉回可用范围。
+    const chainFactor = chainUpscaleFactor(effects)
+    const needsDownscaling =
+      chainFactor > 1 &&
+      (curWidth * chainFactor > this.targetDimensions.width * 1.05 ||
+        curHeight * chainFactor > this.targetDimensions.height * 1.05)
     const DownscaleClass = needsDownscaling ? anime4kModule.Downscale : null
 
-    const upscaleFactors = this.effects.map((e) => e.upscaleFactor ?? 1)
+    const upscaleFactors = effects.map((e) => e.upscaleFactor ?? 1)
     const remainingUpscaleFactors = upscaleFactors.map((_, i) =>
       upscaleFactors.slice(i + 1).reduce((acc, val) => acc * val, 1)
     )
 
-    for (let i = 0; i < this.effects.length; i++) {
+    for (let i = 0; i < effects.length; i++) {
       // 报告预热进度
-      this.onProgress?.('loadingEffect', i + 1, this.effects.length)
+      this.onProgress?.('loadingEffect', i + 1, effects.length)
 
       // 让出主线程，避免界面冻结
       await new Promise((resolve) => setTimeout(resolve, 0))
@@ -810,7 +829,7 @@ export class Renderer {
       // 死设备刷一串校验错误，并持续回调 onProgress。
       if (this.destroyed) return false
 
-      const effect = this.effects[i]
+      const effect = effects[i]
       // 从缓存的模块获取效果类
       const EffectClass = (
         anime4kModule as unknown as Record<
@@ -836,10 +855,17 @@ export class Renderer {
 
           const remainingFactor = remainingUpscaleFactors[i]
           if (DownscaleClass && remainingFactor > 1) {
-            const idealIntermediateWidth =
+            // 中间尺寸绝不能低于源分辨率：低于源意味着把源文件本来有的
+            // 细节直接丢掉，后面再升上去只是把模糊放大。剪枝之后这种
+            // 情况已很少触发，这里作为兜底保证任何链都不会踩到。
+            const idealIntermediateWidth = Math.max(
+              chainInputWidth,
               this.targetDimensions.width / remainingFactor
-            const idealIntermediateHeight =
+            )
+            const idealIntermediateHeight = Math.max(
+              chainInputHeight,
               this.targetDimensions.height / remainingFactor
+            )
 
             if (curWidth > idealIntermediateWidth * 1.1) {
               // 再次让出主线程
