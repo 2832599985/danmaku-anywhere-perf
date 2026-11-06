@@ -28,6 +28,14 @@ export interface DanmakuStyle {
   opacity: number
   fontSize: number
   fontFamily: string
+  /**
+   * Unitless line-height for the text box, e.g. 1.2. When set, the height of a
+   * danmaku node is `fontSize * lineHeight` — predictable, so a host can size
+   * its tracks from the font size alone. Left undefined the browser default
+   * applies (≈1.35 for CJK system fonts), which makes a large font taller than
+   * the track and the lines overlap.
+   */
+  lineHeight?: number
   textStroke?: DanmakuTextStroke
   textShadow?: string
 }

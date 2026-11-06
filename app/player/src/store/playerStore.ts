@@ -9,6 +9,11 @@ import {
 import { immer } from 'zustand/middleware/immer'
 import { type FilenameRule, ruleShape } from '@/danmaku/filenameRules'
 import type { PickedMedia } from '@/platform/types'
+import {
+  DEFAULT_LINE_HEIGHT,
+  LINE_HEIGHT_MAX,
+  LINE_HEIGHT_MIN,
+} from '@/player/danmaku/trackHeight'
 import type { EmbeddedTrack } from '@/subtitle/native'
 import type { SubtitleCue, SubtitleSource } from '@/subtitle/types'
 import {
@@ -363,6 +368,14 @@ const normalizeFilenameRules = (values: unknown): FilenameRule[] => {
  */
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
+}
+
+/** Row pitch persisted by an older build, or the default when it is missing. */
+const clampLineHeight = (value: unknown): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_LINE_HEIGHT
+  }
+  return clamp(value, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX)
 }
 
 /**
@@ -963,6 +976,10 @@ export const usePlayerStore = create<PlayerStore>()(
           danmakuSettings: {
             ...current.danmakuSettings,
             ...p.danmakuSettings,
+            // Added after the first release: a stale persisted object either
+            // lacks the key (spread keeps the default) or holds a value the
+            // slider cannot show — clamp it so the row pitch stays sane.
+            lineHeight: clampLineHeight(p.danmakuSettings?.lineHeight),
             sources: {
               ...current.danmakuSettings.sources,
               ...p.danmakuSettings?.sources,

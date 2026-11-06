@@ -4,6 +4,11 @@ import { alpha } from '@mui/material/styles'
 import { useState } from 'react'
 import { SOURCE_LABELS, type SourceId } from '@/danmaku/sources'
 import { getPlatform } from '@/platform'
+import {
+  LINE_HEIGHT_MAX,
+  LINE_HEIGHT_MIN,
+  LINE_HEIGHT_STEP,
+} from '@/player/danmaku/trackHeight'
 import { usePlayerStore } from '@/store/playerStore'
 import {
   hatchSx,
@@ -216,6 +221,17 @@ export const DanmakuSettings = () => {
           max={48}
           step={1}
           onChange={(v) => updateDanmakuSettings({ fontSize: v })}
+        />
+
+        <InkLabeledSlider
+          zh="行距"
+          en="LINE HEIGHT"
+          display={`${danmaku.lineHeight.toFixed(2)}×`}
+          value={danmaku.lineHeight}
+          min={LINE_HEIGHT_MIN}
+          max={LINE_HEIGHT_MAX}
+          step={LINE_HEIGHT_STEP}
+          onChange={(v) => updateDanmakuSettings({ lineHeight: v })}
         />
 
         <InkLabeledSlider

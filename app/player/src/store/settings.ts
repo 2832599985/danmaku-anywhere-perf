@@ -5,6 +5,8 @@
  * DanmakuController translates into the engine's nested DanmakuOptions.
  */
 
+import { DEFAULT_LINE_HEIGHT } from '@/player/danmaku/trackHeight'
+
 export type UpscaleModeId =
   | 'builtin-mode-a'
   | 'builtin-mode-b'
@@ -71,6 +73,12 @@ export interface DanmakuSettings {
   opacity: number
   /** px */
   fontSize: number
+  /**
+   * Row pitch as a multiple of the font size (行距). The engine's track height
+   * is derived from it, so lines can never overlap whatever the font size —
+   * see `danmakuTrackHeight` in `player/danmaku/trackHeight.ts`.
+   */
+  lineHeight: number
   /** engine scroll speed multiplier (1 = default). */
   speed: number
   /** display area as a percentage of height, measured from the top (yEnd). */
@@ -174,6 +182,7 @@ export const DEFAULT_DANMAKU: DanmakuSettings = {
   visible: true,
   opacity: 0.75,
   fontSize: 26,
+  lineHeight: DEFAULT_LINE_HEIGHT,
   speed: 1,
   area: 100,
   offset: 0,

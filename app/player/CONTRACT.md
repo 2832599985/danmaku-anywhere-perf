@@ -1892,3 +1892,63 @@ user's real `01.flv` through `__player.commands.openVideoFromPath`:
 
 Note the packaged exe can only be replaced while the player is closed; a build
 made during a session lands in `target/release/deps/danmaku_player.exe`.
+
+## 33. Danmaku rows overlapped as soon as the font grew (2026-11-07 — DONE)
+
+### The bug
+
+Two lines of danmaku touched (and at 36px+ visibly overlapped). The engine
+sizes every row from a fixed `trackHeight`, which the player never passed, so
+every track was the library default **32px**. The row pitch was therefore
+constant while the text box was not: `.da-danmaku` set no `line-height`, and
+the browser's line box for the CJK system font is ~1.5em.
+
+Measured in Chromium (`e2e/danmaku-rows.spec.ts`, before the fix):
+
+| font | text box | row pitch | verdict |
+|---|---|---|---|
+| 12px | 18px | 32px | fits |
+| 26px (default) | **39px** | 32px | overlaps 7px |
+| 36px | **54px** | 32px | overlaps 22px |
+| 48px | **72px** | 32px | pitch collapsed to 11.5px |
+
+So this was never "no line-spacing control" — the box was taller than the track
+it was placed in, and got worse as the font grew.
+
+### The fix
+
+The height has to be predictable before the pitch can be derived from it:
+
+- `packages/danmaku-engine` gained an optional `style.lineHeight` (unitless),
+  applied in `$createNode` (before the size is measured) and in
+  `updateOptions`. The extension passes nothing, so its rendering is unchanged.
+- The player pins it to `TEXT_BOX_RATIO` (1.15), so a node is exactly
+  `fontSize * 1.15` tall at every size.
+- The track pitch is `ceil(fontSize * lineHeight)`, rounded **up** so the box
+  can never be taller than the track that holds it. Overlap is now impossible
+  by construction, not by tuning.
+
+`lineHeight` is the new 行距 setting (1.25×–2.2×, default 1.45× — 26px → 38px
+rows, airier than the old fixed 32px). It lives in
+`src/player/danmaku/trackHeight.ts` together with the constants, is exposed in
+both the settings page and the quick panel, and the persist merge clamps a
+stale persisted value (`DanmakuSettings.lineHeight` did not exist in older
+builds).
+
+Measured after the fix:
+
+| font | text box | row pitch |
+|---|---|---|
+| 26px | 29.9px | 38px |
+| 36px | 41.4px | 53px |
+| 48px | 55.2px | 70px |
+
+### Verification
+
+`src/player/danmaku/trackHeight.test.ts` covers the ceiling, the
+never-below-the-box floor, monotonicity across the whole 12–48px range and
+degenerate input. `e2e/danmaku-rows.spec.ts` reads the REAL laid-out boxes in
+Chromium at 12/26/36/48px and asserts both the pinned line box and the
+row-to-row distance. It was checked against the unfixed code: it fails at 12px
+(18px box vs the pinned 13.8px), so it is a genuine regression test, not a
+tautology.

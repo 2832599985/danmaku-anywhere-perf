@@ -5,6 +5,7 @@ import {
   type DanmakuRenderProps,
 } from '@danmaku-anywhere/danmaku-engine'
 import type { DanmakuSettings } from '@/store/settings'
+import { danmakuTrackHeight, TEXT_BOX_RATIO } from './trackHeight'
 
 /**
  * The render callback the engine invokes per danmaku node. Ported from the
@@ -42,7 +43,12 @@ const toEngineConfig = (s: DanmakuSettings): Partial<DanmakuOptions> => ({
     opacity: s.opacity,
     fontSize: s.fontSize,
     fontFamily: 'sans-serif',
+    // Pinned so the node height is exactly fontSize * TEXT_BOX_RATIO; the
+    // track pitch below is derived from the same numbers, which is what
+    // guarantees two rows can never overlap at any font size.
+    lineHeight: TEXT_BOX_RATIO,
   },
+  trackHeight: danmakuTrackHeight(s.fontSize, s.lineHeight),
   speed: s.speed,
   area: { yStart: 0, yEnd: s.area, xStart: 0, xEnd: 100 },
   offset: s.offset,

@@ -208,6 +208,9 @@ export class DanmakuRenderer {
           // Setting it using manager.setStyle applies the style AFTER size is calculated so it's too late
           node.style.fontSize = `${this.config.style.fontSize}px`
           node.style.fontFamily = this.config.style.fontFamily
+          if (this.config.style.lineHeight) {
+            node.style.lineHeight = String(this.config.style.lineHeight)
+          }
 
           // apply the parser-generated styles
           Object.entries(danmaku.data.style).forEach(([key, value]) => {
@@ -302,6 +305,9 @@ export class DanmakuRenderer {
     this.manager.setStyle('pointerEvents', 'none')
     this.manager.setStyle('fontSize', `${this.config.style.fontSize}px`)
     this.manager.setStyle('fontFamily', this.config.style.fontFamily)
+    if (this.config.style.lineHeight) {
+      this.manager.setStyle('lineHeight', String(this.config.style.lineHeight))
+    }
 
     const { textStroke, textShadow } = this.config.style
     const node = this.manager.container.node

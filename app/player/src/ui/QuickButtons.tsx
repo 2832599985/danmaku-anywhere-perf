@@ -1,5 +1,10 @@
 import { alpha, Box, Typography } from '@mui/material'
 import { usePlayerCommands } from '@/player/commands'
+import {
+  LINE_HEIGHT_MAX,
+  LINE_HEIGHT_MIN,
+  LINE_HEIGHT_STEP,
+} from '@/player/danmaku/trackHeight'
 import { usePlayerStore } from '@/store/playerStore'
 import type { InterpolationMultiplier } from '@/store/settings'
 import { GOLD, GREEN, MONO, PAPER, VERMILION } from '@/theme/theme'
@@ -114,6 +119,15 @@ export const DanmakuQuickButton = () => {
             max={48}
             step={1}
             onChange={(v) => update({ fontSize: v })}
+          />
+          <InkLabeledSlider
+            zh="行距"
+            display={`${danmaku.lineHeight.toFixed(2)}×`}
+            value={danmaku.lineHeight}
+            min={LINE_HEIGHT_MIN}
+            max={LINE_HEIGHT_MAX}
+            step={LINE_HEIGHT_STEP}
+            onChange={(v) => update({ lineHeight: v })}
           />
           <InkLabeledSlider
             zh="滚动速度"
