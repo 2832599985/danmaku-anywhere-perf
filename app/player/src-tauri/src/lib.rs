@@ -1,3 +1,4 @@
+mod remux;
 mod source_bridge;
 mod stream;
 pub mod subtitle;
@@ -40,6 +41,7 @@ pub fn run() {
             subtitle_list_tracks,
             subtitle_extract_track,
             subtitle_extract_focus,
+            remux::media_prepare,
             source_bridge::source_fetch,
             source_bridge::source_login,
         ])

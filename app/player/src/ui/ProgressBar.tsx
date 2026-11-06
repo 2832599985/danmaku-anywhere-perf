@@ -1,5 +1,6 @@
 import { alpha, Box, Typography } from '@mui/material'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { preparedUrlForPath } from '@/platform/prepared'
 import { usePlayerCommands } from '@/player/commands'
 import { useOpEdMarks } from '@/player/useOpEdMarks'
 import { usePlayerStore } from '@/store/playerStore'
@@ -116,7 +117,7 @@ export const ProgressBar = () => {
   )
 
   useEffect(() => {
-    if (!showTip || !media?.url) return
+    if (!showTip || !media) return
     let cancelled = false
 
     if (!decoderRef.current) {
@@ -129,7 +130,10 @@ export const ProgressBar = () => {
       decoderRef.current = v
     }
     const decoder = decoderRef.current
-    if (decoder.src !== media.url) decoder.src = media.url
+    // FLV/TS/AVI are remuxed before playback: decode the same file the player
+    // actually plays, not the original the webview cannot demux.
+    const source = (media.path && preparedUrlForPath(media.path)) || media.url
+    if (decoder.src !== source) decoder.src = source
 
     const draw = () => {
       if (cancelled) return
@@ -162,7 +166,7 @@ export const ProgressBar = () => {
       cancelled = true
       decoder.removeEventListener('seeked', draw)
     }
-  }, [showTip, media?.url, tipTime])
+  }, [showTip, media?.url, media?.path, tipTime])
 
   return (
     <Box

@@ -39,6 +39,8 @@ export {
   type PickedMedia,
   type PickedText,
   type Platform,
+  type PreparedMediaUrl,
+  REMUX_EXTENSIONS,
   SUBTITLE_EXTENSION_LIST,
   SUBTITLE_EXTENSIONS,
   VIDEO_EXTENSION_LIST,

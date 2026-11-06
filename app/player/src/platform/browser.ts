@@ -1,5 +1,10 @@
 import { decodeTextBytes } from './decodeText'
-import type { PickedMedia, PickedText, Platform } from './types'
+import type {
+  PickedMedia,
+  PickedText,
+  Platform,
+  PreparedMediaUrl,
+} from './types'
 import { SUBTITLE_EXTENSION_LIST } from './types'
 
 const VIDEO_EXTENSIONS = 'video/*,.mp4,.m4v,.webm,.mkv,.mov,.avi,.ts,.flv,.ogv'
@@ -89,6 +94,15 @@ export const browserPlatform: Platform = {
   mediaUrlForPath(path: string): string {
     // No filesystem paths in the browser; treat as an already-usable URL.
     return path
+  },
+
+  async prepareMediaUrl(item: {
+    url: string
+    path?: string
+  }): Promise<PreparedMediaUrl> {
+    // No ffmpeg in a page: a container the browser cannot demux stays that way.
+    // (The desktop app remuxes FLV/TS/AVI; see src-tauri/src/remux.rs.)
+    return { url: item.url, remuxed: false }
   },
 
   async readTextFile(): Promise<string> {

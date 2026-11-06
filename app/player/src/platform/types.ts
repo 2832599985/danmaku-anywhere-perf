@@ -31,6 +31,19 @@ export const VIDEO_EXTENSIONS: ReadonlySet<string> = new Set(
 )
 
 /**
+ * Containers the WebView2 media stack cannot demux (measured: it opens MP4,
+ * MOV, WebM and MKV, and fails FLV/TS/AVI with `FFmpegDemuxer: open context
+ * failed`). Tauri remuxes these losslessly before handing the file to the
+ * <video> element; see `src-tauri/src/remux.rs`, whose `NEEDS_REMUX` list is
+ * the authority — this copy only decides whether to ask the backend at all.
+ */
+export const REMUX_EXTENSIONS: ReadonlySet<string> = new Set([
+  'flv',
+  'ts',
+  'avi',
+])
+
+/**
  * Subtitle file extensions (no dot): the picker, the drop routing and the
  * sibling-file auto-load (in this order of preference) share this list.
  */
@@ -72,6 +85,13 @@ export interface PickedMedia {
   path?: string
 }
 
+/** A URL the <video> element can load, plus whether it took a conversion. */
+export interface PreparedMediaUrl {
+  url: string
+  /** True when this call actually remuxed the container (cache hits are false). */
+  remuxed: boolean
+}
+
 export interface PickedText {
   /** Full text contents of the picked file. */
   text: string
@@ -101,6 +121,17 @@ export interface Platform {
 
   /** Convert an absolute fs path to a playable media URL (Tauri stream:// / convertFileSrc). */
   mediaUrlForPath(path: string): string
+
+  /**
+   * Resolve a playlist item to a URL the <video> element can actually load.
+   * Containers the host cannot demux (see REMUX_EXTENSIONS) are losslessly
+   * remuxed into a cached MP4/MKV first; everything else — and everything in
+   * the browser, which has no filesystem — maps straight to `mediaUrlForPath`.
+   */
+  prepareMediaUrl(item: {
+    url: string
+    path?: string
+  }): Promise<PreparedMediaUrl>
 
   /**
    * Read a text file by absolute path (Tauri drag-drop, sibling files). The

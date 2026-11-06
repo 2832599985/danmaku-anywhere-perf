@@ -1,10 +1,13 @@
 import { decodeTextBytes } from './decodeText'
+import { rememberPreparedUrl } from './prepared'
 import {
   extOf,
   joinPath,
   type PickedMedia,
   type PickedText,
   type Platform,
+  type PreparedMediaUrl,
+  REMUX_EXTENSIONS,
   SUBTITLE_EXTENSION_LIST,
   SUBTITLE_EXTENSIONS,
   VIDEO_EXTENSIONS,
@@ -207,6 +210,26 @@ export const tauriPlatform: Platform = {
 
   mediaUrlForPath(path: string): string {
     return streamUrlForPath(path)
+  },
+
+  async prepareMediaUrl(item: {
+    url: string
+    path?: string
+  }): Promise<PreparedMediaUrl> {
+    if (!item.path || !REMUX_EXTENSIONS.has(extOf(item.path))) {
+      return { url: item.url, remuxed: false }
+    }
+    // FLV/TS/AVI: WebView2's demuxer refuses the container even when the codecs
+    // inside are fine, so Rust rewrites it (`ffmpeg -c copy`, cached). The
+    // ORIGINAL path stays on the item — only the URL changes.
+    const { invoke } = await import('@tauri-apps/api/core')
+    const prepared = await invoke<{ path: string; remuxed: boolean }>(
+      'media_prepare',
+      { path: item.path }
+    )
+    const url = streamUrlForPath(prepared.path)
+    rememberPreparedUrl(item.path, url)
+    return { url, remuxed: prepared.remuxed }
   },
 
   async readTextFile(path: string): Promise<string> {

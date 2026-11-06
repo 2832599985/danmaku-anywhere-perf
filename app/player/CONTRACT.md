@@ -1818,3 +1818,77 @@ Engine tests **37/37** (9 new prune tests), type-check + biome clean, packaged
 exe acceptance **30/30**. Note the 640x360 fixture still builds 5 passes for a
 1280x720 target — that is a genuine 2× target, so no pruning applies; pruning
 only engages when the requested factor is not a whole 2× step.
+
+## 32. FLV (and TS/AVI) files: remux the container, keep the file (2026-11-07 — DONE)
+
+**Reported as** `01.flv` from an AnimeDownloader batch would not play.
+
+### The container, not the codec
+
+The file is H.264 + AAC, 1920x1080, 24 fps, 1326 s, 202 MB — exactly what
+WebView2 decodes. Measured with a real `<video>` element through `stream://`:
+
+| container | result |
+|---|---|
+| MP4 | ✓ |
+| MKV | ✓ (`1920x1080 dur 8.26`) |
+| WebM / MOV | ✓ |
+| **FLV / TS / AVI** | ✗ `PipelineStatus::DEMUXER_ERROR_COULD_NOT_OPEN: FFmpegDemuxer: open context failed` |
+
+So only the demuxer is missing. `ffmpeg -c copy` rewrites the container with
+every packet copied bit-for-bit: **1.4 s cold / 0.35 s warm for the 202 MB
+episode**, `h264` + `aac` and `duration 1326.42` preserved. No re-encode, no
+quality change.
+
+### Where it happens
+
+`src-tauri/src/remux.rs` — command `media_prepare(path)`:
+* containers not in `NEEDS_REMUX` (`flv`/`ts`/`avi`) return the path unchanged;
+* otherwise `-map 0:v:0 -map 0:a:0? -c copy -movflags +faststart` into
+  `<app cache dir>/media/<sha256(path|size|mtime)>.mp4`, falling back to
+  Matroska (`-f matroska`) when a codec cannot live in MP4;
+* cache entries are keyed on the source's size + mtime, so an edited file can
+  never be served a stale copy, and the directory is pruned to 2 GiB (oldest
+  first; an evicted entry simply remuxes again);
+* one global mutex, so the `<video>` element and the progress-bar thumbnail
+  decoder asking for the same file at once produce ONE copy.
+
+`Platform.prepareMediaUrl(item)` is the frontend entry point (browser: returns
+`item.url`, a page has no ffmpeg). The playlist item keeps the **original**
+`path`; only the URL handed to `<video>` points at the copy. That is deliberate:
+resume history, the sibling `01.xml` danmaku, embedded-subtitle probing and the
+learned filename rules all keep operating on the real file.
+
+### The async gap it introduces
+
+Resolving the source is now asynchronous, so `PlayerHost` holds `sourceKey` —
+the key (`path`, else `url`) of the media the element actually holds. It is
+cleared when the media changes and set only after `video.src` is assigned.
+Every effect that binds something to a source (HDR detection, danmaku mount,
+subtitle mount, upscale apply, resume restore) is gated on `sourceReady`.
+Without this, the resume effect would see the OUTGOING file's
+`readyState >= 1`, seek it to the new episode's resume point, mark itself done,
+and the new file would never resume. `ProgressBar` decodes the prepared URL too
+(`preparedUrlForPath`), otherwise hover thumbnails would keep trying the FLV.
+
+### Verification
+
+Rust unit tests cover the extension list, cache-key invalidation, the
+missing-file pass-through, the no-op for playable containers and the prune
+order. Frontend: `REMUX_EXTENSIONS` test, 167 vitest tests, tsc + biome clean.
+
+End-to-end on the packaged exe (temp `WEBVIEW2_USER_DATA_FOLDER`), opening the
+user's real `01.flv` through `__player.commands.openVideoFromPath`:
+
+| check | result |
+|---|---|
+| first open (remux runs) | **780 ms** → `duration 1326.42`, 1920x1080, `readyState 4` |
+| reopen (cache hit) | **12 ms** |
+| seek to 600 s + play | `currentTime 601.6`, still playing, no error |
+| resume after reopen | restored to the saved 632.6 s |
+| upscale on the remuxed file | `active`, 24 fps in / 24 fps out |
+| `media.path` | still the original `.flv` (resume / siblings / subtitles intact) |
+| `e2e/verify-exe.mjs` | **30/30** |
+
+Note the packaged exe can only be replaced while the player is closed; a build
+made during a session lands in `target/release/deps/danmaku_player.exe`.

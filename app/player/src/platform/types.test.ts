@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extOf, joinPath } from './types'
+import { extOf, joinPath, REMUX_EXTENSIONS } from './types'
 
 describe('joinPath', () => {
   it('appends a listed entry to its directory', () => {
@@ -28,5 +28,17 @@ describe('extOf', () => {
   it('lower-cases the extension and tolerates its absence', () => {
     expect(extOf('A.MP4')).toBe('mp4')
     expect(extOf('no-extension')).toBe('no-extension')
+  })
+})
+
+describe('REMUX_EXTENSIONS', () => {
+  it('covers exactly the containers WebView2 cannot demux', () => {
+    // Measured against a real <video> element: MP4/MOV/WebM/MKV open, these
+    // three fail with `FFmpegDemuxer: open context failed`. Adding an entry
+    // here means "run ffmpeg -c copy first" — see src-tauri/src/remux.rs.
+    expect([...REMUX_EXTENSIONS].sort()).toEqual(['avi', 'flv', 'ts'])
+    for (const ext of ['mp4', 'mkv', 'webm', 'mov', 'ogv']) {
+      expect(REMUX_EXTENSIONS.has(ext)).toBe(false)
+    }
   })
 })

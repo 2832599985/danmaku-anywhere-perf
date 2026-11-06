@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { extOf, REMUX_EXTENSIONS } from '@/platform'
 import { usePlayerStore } from '@/store/playerStore'
 
 const finiteOrZero = (n: number): number => (Number.isFinite(n) ? n : 0)
@@ -42,6 +43,11 @@ export const useVideoElement = (video: HTMLVideoElement | null): void => {
     // at, so a failed load must say so instead of leaving a black screen.
     const onError = () => {
       const code = video.error?.code
+      // FLV/TS/AVI only reach the element after a container remux, so a failure
+      // there is that conversion (missing ffmpeg, an undecodable codec) — say
+      // so instead of blaming a moved file.
+      const path = usePlayerStore.getState().media?.path ?? ''
+      const converted = REMUX_EXTENSIONS.has(extOf(path))
       const message =
         code === MediaError.MEDIA_ERR_ABORTED
           ? '加载已中止 · Load aborted'
@@ -49,7 +55,9 @@ export const useVideoElement = (video: HTMLVideoElement | null): void => {
             ? '读取文件失败 · Cannot read the file'
             : code === MediaError.MEDIA_ERR_DECODE
               ? '解码失败，文件可能已损坏 · Decode failed'
-              : '无法播放：文件可能已被移动、删除，或格式不受支持'
+              : converted
+                ? `${extOf(path).toUpperCase()} 容器转换失败：需要 ffmpeg，或文件内编码不受支持`
+                : '无法播放：文件可能已被移动、删除，或格式不受支持'
       usePlayerStore.getState().setMediaError(message)
       patch({ playing: false, ready: false })
     }

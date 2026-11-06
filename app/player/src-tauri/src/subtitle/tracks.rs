@@ -260,7 +260,7 @@ fn hide_console(_command: &mut Command) {}
 /// SRT cannot fill the pipe and deadlock the child while we poll it.
 /// `cancelled` is polled alongside the deadline; when it returns true the
 /// child is killed and the call fails with [`audio::CANCELLED`].
-fn run_with_timeout(
+pub(crate) fn run_with_timeout(
     mut command: Command,
     name: &str,
     timeout: Duration,

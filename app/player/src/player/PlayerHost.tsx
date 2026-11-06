@@ -120,7 +120,15 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     })
   }, [baseTheme, stageEl])
 
+  // Key (`path`, else `url`) of the media the <video> element actually holds.
+  // Set only AFTER the platform resolved the source, so no effect mounts
+  // danmaku/subtitles, detects HDR or restores a resume point against the
+  // OUTGOING file while a container remux is in flight (FLV/TS/AVI).
+  const [sourceKey, setSourceKey] = useState<string | null>(null)
+
   const media = usePlayerStore((s) => s.media)
+  const mediaKey = media ? (media.path ?? media.url) : null
+  const sourceReady = mediaKey !== null && sourceKey === mediaKey
   const mediaError = usePlayerStore((s) => s.mediaError)
   const comments = usePlayerStore((s) => s.comments)
   const danmakuSettings = usePlayerStore((s) => s.danmakuSettings)
@@ -192,39 +200,58 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   }, [video])
 
   // --- media -> <video>.src, then rebuild upscale/danmaku for the new source ---
+  // The URL comes from the platform adapter: containers WebView2 cannot demux
+  // (FLV/TS/AVI) are remuxed losslessly first, which takes a fraction of a
+  // second. `sourceKey` is cleared while that runs so nothing below binds to
+  // the outgoing file, then set once the element actually holds the new source.
   useEffect(() => {
     if (!video) return
     if (!media) {
+      setSourceKey(null)
       video.removeAttribute('src')
       video.load()
       upscaleCtrlRef.current?.reset()
       return
     }
-    video.src = media.url
-    video.load()
-    // Desktop-player behavior: start playing as soon as a file is opened.
-    // (The exe allows this via --autoplay-policy; browsers may reject → ignore.)
-    void video.play().catch(() => undefined)
+    const key = media.path ?? media.url
+    let stale = false
+    setSourceKey(null)
     upscaleCtrlRef.current?.reset()
-    // Upscale is (re)applied by the HDR-aware decision effect below, once the
-    // source's HDR state is known.
-    const store = usePlayerStore.getState()
-    if (store.comments.length) {
-      danmakuCtrlRef.current?.setComments(
-        video,
-        filterComments(
-          store.comments,
-          store.danmakuSettings.filters,
-          store.danmakuSettings.mergeDuplicates
-        ),
-        store.danmakuSettings
-      )
+    void platform
+      .prepareMediaUrl(media)
+      .then((prepared) => {
+        if (stale) return
+        video.src = prepared.url
+        video.load()
+        // Desktop-player behavior: start playing as soon as a file is opened.
+        // (The exe allows this via --autoplay-policy; browsers may reject →
+        // ignore.)
+        void video.play().catch(() => undefined)
+        if (prepared.remuxed) {
+          usePlayerStore
+            .getState()
+            .showOsd(`已转换容器 · ${extOf(key).toUpperCase()}`, '📦')
+        }
+        setSourceKey(key)
+      })
+      .catch((error: unknown) => {
+        if (stale) return
+        usePlayerStore
+          .getState()
+          .setMediaError(
+            `无法转换该文件的容器格式：${
+              error instanceof Error ? error.message : String(error)
+            }`
+          )
+      })
+    return () => {
+      stale = true
     }
-  }, [media, video])
+  }, [media, video, platform])
 
   // --- detect HDR from the first decoded frame (drives the upscale decision) ---
   useEffect(() => {
-    if (!video || !media) return
+    if (!video || !media || !sourceReady) return
     let cancelled = false
     const detect = () => {
       if (cancelled) return
@@ -251,22 +278,24 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       cancelled = true
       video.removeEventListener('loadeddata', detect)
     }
-  }, [media, video])
+  }, [media, video, sourceReady])
 
   // --- comments (post-filter) -> mount / clear danmaku ---
   useEffect(() => {
     const danmaku = danmakuCtrlRef.current
     if (!video || !danmaku) return
-    if (visibleComments.length) {
-      danmaku.setComments(
-        video,
-        visibleComments,
-        usePlayerStore.getState().danmakuSettings
-      )
-    } else {
+    if (!visibleComments.length) {
       danmaku.clear()
+      return
     }
-  }, [visibleComments, video])
+    // Comments are timed to a source: mount only once the element holds it.
+    if (!sourceReady) return
+    danmaku.setComments(
+      video,
+      visibleComments,
+      usePlayerStore.getState().danmakuSettings
+    )
+  }, [visibleComments, video, sourceReady])
 
   // --- danmaku settings -> live update ---
   useEffect(() => {
@@ -279,9 +308,13 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   useEffect(() => {
     const ctrl = subtitleCtrlRef.current
     if (!video || !ctrl) return
-    if (subtitleCues.length) ctrl.setCues(video, subtitleCues)
-    else ctrl.clear()
-  }, [subtitleCues, video])
+    if (!subtitleCues.length) {
+      ctrl.clear()
+      return
+    }
+    if (!sourceReady) return
+    ctrl.setCues(video, subtitleCues)
+  }, [subtitleCues, video, sourceReady])
 
   useEffect(() => {
     subtitleCtrlRef.current?.updateStyle({
@@ -326,7 +359,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   // (which WebView2 outputs/tone-maps correctly) and skip upscaling.
   useEffect(() => {
     const ctrl = upscaleCtrlRef.current
-    if (!ctrl || !video || !media) return
+    if (!ctrl || !video || !media || !sourceReady) return
     if (isHdr && upscale.enabled) {
       // disable() (not reset()) so the reported status matches reality — the
       // panel would otherwise keep claiming upscale/interpolation are running.
@@ -334,7 +367,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       return
     }
     void ctrl.apply(upscale)
-  }, [upscale, isHdr, media, video])
+  }, [upscale, isHdr, media, video, sourceReady])
 
   // --- A/B compare split -> controller clip-path ---
   useEffect(() => {
@@ -762,7 +795,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   // switching away, and `pagehide` covers a hard app close.
   useEffect(() => {
     const path = media?.path
-    if (!video || !path) return
+    if (!video || !path || !sourceReady) return
     const store = usePlayerStore.getState
 
     let resumed = false
@@ -813,7 +846,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       // Capture the outgoing position before the media effect swaps the src.
       save()
     }
-  }, [media, video])
+  }, [media, video, sourceReady])
 
   // --- persist the resume point when the app window is closing ---
   useEffect(() => {
