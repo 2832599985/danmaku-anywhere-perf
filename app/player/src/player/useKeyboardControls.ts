@@ -32,7 +32,7 @@ const isInsideOverlay = (el: EventTarget | null): boolean =>
  *            from a hold via the browser's key auto-repeat: the rate only
  *            engages on a repeated keydown, so a slow tap never loses its seek.
  *   ↑ / ↓    volume by playbackSettings.volumeStep
- *   Space/k  play-pause · f fullscreen · m mute · d danmaku on/off
+ *   Space/k  play-pause · f fullscreen · p mini player (小窗) · m mute · d danmaku on/off
  *   u upscale · c compare · [ / ] previous / next playlist entry
  * Ignored while typing in a form field or with an overlay open. `commands`
  * must be stable.
@@ -119,6 +119,18 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
         case 'f':
           event.preventDefault()
           commands.toggleFullscreen()
+          break
+        case 'p':
+          event.preventDefault()
+          void commands.toggleMiniPlayer()
+          break
+        case 'Escape':
+          // Esc already leaves fullscreen natively; give the mini window the
+          // same "get me out" key.
+          if (usePlayerStore.getState().miniPlayer) {
+            event.preventDefault()
+            void commands.toggleMiniPlayer()
+          }
           break
         case 'm':
           event.preventDefault()

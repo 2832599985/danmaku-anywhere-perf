@@ -172,6 +172,17 @@ export interface Platform {
   closeWindow(): void
 
   /**
+   * Mini player (小窗): shrink the window to `width` x `height` logical px,
+   * pin it to the bottom-right of the monitor's work area and keep it above
+   * other windows. The geometry before the call (size, position, maximized) is
+   * remembered for `exitMiniWindow`. Returns false where a page cannot move
+   * its own window (the browser), so the caller can skip the mode.
+   */
+  enterMiniWindow(width: number, height: number): Promise<boolean>
+  /** Undo `enterMiniWindow`: restore size/position/maximized, drop top-most. */
+  exitMiniWindow(): Promise<void>
+
+  /**
    * Open the source's login page in a real WebView2 window (Bilibili/Tencent).
    * The cookie jar is shared with the hidden source bridge. No-op in the
    * browser, where the sources are unavailable.

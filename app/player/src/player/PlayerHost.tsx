@@ -47,6 +47,7 @@ import { rankSiblingSubtitles } from '@/subtitle/siblings'
 import { Controls } from '@/ui/Controls'
 import { DanmakuSourceDialog } from '@/ui/DanmakuSourceDialog'
 import { EmptyState } from '@/ui/EmptyState'
+import { MiniControls } from '@/ui/MiniControls'
 import { Osd } from '@/ui/Osd'
 import { PlaylistDrawer } from '@/ui/PlaylistDrawer'
 import { SettingsDrawer } from '@/ui/SettingsDrawer'
@@ -55,6 +56,11 @@ import { type PlayerCommands, PlayerCommandsContext } from './commands'
 import { DanmakuController } from './danmaku/DanmakuController'
 import { detectHdrTransfer } from './detectHdr'
 import { FullscreenPortalContext } from './fullscreenPortal'
+import {
+  effectiveDanmakuSettings,
+  effectiveSubtitleSettings,
+  miniWindowSize,
+} from './mini/miniPlayer'
 import { type SiblingEpisode, selectBatch } from './siblingEpisodes'
 import { SubtitleController } from './subtitle/SubtitleController'
 import { SubtitleRenderer } from './subtitle/SubtitleRenderer'
@@ -134,6 +140,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   const danmakuSettings = usePlayerStore((s) => s.danmakuSettings)
   const subtitleCues = usePlayerStore((s) => s.subtitleCues)
   const subtitleSettings = usePlayerStore((s) => s.subtitleSettings)
+  const miniPlayer = usePlayerStore((s) => s.miniPlayer)
   const videoWidth = usePlayerStore((s) => s.playback.videoWidth)
   const videoHeight = usePlayerStore((s) => s.playback.videoHeight)
   const upscale = usePlayerStore((s) => s.upscale)
@@ -158,6 +165,8 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
 
   const [controlsVisible, setControlsVisible] = useState(true)
   const hideTimer = useRef<number | null>(null)
+  /** Window geometry changes are async; ignore a second toggle mid-flight. */
+  const miniBusyRef = useRef(false)
 
   useVideoElement(video)
 
@@ -178,7 +187,9 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     // on-screen lines to the renderer in the same task (a frame callback, a
     // seek command). No store write, no React render per subtitle line.
     const subtitleRenderer = new SubtitleRenderer(subtitleLayer)
-    subtitleRenderer.applySettings(store.subtitleSettings)
+    subtitleRenderer.applySettings(
+      effectiveSubtitleSettings(store.subtitleSettings, store.miniPlayer)
+    )
     const subtitleCtrl = new SubtitleController({
       onActiveChange: (active) => subtitleRenderer.render(active),
     })
@@ -293,14 +304,21 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     danmaku.setComments(
       video,
       visibleComments,
-      usePlayerStore.getState().danmakuSettings
+      effectiveDanmakuSettings(
+        usePlayerStore.getState().danmakuSettings,
+        usePlayerStore.getState().miniPlayer
+      )
     )
   }, [visibleComments, video, sourceReady])
 
   // --- danmaku settings -> live update ---
   useEffect(() => {
-    danmakuCtrlRef.current?.updateSettings(danmakuSettings)
-  }, [danmakuSettings])
+    // The mini player shrinks the text for the engine only; the stored
+    // settings stay what the user chose.
+    danmakuCtrlRef.current?.updateSettings(
+      effectiveDanmakuSettings(danmakuSettings, miniPlayer)
+    )
+  }, [danmakuSettings, miniPlayer])
 
   // --- subtitles: mount cues / forward settings into controller + renderer ---
   // The controller finds the on-screen lines frame by frame and hands CHANGES
@@ -326,8 +344,10 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   // subtitles on shows the current line in the very next frame. (The toggle
   // command also applies it synchronously — see `toggleSubtitles`.)
   useEffect(() => {
-    subtitleRendererRef.current?.applySettings(subtitleSettings)
-  }, [subtitleSettings, video])
+    subtitleRendererRef.current?.applySettings(
+      effectiveSubtitleSettings(subtitleSettings, miniPlayer)
+    )
+  }, [subtitleSettings, miniPlayer, video])
 
   useEffect(() => {
     subtitleRendererRef.current?.setVideoSize(videoWidth, videoHeight)
@@ -966,8 +986,46 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       toggleFullscreen: () => {
         const stage = stageRef.current
         if (!stage) return
+        // Fullscreen and the mini window are opposite ends; the mini window
+        // has to be left first (its restore puts the geometry back).
+        if (store().miniPlayer) return
         if (document.fullscreenElement) void document.exitFullscreen()
         else void stage.requestFullscreen().catch(() => undefined)
+      },
+      toggleMiniPlayer: async () => {
+        if (miniBusyRef.current) return
+        miniBusyRef.current = true
+        try {
+          if (store().miniPlayer) {
+            await platform.exitMiniWindow()
+            store().setMiniPlayer(false)
+            return
+          }
+          if (document.fullscreenElement) {
+            await document.exitFullscreen().catch(() => undefined)
+          }
+          // Drawers and dialogs have no room in a 480px window.
+          store().setSettingsOpen(false)
+          store().setPlaylistOpen(false)
+          const { videoWidth, videoHeight } = store().playback
+          const size = miniWindowSize(videoWidth, videoHeight)
+          if (await platform.enterMiniWindow(size.width, size.height)) {
+            store().setMiniPlayer(true)
+          } else {
+            store().showOsd('小窗仅在桌面版可用', '🪟')
+          }
+        } catch (error) {
+          // A half-applied geometry change must not leave the window stuck
+          // top-most and tiny: try to put it back, then report.
+          await platform.exitMiniWindow().catch(() => undefined)
+          store().setMiniPlayer(false)
+          store().showOsd(
+            `小窗切换失败：${error instanceof Error ? error.message : String(error)}`,
+            '⚠️'
+          )
+        } finally {
+          miniBusyRef.current = false
+        }
       },
       toggleDanmaku: () => {
         store().toggleDanmakuVisible()
@@ -1036,7 +1094,9 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         // Applied here, synchronously, rather than by the settings effect
         // after React's next render: the lines are already laid out, so they
         // are on screen in the very next frame.
-        subtitleRendererRef.current?.applySettings(settings)
+        subtitleRendererRef.current?.applySettings(
+          effectiveSubtitleSettings(settings, store().miniPlayer)
+        )
         store().showOsd(settings.visible ? '字幕开' : '字幕关', '🎬')
       },
       loadSubtitleFromFile: async () => {
@@ -1125,8 +1185,10 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
 
   // Move the subtitle rows clear of the bottom controls while they show.
   useEffect(() => {
-    subtitleRendererRef.current?.setLifted(overlaysVisible && !!media)
-  }, [overlaysVisible, media, video])
+    subtitleRendererRef.current?.setLifted(
+      overlaysVisible && !!media && !miniPlayer
+    )
+  }, [overlaysVisible, media, video, miniPlayer])
 
   // The bar measures itself and reports; the lift clears exactly its height.
   const onControlsHeight = useCallback((height: number) => {
@@ -1148,7 +1210,15 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={onDrop}
-            onDoubleClick={commands.toggleFullscreen}
+            // While mini, the picture itself moves the window (Tauri starts a
+            // native drag on mousedown inside a drag region) and a double-click
+            // brings the normal window back instead of going fullscreen.
+            {...(miniPlayer ? { 'data-tauri-drag-region': true } : {})}
+            onDoubleClick={
+              miniPlayer
+                ? () => void commands.toggleMiniPlayer()
+                : commands.toggleFullscreen
+            }
             style={{
               position: 'relative',
               width: '100%',
@@ -1162,8 +1232,12 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
               ref={setVideoRef}
               crossOrigin="anonymous"
               playsInline
-              onClick={commands.togglePlay}
+              // Mini: a click is the start of a window drag, not play/pause
+              // (the hover strip has the button). pointer-events off lets
+              // the press reach the stage's drag region.
+              onClick={miniPlayer ? undefined : commands.togglePlay}
               style={{
+                pointerEvents: miniPlayer ? 'none' : undefined,
                 position: 'absolute',
                 inset: 0,
                 width: '100%',
@@ -1235,13 +1309,19 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             )}
 
             <Osd />
-            <TopBar visible={overlaysVisible} platform={platform} />
-            {/* No media -> nothing to control; the idle stage stands alone. */}
-            {media && (
-              <Controls
-                visible={overlaysVisible}
-                onHeightChange={onControlsHeight}
-              />
+            {miniPlayer ? (
+              <MiniControls visible={controlsVisible || !playing} />
+            ) : (
+              <>
+                <TopBar visible={overlaysVisible} platform={platform} />
+                {/* No media -> nothing to control; the idle stage stands alone. */}
+                {media && (
+                  <Controls
+                    visible={overlaysVisible}
+                    onHeightChange={onControlsHeight}
+                  />
+                )}
+              </>
             )}
           </div>
 

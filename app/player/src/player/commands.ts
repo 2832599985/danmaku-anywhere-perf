@@ -21,6 +21,8 @@ export interface PlayerCommands {
   toggleMute(): void
   setPlaybackRate(rate: number): void
   toggleFullscreen(): void
+  /** enter/exit the always-on-top mini window (小窗, keyboard P). */
+  toggleMiniPlayer(): Promise<void>
   /** show/hide danmaku (mirrors settings.visible). */
   toggleDanmaku(): void
   /** flip the super-resolution master switch (keyboard U). */

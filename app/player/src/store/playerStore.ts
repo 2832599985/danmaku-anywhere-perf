@@ -169,6 +169,12 @@ export interface PlayerStore {
   upscaleStats: UpscaleStats | null
   /** A/B compare split ratio (0..1 = position of the divider), null = off. */
   compareRatio: number | null
+  /**
+   * Mini player (小窗): the window is shrunk, pinned top-most and the chrome is
+   * reduced to a hover strip. Session-only — never persisted, so a crash while
+   * mini cannot relaunch the app as a tiny always-on-top window.
+   */
+  miniPlayer: boolean
 
   // --- transient UI ---
   osd: OsdMessage | null
@@ -241,6 +247,7 @@ export interface PlayerStore {
   setUpscaleStats: (stats: UpscaleStats | null) => void
   /** move the A/B divider; null exits compare mode. */
   setCompareRatio: (ratio: number | null) => void
+  setMiniPlayer: (mini: boolean) => void
 
   showOsd: (text: string, icon?: string) => void
   clearOsd: () => void
@@ -497,6 +504,7 @@ export const usePlayerStore = create<PlayerStore>()(
       interpolationStatus: 'off',
       upscaleStats: null,
       compareRatio: null,
+      miniPlayer: false,
 
       osd: null,
       settingsOpen: false,
@@ -622,6 +630,11 @@ export const usePlayerStore = create<PlayerStore>()(
       setCompareRatio: (ratio) =>
         set((s) => {
           s.compareRatio = ratio
+        }),
+
+      setMiniPlayer: (mini) =>
+        set((s) => {
+          s.miniPlayer = mini
         }),
 
       showOsd: (text, icon) =>

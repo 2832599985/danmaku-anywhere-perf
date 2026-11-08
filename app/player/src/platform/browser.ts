@@ -135,6 +135,13 @@ export const browserPlatform: Platform = {
   closeWindow(): void {
     // no-op outside Tauri
   },
+  // A page cannot resize or pin its own window.
+  async enterMiniWindow(): Promise<boolean> {
+    return false
+  },
+  async exitMiniWindow(): Promise<void> {
+    // no-op outside Tauri
+  },
 
   async sourceLogin(): Promise<void> {
     // Bilibili/Tencent sources require the Tauri hidden-WebView bridge.

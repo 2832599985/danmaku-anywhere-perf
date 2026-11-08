@@ -13,6 +13,22 @@ import {
   VIDEO_EXTENSIONS,
 } from './types'
 
+/** Must match `minWidth`/`minHeight` of the main window in tauri.conf.json. */
+const NORMAL_MIN_WIDTH = 880
+const NORMAL_MIN_HEIGHT = 560
+/** Smallest mini window the user can drag it down to. */
+const MINI_MIN_WIDTH = 240
+const MINI_MIN_HEIGHT = 135
+/** Gap between the mini window and the work-area corner (above the taskbar). */
+const MINI_MARGIN = 16
+
+/** Normal-window geometry captured on entering the mini player. */
+let miniRestore: {
+  maximized: boolean
+  size: { width: number; height: number }
+  position: { x: number; y: number }
+} | null = null
+
 const basename = (p: string): string => {
   const parts = p.split(/[\\/]/)
   return parts[parts.length - 1] || p
@@ -263,6 +279,58 @@ export const tauriPlatform: Platform = {
     void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
       getCurrentWindow().close()
     )
+  },
+
+  async enterMiniWindow(width: number, height: number): Promise<boolean> {
+    const { getCurrentWindow, currentMonitor } = await import(
+      '@tauri-apps/api/window'
+    )
+    const { LogicalPosition, LogicalSize } = await import('@tauri-apps/api/dpi')
+    const win = getCurrentWindow()
+    if (!miniRestore) {
+      // Remember the geometry ONCE: a second enter (window re-sized while
+      // mini) must not overwrite the normal-window state with the mini one.
+      const scale = await win.scaleFactor()
+      miniRestore = {
+        maximized: await win.isMaximized(),
+        size: (await win.innerSize()).toLogical(scale),
+        position: (await win.outerPosition()).toLogical(scale),
+      }
+    }
+    if (await win.isMaximized()) await win.unmaximize()
+    // tauri.conf.json sets an 880x560 minimum for the normal layout.
+    await win.setMinSize(new LogicalSize(MINI_MIN_WIDTH, MINI_MIN_HEIGHT))
+    await win.setSize(new LogicalSize(width, height))
+    const monitor = await currentMonitor()
+    if (monitor) {
+      const area = monitor.workArea
+      const origin = area.position.toLogical(monitor.scaleFactor)
+      const extent = area.size.toLogical(monitor.scaleFactor)
+      await win.setPosition(
+        new LogicalPosition(
+          origin.x + extent.width - width - MINI_MARGIN,
+          origin.y + extent.height - height - MINI_MARGIN
+        )
+      )
+    }
+    await win.setAlwaysOnTop(true)
+    return true
+  },
+
+  async exitMiniWindow(): Promise<void> {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    const { LogicalPosition, LogicalSize } = await import('@tauri-apps/api/dpi')
+    const win = getCurrentWindow()
+    await win.setAlwaysOnTop(false)
+    await win.setMinSize(new LogicalSize(NORMAL_MIN_WIDTH, NORMAL_MIN_HEIGHT))
+    const restore = miniRestore
+    miniRestore = null
+    if (!restore) return
+    await win.setSize(new LogicalSize(restore.size.width, restore.size.height))
+    await win.setPosition(
+      new LogicalPosition(restore.position.x, restore.position.y)
+    )
+    if (restore.maximized) await win.maximize()
   },
 
   async sourceLogin(provider: 'bilibili' | 'tencent'): Promise<void> {

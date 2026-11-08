@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { getPlatform } from '@/platform'
 import { usePlayerCommands } from '@/player/commands'
 import { useOpEdMarks } from '@/player/useOpEdMarks'
 import { usePlayerStore } from '@/store/playerStore'
@@ -84,6 +85,8 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
   const commands = usePlayerCommands()
   const playing = usePlayerStore((s) => s.playback.playing)
   const fullscreen = usePlayerStore((s) => s.playback.fullscreen)
+  // The mini window resizes the native window; a browser tab cannot.
+  const isTauri = getPlatform().isTauri
   const playbackRate = usePlayerStore((s) => s.playback.playbackRate)
   const duration = usePlayerStore((s) => s.playback.duration)
   const danmakuSource = usePlayerStore((s) => s.danmakuSource)
@@ -679,6 +682,19 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
           <UpscaleQuickButton />
           <DanmakuQuickButton />
           <SubtitleQuickButton />
+
+          {isTauri && (
+            <Box
+              component="button"
+              type="button"
+              aria-label="小窗播放 (P) / Mini player"
+              title="小窗播放 (P)"
+              onClick={() => void commands.toggleMiniPlayer()}
+              sx={squareSx}
+            >
+              ▣
+            </Box>
+          )}
 
           <Box
             component="button"
