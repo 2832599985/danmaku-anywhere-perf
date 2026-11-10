@@ -491,6 +491,8 @@ await page.waitForFunction(
   null,
   { timeout: 15000 }
 )
+// The key only reaches the page while the exe window has focus.
+await page.bringToFront()
 await page.keyboard.press('f') // trusted gesture -> requestFullscreen
 await page.waitForTimeout(1200)
 const fsMenu = await page.evaluate(async () => {

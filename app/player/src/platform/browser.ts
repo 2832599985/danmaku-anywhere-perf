@@ -142,6 +142,9 @@ export const browserPlatform: Platform = {
   async exitMiniWindow(): Promise<void> {
     // no-op outside Tauri
   },
+  startWindowDrag(): void {
+    // no-op outside Tauri
+  },
 
   async sourceLogin(): Promise<void> {
     // Bilibili/Tencent sources require the Tauri hidden-WebView bridge.

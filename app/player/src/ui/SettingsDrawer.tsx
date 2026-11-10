@@ -30,8 +30,10 @@ const SHORTCUTS: Array<{
   { key: 'Space / K', zh: '播放暂停', en: 'PLAY' },
   { key: '← →', zh: '快退快进', en: 'SEEK' },
   { key: '→ 长按', zh: '临时倍速', en: 'HOLD SPEED' },
+  { key: '← 长按', zh: '倍速快退', en: 'HOLD REWIND' },
   { key: '↑ ↓', zh: '音量', en: 'VOLUME' },
   { key: 'F', zh: '全屏', en: 'FULLSCREEN' },
+  { key: 'P / Esc', zh: '小窗 / 退出小窗', en: 'MINI' },
   { key: 'M', zh: '静音', en: 'MUTE' },
   { key: 'D', zh: '弹幕开关', en: 'DANMAKU' },
   { key: '[ ]', zh: '上一集下一集', en: 'PREV/NEXT' },
@@ -359,7 +361,7 @@ const PlaybackSettingsPage = () => {
         />
         <StepperCard
           label="长按倍速"
-          sub="HOLD SPEED · → HOLD"
+          sub="HOLD · ← →"
           unit="×"
           value={playback.holdSpeed}
           min={1.5}

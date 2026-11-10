@@ -181,6 +181,11 @@ export interface Platform {
   enterMiniWindow(width: number, height: number): Promise<boolean>
   /** Undo `enterMiniWindow`: restore size/position/maximized, drop top-most. */
   exitMiniWindow(): Promise<void>
+  /**
+   * Start a native window move from the current mouse press (call it from a
+   * left-button mousedown). No-op in the browser.
+   */
+  startWindowDrag(): void
 
   /**
    * Open the source's login page in a real WebView2 window (Bilibili/Tencent).

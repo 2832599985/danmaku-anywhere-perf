@@ -22,35 +22,75 @@ const isEditable = (el: EventTarget | null): boolean => {
 const isInsideOverlay = (el: EventTarget | null): boolean =>
   el instanceof HTMLElement && el.closest('.MuiModal-root') !== null
 
+/** How often a held ← steps the playhead back (ms). */
+export const REWIND_TICK_MS = 100
+
 /**
  * Global keyboard controls:
- *   ←        seek back by playbackSettings.seekStepSec
- *   → tap    seek forward by seekStepSec
- *   → hold   temporary playback rate (playbackSettings.holdSpeed); releasing
- *            the key restores the rate that was active BEFORE the hold, so a
- *            1.5× global rate resumes after a 3× hold. A tap is distinguished
- *            from a hold via the browser's key auto-repeat: the rate only
- *            engages on a repeated keydown, so a slow tap never loses its seek.
+ *   ← / → tap    seek by playbackSettings.seekStepSec
+ *   → hold       temporary playback rate (playbackSettings.holdSpeed); releasing
+ *                the key restores the rate that was active BEFORE the hold, so
+ *                a 1.5× global rate resumes after a 3× hold.
+ *   ← hold       rewind at the same speed. Chromium has no negative playback
+ *                rate, so the video is paused and stepped back every
+ *                REWIND_TICK_MS; releasing resumes if it was playing.
+ *   A tap is told from a hold via the browser's key auto-repeat: the hold only
+ *   engages on a repeated keydown, so a slow tap never loses its seek.
  *   ↑ / ↓    volume by playbackSettings.volumeStep
  *   Space/k  play-pause · f fullscreen · p mini player (小窗) · m mute · d danmaku on/off
  *   u upscale · c compare · [ / ] previous / next playlist entry
- * Ignored while typing in a form field or with an overlay open. `commands`
- * must be stable.
+ * Keys are matched on `event.code` (the physical key), so CapsLock, Shift and
+ * an active IME do not change what a key does. Ignored while typing in a form
+ * field or with an overlay open. `commands` must be stable.
  */
 export const useKeyboardControls = (commands: PlayerCommands): void => {
   // Held across re-registrations (the effect re-runs when `commands` changes)
   // so a hold in progress is never orphaned by a re-render.
   const holdingRightRef = useRef(false)
   const rateBeforeHoldRef = useRef<number | null>(null)
+  const rewindTimerRef = useRef<number | null>(null)
+  const playingBeforeRewindRef = useRef(false)
+  // Arrow keys whose keydown we accepted. keyup only acts on these, so a
+  // release we never saw pressed (Ctrl+→, a press that began inside a dialog)
+  // can never seek.
+  const armedArrowsRef = useRef(new Set<string>())
 
   useEffect(() => {
-    const restoreHold = () => {
+    const restoreForward = () => {
       if (!holdingRightRef.current) return
       const rate = rateBeforeHoldRef.current ?? 1
       holdingRightRef.current = false
       rateBeforeHoldRef.current = null
       commands.setPlaybackRate(rate)
       usePlayerStore.getState().showOsd(`${rate}×`, '▶')
+    }
+
+    const restoreRewind = () => {
+      if (rewindTimerRef.current === null) return
+      window.clearInterval(rewindTimerRef.current)
+      rewindTimerRef.current = null
+      if (playingBeforeRewindRef.current) commands.play()
+      playingBeforeRewindRef.current = false
+    }
+
+    const restoreHolds = () => {
+      armedArrowsRef.current.clear()
+      restoreForward()
+      restoreRewind()
+    }
+
+    const startRewind = (speed: number) => {
+      const { playback } = usePlayerStore.getState()
+      playingBeforeRewindRef.current = playback.playing
+      commands.pause()
+      let cursor = playback.currentTime
+      const step = (speed * REWIND_TICK_MS) / 1000
+      rewindTimerRef.current = window.setInterval(() => {
+        if (cursor <= 0) return
+        cursor = Math.max(0, cursor - step)
+        commands.seekTo(cursor)
+      }, REWIND_TICK_MS)
+      usePlayerStore.getState().showOsd(`${speed}× 快退`, '⏪')
     }
 
     /** Nudge the subtitle timing offset; wraps the OSD feedback. */
@@ -75,17 +115,19 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
       }
       if (isEditable(event.target) || isInsideOverlay(event.target)) return
 
-      const { seekStepSec, volumeStep, holdSpeed } =
-        usePlayerStore.getState().playbackSettings
+      const { holdSpeed } = usePlayerStore.getState().playbackSettings
 
-      // Right arrow: a tap seeks, an auto-repeated press holds a temp speed.
-      // The first (non-repeat) keydown intentionally does nothing — keyup
-      // decides whether it was a tap (seek) or the start of a hold (no-op,
-      // the repeat already engaged the speed). This keeps a slow tap from
-      // ever being swallowed by a fixed time threshold.
-      if (event.key === 'ArrowRight') {
+      // ← / →: a tap seeks, an auto-repeated press holds. The first
+      // (non-repeat) keydown intentionally does nothing — keyup decides
+      // whether it was a tap (seek) or the end of a hold.
+      if (event.code === 'ArrowRight' || event.code === 'ArrowLeft') {
         event.preventDefault()
-        if (event.repeat && !holdingRightRef.current) {
+        if (!event.repeat) {
+          armedArrowsRef.current.add(event.code)
+          return
+        }
+        if (!armedArrowsRef.current.has(event.code)) return
+        if (event.code === 'ArrowRight' && !holdingRightRef.current) {
           // Snapshot the live rate NOW, before we overwrite it — setPlaybackRate
           // fires ratechange which mirrors the new rate into the store, so the
           // store can no longer be trusted as "the global rate" mid-hold.
@@ -95,14 +137,14 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
           commands.setPlaybackRate(holdSpeed)
           usePlayerStore.getState().showOsd(`${holdSpeed}× 快进`, '⏩')
         }
+        if (event.code === 'ArrowLeft' && rewindTimerRef.current === null) {
+          startRewind(holdSpeed)
+        }
         return
       }
 
-      switch (event.key) {
-        case 'ArrowLeft':
-          event.preventDefault()
-          commands.seekBy(-seekStepSec)
-          break
+      const { volumeStep } = usePlayerStore.getState().playbackSettings
+      switch (event.code) {
         case 'ArrowUp':
           event.preventDefault()
           commands.changeVolume(volumeStep)
@@ -111,16 +153,16 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
           event.preventDefault()
           commands.changeVolume(-volumeStep)
           break
-        case ' ':
-        case 'k':
+        case 'Space':
+        case 'KeyK':
           event.preventDefault()
           commands.togglePlay()
           break
-        case 'f':
+        case 'KeyF':
           event.preventDefault()
           commands.toggleFullscreen()
           break
-        case 'p':
+        case 'KeyP':
           event.preventDefault()
           void commands.toggleMiniPlayer()
           break
@@ -132,36 +174,36 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
             void commands.toggleMiniPlayer()
           }
           break
-        case 'm':
+        case 'KeyM':
           event.preventDefault()
           commands.toggleMute()
           break
-        case 'd':
+        case 'KeyD':
           event.preventDefault()
           commands.toggleDanmaku()
           break
-        case 'u':
+        case 'KeyU':
           event.preventDefault()
           commands.toggleUpscale()
           break
-        case 'c':
+        case 'KeyC':
           event.preventDefault()
           commands.toggleCompare()
           break
-        case 's':
+        case 'KeyS':
           event.preventDefault()
           commands.toggleSubtitles()
           break
-        case ',':
-        case '.':
+        case 'Comma':
+        case 'Period':
           event.preventDefault()
-          subtitleOffset(event.key === '.' ? 100 : -100)
+          subtitleOffset(event.code === 'Period' ? 100 : -100)
           break
-        case '[':
+        case 'BracketLeft':
           event.preventDefault()
           commands.playlistPrev()
           break
-        case ']':
+        case 'BracketRight':
           event.preventDefault()
           commands.playlistNext()
           break
@@ -171,27 +213,32 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
     }
 
     const onKeyUp = (event: KeyboardEvent) => {
-      if (event.key !== 'ArrowRight') return
-      if (isEditable(event.target) || isInsideOverlay(event.target)) return
-      if (holdingRightRef.current) {
-        restoreHold()
-      } else {
-        // A clean tap (no repeat ever fired) → forward seek.
-        const { seekStepSec } = usePlayerStore.getState().playbackSettings
-        commands.seekBy(seekStepSec)
+      if (event.code !== 'ArrowRight' && event.code !== 'ArrowLeft') return
+      if (!armedArrowsRef.current.delete(event.code)) return
+      if (event.code === 'ArrowRight') {
+        if (holdingRightRef.current) {
+          restoreForward()
+          return
+        }
+      } else if (rewindTimerRef.current !== null) {
+        restoreRewind()
+        return
       }
+      // A clean tap (no repeat ever fired) → seek.
+      const { seekStepSec } = usePlayerStore.getState().playbackSettings
+      commands.seekBy(event.code === 'ArrowRight' ? seekStepSec : -seekStepSec)
     }
 
     window.addEventListener('keydown', handler)
     window.addEventListener('keyup', onKeyUp)
     // If focus leaves the window mid-hold (e.g. Alt-Tab) the keyup may never
-    // arrive; restore so the speed doesn't stick.
-    window.addEventListener('blur', restoreHold)
+    // arrive; restore so the speed / rewind doesn't stick.
+    window.addEventListener('blur', restoreHolds)
     return () => {
       window.removeEventListener('keydown', handler)
       window.removeEventListener('keyup', onKeyUp)
-      window.removeEventListener('blur', restoreHold)
-      restoreHold()
+      window.removeEventListener('blur', restoreHolds)
+      restoreHolds()
     }
   }, [commands])
 }

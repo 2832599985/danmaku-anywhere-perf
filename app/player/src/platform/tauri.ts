@@ -281,6 +281,12 @@ export const tauriPlatform: Platform = {
     )
   },
 
+  startWindowDrag(): void {
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+      getCurrentWindow().startDragging()
+    )
+  },
+
   async enterMiniWindow(width: number, height: number): Promise<boolean> {
     const { getCurrentWindow, currentMonitor } = await import(
       '@tauri-apps/api/window'

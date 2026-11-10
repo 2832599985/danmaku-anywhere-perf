@@ -69,6 +69,8 @@ import { useKeyboardControls } from './useKeyboardControls'
 import { useVideoElement } from './useVideoElement'
 
 const DANMAKU_EXTENSIONS = new Set(['xml', 'json', 'txt'])
+/** Long enough to rule out a double-click, short enough not to feel late. */
+const SINGLE_CLICK_DELAY_MS = 250
 
 const basename = (p: string): string => p.split(/[\\/]/).pop() || p
 const formatClock = (input: number): string => {
@@ -167,6 +169,10 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   const hideTimer = useRef<number | null>(null)
   /** Window geometry changes are async; ignore a second toggle mid-flight. */
   const miniBusyRef = useRef(false)
+  // A single click on the picture plays/pauses only once it is certain not
+  // to be the first half of a double-click (fullscreen); acting at once made
+  // every double-click pause and resume the video on its way to fullscreen.
+  const clickTimerRef = useRef<number | null>(null)
 
   useVideoElement(video)
 
@@ -1178,8 +1184,50 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   useEffect(() => {
     return () => {
       if (hideTimer.current) window.clearTimeout(hideTimer.current)
+      if (clickTimerRef.current) window.clearTimeout(clickTimerRef.current)
     }
   }, [])
+
+  const cancelPendingClick = useCallback(() => {
+    if (clickTimerRef.current === null) return
+    window.clearTimeout(clickTimerRef.current)
+    clickTimerRef.current = null
+  }, [])
+
+  const onVideoClick = useCallback(
+    (event: React.MouseEvent) => {
+      // detail counts the clicks of this burst: the 2nd click belongs to the
+      // double-click, which goes fullscreen and must not toggle playback.
+      cancelPendingClick()
+      if (event.detail !== 1) return
+      clickTimerRef.current = window.setTimeout(() => {
+        clickTimerRef.current = null
+        commands.togglePlay()
+      }, SINGLE_CLICK_DELAY_MS)
+    },
+    [commands, cancelPendingClick]
+  )
+
+  const onStageDoubleClick = useCallback(() => {
+    cancelPendingClick()
+    commands.toggleFullscreen()
+  }, [commands, cancelPendingClick])
+
+  // Mini: the picture moves the window. Tauri's own drag region is NOT used —
+  // its script turns a double-click into toggle-maximize and swallows the
+  // event, which fought our double-click-to-restore.
+  const onMiniMouseDown = useCallback(
+    (event: React.MouseEvent) => {
+      if (event.button !== 0 || event.target !== event.currentTarget) return
+      if (event.detail === 2) {
+        void commands.toggleMiniPlayer()
+      } else if (event.detail === 1) {
+        event.preventDefault()
+        platform.startWindowDrag()
+      }
+    },
+    [commands, platform]
+  )
 
   const overlaysVisible = controlsVisible || !playing || !media
 
@@ -1210,15 +1258,11 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={onDrop}
-            // While mini, the picture itself moves the window (Tauri starts a
-            // native drag on mousedown inside a drag region) and a double-click
-            // brings the normal window back instead of going fullscreen.
-            {...(miniPlayer ? { 'data-tauri-drag-region': true } : {})}
-            onDoubleClick={
-              miniPlayer
-                ? () => void commands.toggleMiniPlayer()
-                : commands.toggleFullscreen
-            }
+            // While mini, the picture itself moves the window and a
+            // double-click brings the normal window back (onMiniMouseDown)
+            // instead of going fullscreen.
+            onMouseDown={miniPlayer ? onMiniMouseDown : undefined}
+            onDoubleClick={miniPlayer ? undefined : onStageDoubleClick}
             style={{
               position: 'relative',
               width: '100%',
@@ -1234,8 +1278,8 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
               playsInline
               // Mini: a click is the start of a window drag, not play/pause
               // (the hover strip has the button). pointer-events off lets
-              // the press reach the stage's drag region.
-              onClick={miniPlayer ? undefined : commands.togglePlay}
+              // the press reach the stage's mousedown handler.
+              onClick={miniPlayer ? undefined : onVideoClick}
               style={{
                 pointerEvents: miniPlayer ? 'none' : undefined,
                 position: 'absolute',

@@ -111,20 +111,36 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
       window.dispatchEvent(
         new KeyboardEvent('keydown', {
           key: k,
+          code: k,
           bubbles: true,
           cancelable: true,
         })
       )
       window.dispatchEvent(
-        new KeyboardEvent('keyup', { key: k, bubbles: true, cancelable: true })
+        new KeyboardEvent('keyup', {
+          key: k,
+          code: k,
+          bubbles: true,
+          cancelable: true,
+        })
       )
     }, key)
-  // Simulate a long press: an auto-repeated keydown (repeat:true) then release.
+  // Simulate a long press: the first keydown, then an auto-repeated one
+  // (repeat:true); releaseKey ends it.
   const holdKey = (key: string) =>
     page.evaluate((k) => {
       window.dispatchEvent(
         new KeyboardEvent('keydown', {
           key: k,
+          code: k,
+          bubbles: true,
+          cancelable: true,
+        })
+      )
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: k,
+          code: k,
           repeat: true,
           bubbles: true,
           cancelable: true,
@@ -134,7 +150,12 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
   const releaseKey = (key: string) =>
     page.evaluate((k) => {
       window.dispatchEvent(
-        new KeyboardEvent('keyup', { key: k, bubbles: true, cancelable: true })
+        new KeyboardEvent('keyup', {
+          key: k,
+          code: k,
+          bubbles: true,
+          cancelable: true,
+        })
       )
     }, key)
   const readRate = () =>
@@ -201,6 +222,49 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
   await expect
     .poll(async () => (await readVideo())?.currentTime ?? 0)
     .toBeGreaterThan(tBeforeHold + 0.5)
+
+  // --- 2e: hold left arrow = rewind at holdSpeed, release keeps it paused ---
+  await page.evaluate(() => (window as any).__player.commands.seekTo(5))
+  await expect
+    .poll(async () => (await readVideo())?.currentTime ?? 0)
+    .toBeGreaterThan(4.5)
+  await holdKey('ArrowLeft')
+  // 3× rewind steps back ~0.3s per 100ms tick
+  await expect
+    .poll(async () => (await readVideo())?.currentTime ?? 5, {
+      timeout: 5_000,
+    })
+    .toBeLessThan(4)
+  await releaseKey('ArrowLeft')
+  const tAfterRewind = (await readVideo())?.currentTime ?? 0
+  await page.waitForTimeout(400)
+  // released: no more stepping, and it was paused before, so still paused
+  expect(
+    Math.abs(((await readVideo())?.currentTime ?? 0) - tAfterRewind)
+  ).toBeLessThan(0.1)
+  expect((await readVideo())?.paused).toBe(true)
+  // the rewind never touched the rate
+  expect(await readRate()).toBe(1.5)
+
+  // a modified release (Ctrl+→ keyup without an accepted keydown) never seeks
+  const tBeforeCtrl = (await readVideo())?.currentTime ?? 0
+  await page.evaluate(() => {
+    for (const type of ['keydown', 'keyup'] as const) {
+      window.dispatchEvent(
+        new KeyboardEvent(type, {
+          key: 'ArrowRight',
+          code: 'ArrowRight',
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        })
+      )
+    }
+  })
+  await page.waitForTimeout(300)
+  expect(
+    Math.abs(((await readVideo())?.currentTime ?? 0) - tBeforeCtrl)
+  ).toBeLessThan(0.1)
 
   // restore the default rate so the GPU tests below aren't run at 1.5×
   await page.evaluate(() =>
