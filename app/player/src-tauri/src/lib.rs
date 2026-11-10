@@ -1,6 +1,7 @@
 mod remux;
 mod source_bridge;
 mod stream;
+mod thumbs;
 pub mod subtitle;
 
 use subtitle::commands::{
@@ -44,7 +45,20 @@ pub fn run() {
             remux::media_prepare,
             source_bridge::source_fetch,
             source_bridge::source_login,
+            thumbs::thumb_save,
+            thumbs::thumb_load,
+            thumbs::thumb_delete,
         ])
+        // The hidden Bilibili/Tencent bridge windows (source_bridge) are still
+        // open when the player window closes, and Tauri only exits once every
+        // window is gone — so each close left a background process behind.
+        // The player window going away ends the app. `Destroyed` comes after
+        // the page's pagehide, so the resume point/frame are already saved.
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                tauri::Manager::app_handle(window).exit(0);
+            }
+        })
         // Async variant so large-file range reads happen off the UI thread.
         .register_asynchronous_uri_scheme_protocol("stream", |_ctx, request, responder| {
             stream::handle(request, responder);

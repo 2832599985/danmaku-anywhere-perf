@@ -1,5 +1,7 @@
 import { Box, Stack, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
+import { useEffect, useState } from 'react'
+import { getPlatform } from '@/platform'
 import { usePlayerCommands } from '@/player/commands'
 import type { PlaylistItem, ResumeEntry } from '@/store/playerStore'
 import { usePlayerStore } from '@/store/playerStore'
@@ -14,6 +16,77 @@ import {
   VERMILION,
 } from '@/theme/theme'
 import { formatTime } from './TimeDisplay'
+
+/**
+ * The frame the video was left on (loaded from the platform's thumbnail
+ * store), or the hatch placeholder until one exists — older history, or every
+ * capture so far was a black frame. `version` reloads it after a new capture.
+ */
+const ResumeThumb = ({ path, version }: { path: string; version: number }) => {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    let objectUrl: string | null = null
+    void getPlatform()
+      .loadResumeThumb(path)
+      .then((blob) => {
+        if (!alive || !blob) return
+        objectUrl = URL.createObjectURL(blob)
+        setUrl(objectUrl)
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [path, version])
+
+  const frameSx = {
+    height: 88,
+    borderBottom: `2px solid ${alpha(PAPER, 0.3)}`,
+  }
+  if (url) {
+    return (
+      <Box
+        component="img"
+        src={url}
+        alt=""
+        data-resume-thumb
+        draggable={false}
+        sx={{
+          ...frameSx,
+          display: 'block',
+          width: '100%',
+          objectFit: 'cover',
+          background: INK,
+        }}
+      />
+    )
+  }
+  return (
+    <Box
+      sx={{
+        ...frameSx,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...hatchSx(),
+      }}
+    >
+      <Typography
+        sx={{
+          fontFamily: MONO,
+          fontSize: 9,
+          color: alpha(PAPER, 0.4),
+          fontWeight: 700,
+          letterSpacing: '0.2em',
+        }}
+      >
+        THUMB
+      </Typography>
+    </Box>
+  )
+}
 
 /** Recent, resumable history shown under the hero (most recently watched first). */
 const pickRecent = (
@@ -405,29 +478,12 @@ export const EmptyState = () => {
                         },
                       }}
                     >
-                      {/* Thumbnail placeholder area. */}
-                      <Box
-                        sx={{
-                          height: 88,
-                          borderBottom: `2px solid ${alpha(PAPER, 0.3)}`,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          ...hatchSx(),
-                        }}
-                      >
-                        <Typography
-                          sx={{
-                            fontFamily: MONO,
-                            fontSize: 9,
-                            color: alpha(PAPER, 0.4),
-                            fontWeight: 700,
-                            letterSpacing: '0.2em',
-                          }}
-                        >
-                          THUMB
-                        </Typography>
-                      </Box>
+                      {item.path && (
+                        <ResumeThumb
+                          path={item.path}
+                          version={entry.updatedAt}
+                        />
+                      )}
 
                       {/* Body: name + progress. */}
                       <Box sx={{ padding: '8px 10px' }}>

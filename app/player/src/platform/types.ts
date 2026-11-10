@@ -188,6 +188,20 @@ export interface Platform {
   startWindowDrag(): void
 
   /**
+   * "Continue watching" frame for a video path (JPEG bytes). Desktop only:
+   * the browser has no paths, so it never shows a resume list.
+   */
+  saveResumeThumb(path: string, jpeg: Uint8Array): Promise<void>
+  loadResumeThumb(path: string): Promise<Blob | null>
+  deleteResumeThumb(path: string): Promise<void>
+  /**
+   * Run `handler` when the window is asked to close (✕, Alt+F4, taskbar) and
+   * close only after it settles — the last chance to save state while the
+   * page is still intact. Returns an unsubscribe.
+   */
+  onCloseRequested(handler: () => Promise<void>): () => void
+
+  /**
    * Open the source's login page in a real WebView2 window (Bilibili/Tencent).
    * The cookie jar is shared with the hidden source bridge. No-op in the
    * browser, where the sources are unavailable.

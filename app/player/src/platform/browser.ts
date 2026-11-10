@@ -145,6 +145,19 @@ export const browserPlatform: Platform = {
   startWindowDrag(): void {
     // no-op outside Tauri
   },
+  async saveResumeThumb(): Promise<void> {
+    // no paths in the browser → no resume list
+  },
+  async loadResumeThumb(): Promise<Blob | null> {
+    return null
+  },
+  async deleteResumeThumb(): Promise<void> {
+    // nothing stored
+  },
+  onCloseRequested(): () => void {
+    // A tab close cannot be awaited.
+    return () => undefined
+  },
 
   async sourceLogin(): Promise<void> {
     // Bilibili/Tencent sources require the Tauri hidden-WebView bridge.

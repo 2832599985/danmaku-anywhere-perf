@@ -287,6 +287,42 @@ export const tauriPlatform: Platform = {
     )
   },
 
+  async saveResumeThumb(path: string, jpeg: Uint8Array): Promise<void> {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('thumb_save', { key: path, data: Array.from(jpeg) })
+  },
+
+  async loadResumeThumb(path: string): Promise<Blob | null> {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const bytes = await invoke<number[] | null>('thumb_load', { key: path })
+    return bytes?.length
+      ? new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' })
+      : null
+  },
+
+  async deleteResumeThumb(path: string): Promise<void> {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('thumb_delete', { key: path })
+  },
+
+  onCloseRequested(handler: () => Promise<void>): () => void {
+    let unlisten: (() => void) | null = null
+    let disposed = false
+    void import('@tauri-apps/api/window').then(async ({ getCurrentWindow }) => {
+      // With a listener registered Tauri holds the close, awaits the handler
+      // and then destroys the window (capability: allow-destroy).
+      const off = await getCurrentWindow().onCloseRequested(async () => {
+        await handler()
+      })
+      if (disposed) off()
+      else unlisten = off
+    })
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  },
+
   async enterMiniWindow(width: number, height: number): Promise<boolean> {
     const { getCurrentWindow, currentMonitor } = await import(
       '@tauri-apps/api/window'

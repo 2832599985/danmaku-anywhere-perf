@@ -61,6 +61,7 @@ import {
   effectiveSubtitleSettings,
   miniWindowSize,
 } from './mini/miniPlayer'
+import { snapshotThumb } from './resumeThumbs'
 import { type SiblingEpisode, selectBatch } from './siblingEpisodes'
 import { SubtitleController } from './subtitle/SubtitleController'
 import { SubtitleRenderer } from './subtitle/SubtitleRenderer'
@@ -69,6 +70,10 @@ import { useKeyboardControls } from './useKeyboardControls'
 import { useVideoElement } from './useVideoElement'
 
 const DANMAKU_EXTENSIONS = new Set(['xml', 'json', 'txt'])
+/** Longest a window close waits for the last resume frame to be stored. */
+const CLOSE_SAVE_MS = 1500
+/** Fallback cadence of the resume-card frame capture while playing. */
+const THUMB_PERIOD_MS = 15_000
 /** Long enough to rule out a double-click, short enough not to feel late. */
 const SINGLE_CLICK_DELAY_MS = 250
 
@@ -429,7 +434,10 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       // exactly what silently killed the clear when it lived next to the
       // resume/save handlers.
       const finished = s.media?.path
-      if (finished) s.clearProgress(finished)
+      if (finished) {
+        s.clearProgress(finished)
+        void platform.deleteResumeThumb(finished).catch(() => undefined)
+      }
       if (!s.playbackSettings.autoAdvance) return
       // playlistIndex can be -1 after the current entry was removed from the
       // list; advancing from there to 0 is still the right continuation.
@@ -849,14 +857,28 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         store().saveProgress(path, t, video.duration)
       }
     }
+    // The "continue watching" card shows the frame you left on. Captured on
+    // pause, on leaving the video and on close; the periodic one only covers
+    // an exit that never runs a handler (crash, killed process).
+    const snapshot = () => {
+      if (!video.ended) void snapshotThumb(platform, path, video)
+    }
     let lastSave = 0
+    let lastSnapshot = 0
     const onTimeUpdate = () => {
       const now = performance.now()
+      if (now - lastSnapshot >= THUMB_PERIOD_MS) {
+        lastSnapshot = now
+        snapshot()
+      }
       if (now - lastSave < 3000) return
       lastSave = now
       save()
     }
-    const onPause = () => save()
+    const onPause = () => {
+      save()
+      snapshot()
+    }
     // NOTE: clearing on 'ended' deliberately lives in the element-keyed
     // auto-advance effect above — a listener registered here is torn down
     // mid-dispatch as soon as the video finishes and media switches.
@@ -869,8 +891,10 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       video.removeEventListener('loadedmetadata', onMeta)
       video.removeEventListener('timeupdate', onTimeUpdate)
       video.removeEventListener('pause', onPause)
-      // Capture the outgoing position before the media effect swaps the src.
+      // Capture the outgoing position (and frame) before the media effect
+      // swaps the src.
       save()
+      snapshot()
     }
   }, [media, video, sourceReady])
 
@@ -886,6 +910,24 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     window.addEventListener('pagehide', onHide)
     return () => window.removeEventListener('pagehide', onHide)
   }, [])
+
+  // --- the window is closing: last frame for the resume card ---
+  // pagehide is too late for it (the write never reaches disk), so the close
+  // is held until the frame is stored — capped, a close must never hang.
+  useEffect(
+    () =>
+      platform.onCloseRequested(async () => {
+        const s = usePlayerStore.getState()
+        const v = videoRef.current
+        if (!s.media?.path || !v || v.ended || !(v.currentTime > 1)) return
+        s.saveProgress(s.media.path, v.currentTime, v.duration)
+        await Promise.race([
+          snapshotThumb(platform, s.media.path, v),
+          new Promise((resolve) => window.setTimeout(resolve, CLOSE_SAVE_MS)),
+        ])
+      }),
+    [platform]
+  )
 
   // --- imperative commands ---
   const commands = useMemo<PlayerCommands>(() => {
