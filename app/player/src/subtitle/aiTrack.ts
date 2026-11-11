@@ -171,14 +171,15 @@ export const DISPLAY_MODE_LABEL: Record<DisplayMode, string> = {
 // Cache (persisted per video by Rust under <data dir>/subs/)
 // ---------------------------------------------------------------------------
 
+/** v2: cue times snapped to the voice (VAD, CONTRACT §36) — v1 tracks regenerate. */
 interface CacheFile {
-  v: 1
+  v: 2
   lines: AiLine[]
   asr: Interval[]
 }
 
 export const serializeTrack = (lines: AiLine[], asr: Interval[]): string =>
-  JSON.stringify({ v: 1, lines, asr } satisfies CacheFile)
+  JSON.stringify({ v: 2, lines, asr } satisfies CacheFile)
 
 const isNum = (v: unknown): v is number =>
   typeof v === 'number' && Number.isFinite(v)
@@ -196,7 +197,7 @@ export const parseTrack = (
   }
   if (!raw || typeof raw !== 'object') return null
   const file = raw as Partial<CacheFile>
-  if (file.v !== 1 || !Array.isArray(file.lines) || !Array.isArray(file.asr)) {
+  if (file.v !== 2 || !Array.isArray(file.lines) || !Array.isArray(file.asr)) {
     return null
   }
   const lines: AiLine[] = []

@@ -22,6 +22,7 @@ use serde::Deserialize;
 
 use super::audio;
 use super::commands::Cue;
+use super::speech;
 
 /// Clip length. The first GPU clip may be shorter so the first cue arrives
 /// sooner (`first_clip`).
@@ -228,6 +229,7 @@ pub fn transcribe_range(
     to: f64,
     first_clip: f64,
     language: &str,
+    detector: Option<&speech::Detector>,
     cancel: &AtomicBool,
     mut on_clip: impl FnMut(ClipDone),
 ) -> Result<f64, String> {
@@ -243,9 +245,19 @@ pub fn transcribe_range(
         let len = want.min(to - start);
         let last = start + len >= to - 1e-6;
         let wav_path = audio::temp_wav();
+        let mut voice: Option<Vec<(f64, f64)>> = None;
         let result = audio::extract_wav(video, start, len, &wav_path, cancel).and_then(|()| {
             let wav = std::fs::read(&wav_path).map_err(|e| format!("读取音频失败: {e}"))?;
-            infer(base, &wav, language)
+            let body = infer(base, &wav, language)?;
+            // Timing only: on failure the cues keep whisper's own times.
+            voice = detector.and_then(|d| match d.segments(&wav_path) {
+                Ok(spans) => Some(spans),
+                Err(e) => {
+                    super::logging::write(&format!("vad: {e}"));
+                    None
+                }
+            });
+            Ok(body)
         });
         let _ = std::fs::remove_file(&wav_path);
         if cancel.load(Ordering::Relaxed) {
@@ -261,7 +273,16 @@ pub fn transcribe_range(
                 text: c.text,
             })
             .collect();
+        // Boundary rule on whisper's times (it decides where the next clip
+        // starts), then shrink the kept cues to the voice.
         let (kept, next) = keep_and_advance(absolute, start, len, last);
+        let kept = match &voice {
+            Some(spans) => {
+                let spans: Vec<(f64, f64)> = spans.iter().map(|(s, e)| (s + start, e + start)).collect();
+                speech::tighten(kept, &spans)
+            }
+            None => kept,
+        };
         let cues = clean(kept, previous.as_deref());
         if let Some(tail) = cues.last() {
             previous = Some(tail.text.clone());

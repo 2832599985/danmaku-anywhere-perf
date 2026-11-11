@@ -169,9 +169,9 @@ describe('cache', () => {
   it('rejects foreign or corrupt files', () => {
     expect(parseTrack(null)).toBeNull()
     expect(parseTrack('{oops')).toBeNull()
-    expect(parseTrack('{"v":2,"lines":[],"asr":[]}')).toBeNull()
+    expect(parseTrack('{"v":1,"lines":[],"asr":[]}')).toBeNull()
     const partial = parseTrack(
-      '{"v":1,"lines":[{"start":1,"end":2,"ja":"x"},{"start":"bad"}],"asr":[{"from":0,"to":"x"}]}'
+      '{"v":2,"lines":[{"start":1,"end":2,"ja":"x"},{"start":"bad"}],"asr":[{"from":0,"to":"x"}]}'
     )
     expect(partial?.lines).toHaveLength(1)
     expect(partial?.asr).toEqual([])

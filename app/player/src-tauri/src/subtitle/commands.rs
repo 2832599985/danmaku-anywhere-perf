@@ -22,6 +22,7 @@ use super::assets::{self, AssetStatus, DownloadEvent};
 use super::audio;
 use super::logging;
 use super::sidecar::{self, Engine, Engines};
+use super::speech;
 use super::storage;
 use super::translator;
 use super::whisper;
@@ -114,6 +115,15 @@ pub fn subtitle_transcribe(
             let lease = app.state::<Engines>().ensure(&app, Engine::Asr, gpu)?;
             let _ = on_event.send(TranscribeEvent::Started { gpu: lease.gpu });
             let mut language_seen: Option<String> = None;
+            // VAD always runs from the CPU runtime (0.5 s per 5 min of audio).
+            let detector = assets::path_of(&app, &assets::WHISPER_CPU)
+                .ok()
+                .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+                .zip(assets::vad_model_path(&app).ok())
+                .and_then(|(dir, model)| speech::Detector::new(&dir, model));
+            if detector.is_none() {
+                logging::write("vad: detector unavailable, keeping whisper timing");
+            }
             let covered = whisper::transcribe_range(
                 &lease.base,
                 &path,
@@ -121,6 +131,7 @@ pub fn subtitle_transcribe(
                 to,
                 first_clip,
                 &language,
+                detector.as_ref(),
                 &cancel,
                 |clip| {
                     if language_seen.is_none() {

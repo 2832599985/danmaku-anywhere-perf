@@ -2047,3 +2047,28 @@ Verified: `cargo test launch` (arg filtering); exe with a temp
 `WEBVIEW2_USER_DATA_FOLDER`: `exe <video>` played it (resume thumb written on
 close, then deleted), a second `exe <video>` exited at once with one process
 left.
+
+## 36. AI subtitles: cue times snapped to the voice (2026-11-12 — DONE)
+
+Symptom: the next line was on screen through the whole pause before it was
+spoken — subtitles looked continuous. Cause: whisper (no word timestamps)
+starts a segment where the previous one ENDED, folding the pause into it.
+Transub-Player uses whisper's segment times as-is, so it has the same issue.
+
+Fix (`src-tauri/src/subtitle/speech.rs`): after each clip, run silero VAD
+(`whisper-vad-speech-segments.exe`, shipped in the same whisper.cpp b5454 CPU
+zip, bundled model) on the clip's WAV and shrink every kept cue to the speech
+inside it — start = voice start − 0.3 s, end = voice end + 0.5 s, never
+outside whisper's span, ≥ 0.8 s shown; cues without speech inside unchanged.
+Applied AFTER the clip-boundary rule. VAD failure only logs `vad:` and keeps
+whisper timing. Cost ~0.5 s per 300 s of audio. Cache format `v: 2`.
+
+Result on the A/B segment vs the official track: starts > 0.5 s early 23 → 8,
+pairs with a gap ≥ 0.3 s 21 → 43 of 82, on-screen 262 s → 230 s (official
+232 s).
+
+Tried and REVERTED by the user (2026-11-12, "不如第一版"): Netflix/BBC
+display rules on top (0.5 s linger, closing gaps < 0.5 s, 5/6 s minimum,
+9 chars/s), sentence splits at 「。」+pause, ffmpeg scdet shot-change
+alignment and a 0.25 s speech-overlap rule. They scored better against the
+official track but looked worse to the user — the metric is not the goal.
