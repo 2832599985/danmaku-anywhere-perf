@@ -2026,3 +2026,24 @@ servers: 82 cues, 24/24 translated on GPU); vitest `aiTrack.test.ts` +
 skip, low VRAM, no CUDA, GPU off, seek bursts, follow lead, media-switch
 staleness). Rust tests MUST use `--target-dir D:/tmp/cargo-test-target` (the
 default dir overwrites the release exe with a dev build).
+
+## 35. Explorer 「打开方式」 / file association opens the file (2026-11-11 — DONE)
+
+Before: the exe ignored its command line, so 「打开方式 → Danmaku Player」 only
+started an empty player. Now (`src-tauri/src/launch.rs`):
+
+- First launch: existing files in argv (relative ones resolved against the
+  cwd, `-flags` dropped) are parked in `LaunchFiles`; the page takes them once
+  via `launch_files_take` (emitting at setup would beat the page's listener).
+- Player already running: `tauri-plugin-single-instance` (first plugin
+  registered) makes the second launch exit and hands its argv to `forward`,
+  which unminimizes/focuses `main` and emits `open-files`.
+- Frontend: `Platform.onOpenFiles` (Tauri: subscribe to `open-files` first,
+  then take the launch files; browser: noop). `PlayerHost` routes both it and
+  OS drag-drop through the same handler — videos → `openVideosFromPaths`
+  (playlist reset), `.xml/.json` → danmaku, subtitle files → subtitles.
+
+Verified: `cargo test launch` (arg filtering); exe with a temp
+`WEBVIEW2_USER_DATA_FOLDER`: `exe <video>` played it (resume thumb written on
+close, then deleted), a second `exe <video>` exited at once with one process
+left.

@@ -163,6 +163,14 @@ export interface Platform {
   onFileDrop(cb: (paths: string[]) => void): () => void
 
   /**
+   * Files the OS asked us to open (Explorer 「打开方式」 / file association):
+   * the command-line files of this launch, delivered once, then the files of
+   * every later launch while this window is running (Tauri). Returns an
+   * unsubscribe fn; a noop in the browser.
+   */
+  onOpenFiles(cb: (paths: string[]) => void): () => void
+
+  /**
    * Window chrome controls for the undecorated Tauri window (the native title
    * bar is disabled; the top bar renders its own ─ □ ✕). No-ops in the browser,
    * where the buttons are not rendered at all.

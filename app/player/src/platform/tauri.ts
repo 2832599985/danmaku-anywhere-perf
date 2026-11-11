@@ -401,4 +401,33 @@ export const tauriPlatform: Platform = {
       unlisten?.()
     }
   },
+
+  onOpenFiles(cb: (paths: string[]) => void): () => void {
+    let unlisten: (() => void) | null = null
+    let cancelled = false
+    void (async () => {
+      const [{ invoke }, { listen }] = await Promise.all([
+        import('@tauri-apps/api/core'),
+        import('@tauri-apps/api/event'),
+      ])
+      // Subscribe before taking the launch files so a second launch racing
+      // the first one's startup is not lost.
+      const fn = await listen<string[]>('open-files', (event) => {
+        if (event.payload.length) cb(event.payload)
+      })
+      if (cancelled) {
+        fn()
+        return
+      }
+      unlisten = fn
+      // Taken once per process: once taken they are delivered even if this
+      // subscription is torn down meanwhile, or they would be lost.
+      const launched = await invoke<string[]>('launch_files_take')
+      if (launched.length) cb(launched)
+    })()
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  },
 }

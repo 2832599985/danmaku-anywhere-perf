@@ -125,6 +125,10 @@ export const browserPlatform: Platform = {
     return () => undefined
   },
 
+  onOpenFiles(): () => void {
+    return () => undefined
+  },
+
   // The browser tab has its own chrome; the custom window buttons never render.
   minimizeWindow(): void {
     // no-op outside Tauri

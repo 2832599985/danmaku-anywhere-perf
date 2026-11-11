@@ -1194,10 +1194,10 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     }
   }, [commands])
 
-  // --- native (Tauri) OS drag-drop ---
+  // --- native (Tauri) OS drag-drop and 「打开方式」 (command-line files) ---
   useEffect(() => {
     if (!platform.isTauri) return
-    return platform.onFileDrop((paths) => {
+    const openPaths = (paths: string[]) => {
       // Videos first (they reset the playlist + danmaku), then danmaku and
       // subtitle files.
       const videos = paths.filter((p) => VIDEO_EXTENSIONS.has(extOf(p)))
@@ -1206,7 +1206,13 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       if (videos.length) commands.openVideosFromPaths(videos)
       for (const path of danmaku) void commands.loadDanmakuFromPath(path)
       for (const path of subtitles) void commands.loadSubtitleFromPath(path)
-    })
+    }
+    const offDrop = platform.onFileDrop(openPaths)
+    const offOpen = platform.onOpenFiles(openPaths)
+    return () => {
+      offDrop()
+      offOpen()
+    }
   }, [platform, commands])
 
   // --- browser drag-drop ---

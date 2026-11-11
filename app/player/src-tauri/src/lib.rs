@@ -1,3 +1,4 @@
+mod launch;
 mod remux;
 mod source_bridge;
 mod stream;
@@ -23,10 +24,18 @@ use subtitle::tracks::{subtitle_extract_focus, subtitle_extract_track, subtitle_
 ///   (app_log_dir/subtitle.log — the trace for "no subtitles appeared").
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let launch_files = launch::files_from_args(std::env::args().skip(1), &cwd);
     tauri::Builder::default()
+        // Must be the first plugin: a second launch (「打开方式」 while the
+        // player is open) exits here and its files go to the running window.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            launch::forward(app, argv, cwd);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
+        .manage(launch::LaunchFiles::new(launch_files))
         .manage(TaskRegistry::default())
         // whisper-server / llama-server sidecars; dropped (= killed) on exit,
         // and a kill-on-close job covers crashes.
@@ -58,6 +67,7 @@ pub fn run() {
             thumbs::thumb_save,
             thumbs::thumb_load,
             thumbs::thumb_delete,
+            launch::launch_files_take,
         ])
         // The hidden Bilibili/Tencent bridge windows (source_bridge) are still
         // open when the player window closes, and Tauri only exits once every
