@@ -10,7 +10,9 @@ rust-version = "1.77.2"
 # future mobile targets) and a thin `main.rs` entry point.
 [lib]
 name = "danmaku_player_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop only: the exe and tests link the rlib. staticlib/cdylib are the
+# mobile template defaults and cost a 1.2 GB .lib plus link time per build.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
