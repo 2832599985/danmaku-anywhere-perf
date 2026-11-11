@@ -106,6 +106,8 @@ export default defineConfig({
     emptyOutDir: true,
     // WebGPU engine + top-level await need a modern target.
     target: 'esnext',
+    // The gzip report walks every chunk and is meaningless for a local exe.
+    reportCompressedSize: false,
   },
   // Tauri env passthrough (harmless in browser dev).
   envPrefix: ['VITE_', 'TAURI_'],

@@ -1,4 +1,5 @@
-import { DeleteOutlineRounded, PlaylistAddRounded } from '@mui/icons-material'
+import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
+import PlaylistAddRounded from '@mui/icons-material/PlaylistAddRounded'
 import { Box, Button, Stack, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import { useState } from 'react'

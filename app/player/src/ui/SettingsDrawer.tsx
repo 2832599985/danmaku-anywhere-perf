@@ -1,4 +1,4 @@
-import { ArrowForwardRounded } from '@mui/icons-material'
+import ArrowForwardRounded from '@mui/icons-material/ArrowForwardRounded'
 import { Box, Button, Modal, Stack, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import { usePlayerStore } from '@/store/playerStore'

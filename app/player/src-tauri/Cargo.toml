@@ -62,8 +62,9 @@ windows = { version = "0.61", features = [
 
 # Sensible release optimizations (smaller, faster binary).
 [profile.release]
-codegen-units = 1
-lto = true
+codegen-units = 16
+lto = false
+incremental = true
 opt-level = "s"
 strip = true
 panic = "abort"
