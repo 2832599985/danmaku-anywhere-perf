@@ -5,8 +5,9 @@ mod thumbs;
 pub mod subtitle;
 
 use subtitle::commands::{
-    subtitle_cancel, subtitle_log, subtitle_model_download, subtitle_model_status,
-    subtitle_save_srt, subtitle_transcribe, TaskRegistry,
+    subtitle_asset_download, subtitle_assets, subtitle_cache_load, subtitle_cache_save,
+    subtitle_cancel, subtitle_gpu_info, subtitle_log, subtitle_release, subtitle_save_srt,
+    subtitle_set_data_dir, subtitle_transcribe, subtitle_translate, TaskRegistry,
 };
 use subtitle::tracks::{subtitle_extract_focus, subtitle_extract_track, subtitle_list_tracks};
 
@@ -17,8 +18,8 @@ use subtitle::tracks::{subtitle_extract_focus, subtitle_extract_track, subtitle_
 /// - Registers the custom, range-capable, CORS-clean `stream://` URI scheme so
 ///   the webview can read local video files without tainting the WebGPU
 ///   texture source.
-/// - Manages the subtitle TaskRegistry (single-flight transcription tasks) and
-///   the subtitle command surface, plus the subtitle diagnostic log
+/// - Manages the subtitle TaskRegistry (single-flight recognition), the model
+///   server sidecars, and the subtitle command surface, plus the subtitle diagnostic log
 ///   (app_log_dir/subtitle.log — the trace for "no subtitles appeared").
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -27,6 +28,9 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
         .manage(TaskRegistry::default())
+        // whisper-server / llama-server sidecars; dropped (= killed) on exit,
+        // and a kill-on-close job covers crashes.
+        .manage(subtitle::sidecar::Engines::default())
         .manage(std::sync::Arc::new(source_bridge::SourceBridge::new()))
         .setup(|app| {
             subtitle::logging::init(app.handle());
@@ -35,8 +39,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             subtitle_transcribe,
             subtitle_cancel,
-            subtitle_model_status,
-            subtitle_model_download,
+            subtitle_translate,
+            subtitle_release,
+            subtitle_gpu_info,
+            subtitle_assets,
+            subtitle_set_data_dir,
+            subtitle_asset_download,
+            subtitle_cache_load,
+            subtitle_cache_save,
             subtitle_save_srt,
             subtitle_log,
             subtitle_list_tracks,

@@ -7,6 +7,7 @@ import {
 } from '@/player/danmaku/trackHeight'
 import { usePlayerStore } from '@/store/playerStore'
 import type { InterpolationMultiplier } from '@/store/settings'
+import { aiGenLabel } from '@/subtitle/generate'
 import { GOLD, GREEN, MONO, PAPER, VERMILION } from '@/theme/theme'
 import {
   InkLabeledSlider,
@@ -163,13 +164,12 @@ export const SubtitleQuickButton = () => {
   const commands = usePlayerCommands()
   const subtitle = usePlayerStore((s) => s.subtitleSettings)
   const subtitleSource = usePlayerStore((s) => s.subtitleSource)
-  const sttStatus = usePlayerStore((s) => s.sttStatus)
-  const sttProgress = usePlayerStore((s) => s.sttProgress)
+  const aiGen = usePlayerStore((s) => s.aiGen)
   const update = usePlayerStore((s) => s.updateSubtitleSettings)
-  const generating = sttStatus !== 'idle'
+  const generating = aiGen !== null && (aiGen.phase === 'burst' || aiGen.behind)
 
-  const status = generating
-    ? `${sttStatus === 'extracting' ? '提取' : '识别'} ${Math.round(sttProgress * 100)}%`
+  const status = aiGen
+    ? aiGenLabel(aiGen)
     : subtitleSource
       ? subtitle.visible
         ? '开'

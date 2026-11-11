@@ -41,6 +41,7 @@ const SHORTCUTS: Array<{
   { key: 'C', zh: '增强对比', en: 'COMPARE' },
   { key: 'S', zh: '字幕开关', en: 'SUBTITLE' },
   { key: ', .', zh: '字幕时轴±100ms', en: 'SUB OFFSET' },
+  { key: 'T', zh: 'AI 字幕 双语/译文/原文', en: 'AI SUB MODE' },
 ]
 
 interface StepperCardProps {

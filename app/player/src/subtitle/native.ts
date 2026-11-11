@@ -5,33 +5,6 @@
  * imports this module.
  */
 import { Channel, invoke } from '@tauri-apps/api/core'
-import type { SubtitleCue } from './types'
-
-/** Progress/result events streamed by subtitle_transcribe. */
-export type TranscribeEvent =
-  | { type: 'extracting'; percent: number | null }
-  | { type: 'transcribing'; percent: number }
-  /** incremental cues: mount while inference continues (streaming subtitles) */
-  | { type: 'partial'; cues: SubtitleCue[] }
-  | { type: 'done'; cues: SubtitleCue[] }
-  | { type: 'cancelled' }
-  | { type: 'failed'; message: string }
-
-export type ModelDownloadEvent =
-  | { type: 'downloading'; percent: number }
-  | { type: 'verifying' }
-  | { type: 'extracting' }
-  | { type: 'done' }
-  | { type: 'failed'; message: string }
-
-export interface ModelStatus {
-  id: string
-  downloaded: boolean
-  /** shipped inside the app — nothing to download */
-  bundled: boolean
-  size_bytes: number
-  size_label: string
-}
 
 /**
  * One subtitle stream INSIDE the container (matroska/mp4/webm), as reported by
@@ -90,37 +63,122 @@ export const focusEmbeddedExtraction = (path: string): Promise<void> =>
 /** How the backend reports an extraction it stopped on purpose. */
 export const EXTRACTION_CANCELLED = '__cancelled__'
 
-/** Start a transcription task for the window [startSecs, endSecs]; events
- * stream through `onEvent`. Single-flight. Bounded lookahead ahead of the
- * playhead — the frontend opens the next window as playback nears endSecs. */
+// ---------------------------------------------------------------------------
+// AI subtitles (CONTRACT §34): recognition + translation sidecars
+// ---------------------------------------------------------------------------
+
+/** Cue shape the recognizer streams (absolute seconds, Japanese text). */
+export interface RecognizedCue {
+  start: number
+  end: number
+  text: string
+}
+
+export type TranscribeEvent =
+  /** engine up; gpu = what actually serves (GPU may have fallen back) */
+  | { type: 'started'; gpu: boolean }
+  /** one clip done: its cues + how far recognition now reaches */
+  | { type: 'clip'; cues: RecognizedCue[]; coveredTo: number }
+  | { type: 'done'; coveredTo: number; language: string | null }
+  | { type: 'cancelled' }
+  | { type: 'failed'; message: string }
+
+/** Recognize [from, to) of the video. Single-flight; resolves once started. */
 export const transcribe = (
   path: string,
-  startSecs: number,
-  endSecs: number,
+  from: number,
+  to: number,
+  options: { gpu: boolean; firstClip?: number },
   onEvent: (event: TranscribeEvent) => void
 ): Promise<void> =>
   invoke('subtitle_transcribe', {
     path,
-    startSecs,
-    endSecs,
+    from,
+    to,
+    gpu: options.gpu,
+    firstClip: options.firstClip ?? null,
+    language: 'ja',
     onEvent: new Channel<TranscribeEvent>(onEvent),
   })
 
+/** Stop the running recognition (its server is killed — VRAM returns). */
 export const cancelTranscribe = (): Promise<void> => invoke('subtitle_cancel')
+
+/** Lines per translate call (Rust rejects more). */
+export const TRANSLATE_BATCH = 8
+
+/** One batch ja → zh. null entries = keep the Japanese. */
+export const translateBatch = (
+  lines: string[],
+  gpu: boolean
+): Promise<{ lines: Array<string | null>; gpu: boolean }> =>
+  invoke('subtitle_translate', { lines, gpu })
+
+/** Kill engines: gpuOnly frees VRAM and keeps CPU engines warm. */
+export const releaseEngines = (gpuOnly: boolean): Promise<void> =>
+  invoke('subtitle_release', { gpuOnly })
+
+export interface GpuInfo {
+  /** free VRAM in MiB (NVIDIA only); null = unknown */
+  freeMb: number | null
+  asrGpu: boolean | null
+  mtGpu: boolean | null
+}
+
+export const gpuInfo = (): Promise<GpuInfo> => invoke('subtitle_gpu_info')
+
+export interface AssetStatus {
+  id: string
+  label: string
+  installed: boolean
+  optional: boolean
+  bytes: number
+  partialBytes: number
+}
+
+export interface AssetsReport {
+  dataDir: string
+  defaultDir: string
+  freeBytes: number | null
+  assets: AssetStatus[]
+}
+
+export const subtitleAssets = (): Promise<AssetsReport> =>
+  invoke('subtitle_assets')
+
+export const setSubtitleDataDir = (path: string): Promise<AssetsReport> =>
+  invoke('subtitle_set_data_dir', { path })
+
+export type AssetDownloadEvent =
+  | { type: 'downloading'; received: number; total: number }
+  | { type: 'verifying' }
+  | { type: 'extracting' }
+  | { type: 'done' }
+  | { type: 'failed'; message: string }
+
+export const downloadAsset = (
+  id: string,
+  onEvent: (event: AssetDownloadEvent) => void
+): Promise<void> =>
+  invoke('subtitle_asset_download', {
+    id,
+    onEvent: new Channel<AssetDownloadEvent>(onEvent),
+  })
+
+/** Per-video generation state (opaque JSON, see aiTrack.serializeTrack). */
+export const loadSubtitleCache = (path: string): Promise<string | null> =>
+  invoke('subtitle_cache_load', { path })
+
+export const saveSubtitleCache = (
+  path: string,
+  contents: string
+): Promise<void> => invoke('subtitle_cache_save', { path, contents })
+
+/** Write an exported .srt to a path picked in a save dialog. */
+export const saveSrt = (path: string, contents: string): Promise<void> =>
+  invoke('subtitle_save_srt', { path, contents })
 
 /** Frontend diagnostic line → app_log_dir/subtitle.log (see logging.rs). */
 export const subtitleLog = (line: string): void => {
   void invoke('subtitle_log', { line }).catch(() => undefined)
 }
-
-export const modelStatus = (): Promise<ModelStatus[]> =>
-  invoke('subtitle_model_status')
-
-export const downloadModel = (
-  id: string,
-  onEvent: (event: ModelDownloadEvent) => void
-): Promise<void> =>
-  invoke('subtitle_model_download', {
-    id,
-    onEvent: new Channel<ModelDownloadEvent>(onEvent),
-  })

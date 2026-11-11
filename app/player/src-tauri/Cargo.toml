@@ -35,24 +35,30 @@ tokio = { version = "1", features = ["sync", "time"] }
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 
+# --- subtitle pipeline (src/subtitle/) ---
+# Recognition (whisper.cpp `whisper-server`) and translation (llama.cpp
+# `llama-server`) run as SIDECAR processes driven over loopback HTTP — no
+# native inference library is linked into the app, and killing a sidecar is
+# what returns its VRAM. See src/subtitle/sidecar.rs.
+# Model/runtime download (default features = rustls TLS; no OpenSSL on Windows);
+# `json` gives send_json/into_json for the sidecar clients.
+ureq = { version = "2", features = ["json"] }
+# The whisper.cpp / llama.cpp Windows runtimes ship as zip release assets.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# Download integrity gate before installation.
+sha2 = "0.10"
+
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"
-windows = "0.61"
-
-# --- subtitle speech-to-text pipeline (src/subtitle/) ---
-# Offline ASR (SenseVoice/Whisper) + silero VAD over onnxruntime. The build
-# script fetches a prebuilt static sherpa-onnx library for the target; set
-# SHERPA_ONNX_LIB_DIR to point at a local one in offline/CI environments.
-sherpa-onnx = "1.13"
-# WAV reading for the extracted 16 kHz mono audio.
-hound = "3.5"
-# Model download (default features = rustls TLS; no OpenSSL dependency on Windows).
-ureq = "2"
-# SenseVoice ships as tar.bz2 release assets.
-tar = "0.4"
-bzip2 = "0.5"
-# Archive integrity gate before extraction.
-sha2 = "0.10"
+windows = { version = "0.61", features = [
+  # sidecar.rs: kill-on-close Job Object so a crashed/killed player never
+  # leaves a model server holding gigabytes of VRAM behind.
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  # storage.rs: pick a non-system fixed drive for models and caches.
+  "Win32_Storage_FileSystem",
+] }
 
 # Sensible release optimizations (smaller, faster binary).
 [profile.release]

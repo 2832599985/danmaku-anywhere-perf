@@ -130,6 +130,16 @@ export interface SubtitleSettings {
   opacity: number
   /** ink outline + hard shadow behind the paper-colored text. */
   outline: boolean
+  /**
+   * AI subtitles: what is shown — 'dual' (Chinese above, small Japanese
+   * below), 'zh' or 'ja'. A line without a translation shows its Japanese.
+   */
+  aiDisplay: 'dual' | 'zh' | 'ja'
+  /**
+   * AI subtitles may borrow the GPU while the player auto-pauses (burst).
+   * Off = everything on the CPU, no auto-pause on seeks.
+   */
+  aiGpu: boolean
 }
 
 export interface PlaybackSettings {
@@ -212,6 +222,8 @@ export const DEFAULT_SUBTITLE: SubtitleSettings = {
   bottom: 6,
   opacity: 1,
   outline: true,
+  aiDisplay: 'dual',
+  aiGpu: true,
 }
 
 export const DEFAULT_SETTINGS: Settings = {

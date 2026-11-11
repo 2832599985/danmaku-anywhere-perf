@@ -35,7 +35,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": ["resources/silero-vad.onnx"],
+    "resources": ["resources/ggml-silero-v5.1.2.bin"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

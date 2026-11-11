@@ -30,7 +30,24 @@ import {
 
 export type UpscaleStatus = 'idle' | 'initializing' | 'active' | 'error'
 export type InterpolationStatus = 'off' | 'active' | 'fallback'
-export type SttStatus = 'idle' | 'extracting' | 'transcribing'
+/**
+ * AI subtitle generation status (CONTRACT §34), published by
+ * `subtitle/generate.ts` — only when a field changes, never per frame.
+ */
+export interface AiGenState {
+  /** burst = auto-paused on the GPU; follow = keeping up while playing */
+  phase: 'burst' | 'follow'
+  stage: 'recognizing' | 'translating' | 'waiting'
+  /** burst progress 0..1 */
+  progress: number
+  /** where each engine actually runs (null = not started yet) */
+  asrGpu: boolean | null
+  mtGpu: boolean | null
+  /** Chinese is ready at the playhead (the burst overlay offers 直接播放) */
+  ready: boolean
+  /** follow: playback ran past the finished Chinese */
+  behind: boolean
+}
 
 /** Playlist item: a queued media file. */
 export interface PlaylistItem {
@@ -146,13 +163,11 @@ export interface PlayerStore {
   /** Why the probe failed (no ffprobe, unreadable file) — null when it worked. */
   embeddedError: string | null
 
-  // --- speech-to-text generation (session-only) ---
-  /** pipeline stage; 'idle' = nothing running, no error. */
-  sttStatus: SttStatus
-  /** 0..1 progress within the current stage. */
-  sttProgress: number
-  /** last pipeline failure (null when idle/running). */
-  sttError: string | null
+  // --- AI subtitle generation (session-only) ---
+  /** null = not generating for this video. */
+  aiGen: AiGenState | null
+  /** last generation failure shown in 设置 → 字幕 (null = none). */
+  aiError: string | null
 
   // --- source HDR (detected from the decoded frame; session-only) ---
   isHdr: boolean
@@ -234,9 +249,8 @@ export interface PlayerStore {
   setActiveEmbeddedTrack: (index: number | null) => void
   /** record why the probe failed (cleared on the next successful one). */
   setEmbeddedError: (message: string | null) => void
-  setSttStatus: (status: SttStatus, progress?: number) => void
-  setSttProgress: (progress: number) => void
-  setSttError: (message: string | null) => void
+  setAiGen: (state: AiGenState | null) => void
+  setAiError: (message: string | null) => void
   /** record the detected HDR transfer ('pq'/'hlg') or null for SDR. */
   setHdr: (transfer: string | null) => void
 
@@ -463,9 +477,8 @@ function resetPlaybackForNewMedia(s: PlayerStore): void {
   s.embeddedTracks = []
   s.activeEmbeddedTrack = null
   s.embeddedError = null
-  s.sttStatus = 'idle'
-  s.sttProgress = 0
-  s.sttError = null
+  s.aiGen = null
+  s.aiError = null
   // The prefill describes the PREVIOUS file's show; a stale one would open the
   // picker on the wrong title after a media switch.
   s.danmakuSearchPrefill = null
@@ -490,9 +503,8 @@ export const usePlayerStore = create<PlayerStore>()(
       activeEmbeddedTrack: null,
       embeddedError: null,
 
-      sttStatus: 'idle',
-      sttProgress: 0,
-      sttError: null,
+      aiGen: null,
+      aiError: null,
 
       isHdr: false,
       hdrTransfer: null,
@@ -583,21 +595,14 @@ export const usePlayerStore = create<PlayerStore>()(
           s.embeddedError = message
         }),
 
-      setSttStatus: (status, progress = 0) =>
+      setAiGen: (state) =>
         set((s) => {
-          s.sttStatus = status
-          s.sttProgress = progress
-          if (status !== 'idle') s.sttError = null
+          s.aiGen = state
         }),
 
-      setSttProgress: (progress) =>
+      setAiError: (message) =>
         set((s) => {
-          s.sttProgress = progress
-        }),
-
-      setSttError: (message) =>
-        set((s) => {
-          s.sttError = message
+          s.aiError = message
         }),
 
       setHdr: (transfer) =>

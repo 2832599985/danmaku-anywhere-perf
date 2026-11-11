@@ -1,350 +1,794 @@
-import { invoke } from '@tauri-apps/api/core'
-import { usePlayerStore } from '@/store/playerStore'
+/**
+ * AI subtitle scheduler (CONTRACT §34): Japanese speech → Chinese subtitles,
+ * generated around the playhead while you watch.
+ *
+ * Two phases, both driven by `pump()` — every event (a recognized clip, a
+ * finished translation batch, a playhead tick, a seek, play/pause) re-runs
+ * the same decision instead of chaining callbacks:
+ *
+ * - **burst** — on 生成字幕 (and on a seek into audio nobody recognized yet)
+ *   the player AUTO-PAUSES, borrows the GPU (recognize the next ~5 min in ~4 s,
+ *   then translate until the Chinese reaches ~1 min ahead), gives the GPU back
+ *   (the servers are killed — VRAM returns) and AUTO-RESUMES. The user never
+ *   pauses by hand; the overlay offers 直接播放, and pressing play ends the
+ *   burst early. GPU use is sequential: one model at a time (8 GB card with
+ *   Anime4K at its top tier: ~3.1 GB free; whisper ≈ 1 GB, Murasaki ≈ 2.5 GB).
+ * - **follow** — while playing, CPU recognition + CPU translation keep ahead
+ *   of the playhead (measured CPU: recognition 4.7x realtime, translation
+ *   ~4x), stopping when far enough ahead.
+ *
+ * Every async result is checked against the session that started it: a media
+ * switch (or stop) makes all in-flight work land in a dead session.
+ */
+import { type AiGenState, usePlayerStore } from '@/store/playerStore'
 import { errorMessage } from '@/ui/shared'
-import { serializeSrt } from './format'
 import {
-  cancelTranscribe,
-  modelStatus,
-  subtitleLog,
-  transcribe,
-} from './native'
-import type { SubtitleCue } from './types'
+  type AiLine,
+  addInterval,
+  buildCues,
+  coveredEnd,
+  DISPLAY_MODE_LABEL,
+  type ExportKind,
+  exportCues,
+  hasPendingBefore,
+  type Interval,
+  mergeLines,
+  nextDisplayMode,
+  parseTrack,
+  pickBatch,
+  serializeTrack,
+  zhFrontier,
+} from './aiTrack'
+import { serializeSrt } from './format'
+import * as native from './native'
 
-/**
- * PLAYHEAD-FOLLOWING subtitle generation (the "分段生成 while playing" shape).
- *
- * Recognition never spans the whole file — that is what stalled the player.
- * Instead each task covers a short bounded WINDOW ahead of the playhead
- * (150 s of audio ≈ a ~2 s task) and stops. As playback nears the covered
- * end, the next window opens automatically; a seek into an uncovered spot
- * (debounced so a progress-bar drag doesn't storm cancels) re-anchors the
- * window to the new playhead. Inference is cheap (measured: 60 s audio
- * decodes in ~0.7 s on CPU), so the pipeline is paced by ffmpeg extraction.
- *
- * Coverage is tracked on a 30 s grid and cues MERGE across windows (dedup by
- * start|text). The durable artifact is <video>.srt, reloaded as a sibling on
- * next open (stage 1 path), marking the whole covered span so no re-run.
- */
+// --- tuning (measured values: PLAN-subtitle-v2.md §1) ---
 
-const WINDOW_SECS = 150
-/** Open the next window when the playhead is this close to the covered end. */
-const TRIGGER_SECS = 60
-/** Seek restart is debounced by this much (progress-bar drag = many seeks). */
+/** Burst recognition span: GPU does 300 s in ~4 s; CPU 60 s in ~13 s. */
+const BURST_ASR_GPU = 300
+const BURST_ASR_CPU = 60
+/** Burst ends once the Chinese reaches this far past the playhead. */
+const BURST_ZH_GPU = 60
+const BURST_ZH_CPU = 25
+/** Follow: start recognizing when less than this is recognized ahead… */
+const ASR_LEAD_LOW = 150
+/** …and recognize this much per run (two 120 s clips). */
+const FOLLOW_ASR_SPAN = 240
+/** Follow: translate while the Chinese is less than this far ahead. */
+const MT_LEAD_TARGET = 120
+/** Free VRAM (MiB) needed to put an engine on the GPU (measured + margin). */
+const ASR_GPU_MB = 1300
+const MT_GPU_MB = 2800
+/** Progress-bar drags fire many seeks; act once they settle. */
 const SEEK_DEBOUNCE_MS = 450
-/** Progress-log throttle: only log playhead advancement once per this many s. */
-const LOG_STEP_SECS = 15
+/** Consecutive failures before an engine is given up for this video. */
+const MAX_FAILURES = 3
+const SAVE_DEBOUNCE_MS = 3000
+const MOUNT_THROTTLE_MS = 250
 
-/** Seconds of covered audio ahead of the playhead per video path. */
-const coveredUntil = new Map<string, number>()
-/** Session cue cache per video path — merged across windows. */
-const cueCache = new Map<string, SubtitleCue[]>()
-/**
- * Monotonic id of the CURRENT media. Every async step (window run, debounced
- * timers, cancel waits) captures it and stops acting when it no longer
- * matches — the path-based identity check reads the same initially but two
- * windows of the SAME old path can both resolve after the user reopens that
- * path; mediaSession disambiguates stale generations.
- */
-let mediaSession = 0
-let followingStarted = false
-let seekTimer: number | null = null
-let lastLogPlayhead = Number.NEGATIVE_INFINITY
+/** Assets generation cannot run without. */
+export const REQUIRED_ASSETS = [
+  'whisper-turbo-q5',
+  'murasaki-4b',
+  'whisper-cpu',
+  'llama',
+] as const
 
-export const isGenerating = (): boolean =>
-  usePlayerStore.getState().sttStatus !== 'idle'
+// --- injectable edges (tests swap them) ---
 
-/** Drop all session state for a media switch (called by PlayerHost). */
-export const resetGeneration = (): void => {
-  mediaSession += 1
-  coveredUntil.clear()
-  cueCache.clear()
-  if (seekTimer) {
-    window.clearTimeout(seekTimer)
-    seekTimer = null
-  }
-  lastLogPlayhead = Number.NEGATIVE_INFINITY
+export interface Backend {
+  transcribe: typeof native.transcribe
+  cancelTranscribe: typeof native.cancelTranscribe
+  translateBatch: typeof native.translateBatch
+  releaseEngines: typeof native.releaseEngines
+  gpuInfo: typeof native.gpuInfo
+  assets: typeof native.subtitleAssets
+  loadCache: typeof native.loadSubtitleCache
+  saveCache: typeof native.saveSubtitleCache
+  log: (line: string) => void
 }
 
-const mergeCues = (
-  existing: SubtitleCue[],
-  incoming: SubtitleCue[]
-): SubtitleCue[] => {
-  const seen = new Set(existing.map((c) => `${c.start.toFixed(2)}|${c.text}`))
-  const fresh = incoming.filter(
-    (c) => !seen.has(`${c.start.toFixed(2)}|${c.text}`)
-  )
-  return [...existing, ...fresh].sort((a, b) => a.start - b.start)
+const nativeBackend: Backend = {
+  transcribe: native.transcribe,
+  cancelTranscribe: native.cancelTranscribe,
+  translateBatch: native.translateBatch,
+  releaseEngines: native.releaseEngines,
+  gpuInfo: native.gpuInfo,
+  assets: native.subtitleAssets,
+  loadCache: native.loadSubtitleCache,
+  saveCache: native.saveSubtitleCache,
+  log: native.subtitleLog,
 }
 
-const mountTrack = (videoPath: string, session: number): void => {
-  const store = usePlayerStore.getState()
-  if (session !== mediaSession || store.media?.path !== videoPath) return
-  const cues = cueCache.get(videoPath)
-  if (!cues?.length) return
-  subtitleLog(
-    `mount track: cues=${cues.length} visible=${store.subtitleSettings.visible}`
-  )
-  store.setSubtitles(cues, {
-    label: store.sttStatus === 'idle' ? '语音识别' : '语音识别 · 生成中',
-    count: cues.length,
+let backend: Backend = nativeBackend
+
+/** Play/pause hooks PlayerHost provides (the scheduler never owns <video>). */
+export interface PlayerHooks {
+  play(): void
+  pause(): void
+}
+
+let player: PlayerHooks | null = null
+
+export const bindGenerationPlayer = (hooks: PlayerHooks | null): void => {
+  player = hooks
+}
+
+// --- session ---
+
+interface Burst {
+  from: number
+  to: number
+  zhTarget: number
+  asrGpu: boolean
+  mtGpu: boolean
+  /** the video was playing when the burst began → resume it afterwards */
+  resumeAfter: boolean
+  /** the pause has taken effect; a later `playing` = the user pressed play */
+  pausedSeen: boolean
+  asrDone: boolean
+  /** GPU recognizer released before translation started */
+  released: boolean
+}
+
+interface Session {
+  id: number
+  path: string
+  lines: AiLine[]
+  asr: Interval[]
+  phase: 'burst' | 'follow'
+  burst: Burst | null
+  asrRun: {
+    from: number
+    to: number
+    cursor: number
+    gpu: boolean
+    cancelling: boolean
+  } | null
+  mtRunning: boolean
+  asrGpu: boolean | null
+  mtGpu: boolean | null
+  asrFailures: number
+  mtFailures: number
+  /** our cues are on screen (a later foreign mount = the user switched away) */
+  mounted: boolean
+  saveTimer: ReturnType<typeof setTimeout> | null
+  mountTimer: ReturnType<typeof setTimeout> | null
+}
+
+let session: Session | null = null
+let nextId = 1
+let seekTimer: ReturnType<typeof setTimeout> | null = null
+let unsubscribe: (() => void) | null = null
+
+const store = () => usePlayerStore.getState()
+const alive = (s: Session) => session === s && store().media?.path === s.path
+
+const playhead = () => {
+  const t = store().playback.currentTime
+  return Number.isFinite(t) && t > 0 ? t : 0
+}
+
+const duration = () => {
+  const d = store().playback.duration
+  return Number.isFinite(d) && d > 0 ? d : Number.POSITIVE_INFINITY
+}
+
+// --- mounting ---
+
+const mountNow = (s: Session) => {
+  if (!alive(s) || !s.lines.length) return
+  const st = store()
+  const mode = st.subtitleSettings.aiDisplay
+  const cues = buildCues(s.lines, mode)
+  const translated = s.lines.filter((l) => typeof l.zh === 'string').length
+  const running = s.asrRun !== null || s.mtRunning || s.phase === 'burst'
+  st.setSubtitles(cues, {
+    label: `AI 字幕 · ${DISPLAY_MODE_LABEL[mode]}${running ? ' · 生成中' : ''}`,
+    count: s.lines.length,
     kind: 'generated',
   })
+  s.mounted = true
+  backend.log(`mount: lines=${s.lines.length} zh=${translated} mode=${mode}`)
 }
 
-const ingest = (
-  videoPath: string,
-  cues: SubtitleCue[],
-  session: number
-): void => {
-  if (!cues.length) return
-  if (session !== mediaSession) return
-  const merged = mergeCues(cueCache.get(videoPath) ?? [], cues)
-  cueCache.set(videoPath, merged)
-  mountTrack(videoPath, session)
+const mount = (s: Session) => {
+  if (s.mountTimer) return
+  s.mountTimer = setTimeout(() => {
+    s.mountTimer = null
+    mountNow(s)
+  }, MOUNT_THROTTLE_MS)
 }
 
-const saveSrt = async (
-  videoPath: string,
-  cues: SubtitleCue[],
-  session: number
-): Promise<void> => {
-  const base = videoPath.replace(/\.[^./\\]+$/, '')
+const scheduleSave = (s: Session) => {
+  if (s.saveTimer) clearTimeout(s.saveTimer)
+  s.saveTimer = setTimeout(() => {
+    s.saveTimer = null
+    void flushSave(s)
+  }, SAVE_DEBOUNCE_MS)
+}
+
+const flushSave = async (s: Session) => {
+  if (s.saveTimer) {
+    clearTimeout(s.saveTimer)
+    s.saveTimer = null
+  }
+  if (!s.lines.length) return
   try {
-    await invoke('subtitle_save_srt', {
-      path: `${base}.srt`,
-      contents: serializeSrt(cues),
-    })
-  } catch {
-    // read-only dir — the session cache still works.
+    await backend.saveCache(s.path, serializeTrack(s.lines, s.asr))
+  } catch (error) {
+    backend.log(`cache save failed: ${errorMessage(error)}`)
   }
 }
 
-/**
- * Run ONE window [start, end]. Resolves with the window's cues when it
- * finishes (null on media-switch/cancel/stale). Progress is per-window so
- * the capsule never sits "100% then keeps running".
- */
-const runWindow = (
-  videoPath: string,
-  start: number,
-  end: number,
-  session: number
-): Promise<SubtitleCue[] | null> =>
-  new Promise((resolve, reject) => {
-    let settled = false
-    const finish = (fn: () => void) => {
-      if (settled) return
-      settled = true
-      fn()
+// --- status for the UI ---
+
+const publish = (s: Session) => {
+  if (!alive(s)) return
+  const t = playhead()
+  const frontier = zhFrontier(s.lines, s.asr, t)
+  const b = s.burst
+  let progress = 0
+  let stage: 'recognizing' | 'translating' | 'waiting' = 'waiting'
+  if (b) {
+    const asrTo = coveredEnd(s.asr, b.from) ?? b.from
+    const asrPart = Math.min(1, (asrTo - b.from) / Math.max(1, b.to - b.from))
+    const zhPart = Math.min(1, (frontier - t) / Math.max(1, b.zhTarget - t))
+    progress = b.asrDone ? 0.4 + 0.6 * Math.max(0, zhPart) : 0.4 * asrPart
+    stage = b.asrDone ? 'translating' : 'recognizing'
+  } else if (s.asrRun) {
+    stage = 'recognizing'
+  } else if (s.mtRunning) {
+    stage = 'translating'
+  }
+  const next = {
+    phase: s.phase,
+    stage,
+    progress: Math.round(progress * 100) / 100,
+    asrGpu: s.asrGpu,
+    mtGpu: s.mtGpu,
+    // 直接播放 is offered once the line at the playhead (or the next one) has
+    // its Chinese.
+    ready: frontier >= t + 5,
+    // follow: playback ran past the finished Chinese
+    behind:
+      s.phase === 'follow' &&
+      frontier <= t + 0.5 &&
+      t < duration() - 1 &&
+      (s.asrRun !== null || s.mtRunning),
+  }
+  const prev = store().aiGen
+  if (
+    !prev ||
+    prev.phase !== next.phase ||
+    prev.stage !== next.stage ||
+    prev.progress !== next.progress ||
+    prev.asrGpu !== next.asrGpu ||
+    prev.mtGpu !== next.mtGpu ||
+    prev.ready !== next.ready ||
+    prev.behind !== next.behind
+  ) {
+    store().setAiGen(next)
+  }
+}
+
+// --- engines ---
+
+const runAsr = (s: Session, from: number, to: number, gpu: boolean) => {
+  s.asrRun = { from, to, cursor: from, gpu, cancelling: false }
+  backend.log(`asr run [${from.toFixed(1)}, ${to.toFixed(1)}) gpu=${gpu}`)
+  const finish = (failed: string | null) => {
+    if (session !== s) return
+    s.asrRun = null
+    if (failed !== null) {
+      s.asrFailures += 1
+      backend.log(`asr failed (${s.asrFailures}): ${failed}`)
+      if (s.asrFailures >= MAX_FAILURES) fail(s, `语音识别失败：${failed}`)
+    } else {
+      s.asrFailures = 0
     }
-    void transcribe(videoPath, start, end, (event) => {
-      if (
-        session !== mediaSession ||
-        usePlayerStore.getState().media?.path !== videoPath
-      ) {
-        void cancelTranscribe()
-        finish(() => resolve(null))
-        return
-      }
-      const s = usePlayerStore.getState()
+    if (s.burst && failed !== null) s.burst.asrDone = true
+    mount(s)
+    pump()
+  }
+  void backend
+    .transcribe(s.path, from, to, { gpu }, (event) => {
+      if (session !== s || !s.asrRun) return
+      const run = s.asrRun
       switch (event.type) {
-        case 'extracting':
-          s.setSttStatus('extracting', event.percent ?? 0)
+        case 'started':
+          s.asrGpu = event.gpu
           break
-        case 'transcribing':
-          s.setSttStatus('transcribing', event.percent)
+        case 'clip': {
+          const fresh = event.cues.map((c) => ({
+            start: c.start,
+            end: c.end,
+            ja: c.text,
+          }))
+          s.lines = mergeLines(s.lines, fresh)
+          s.asr = addInterval(s.asr, { from: run.cursor, to: event.coveredTo })
+          run.cursor = event.coveredTo
+          mount(s)
+          scheduleSave(s)
+          pump()
           break
-        case 'partial':
-          ingest(videoPath, event.cues, session)
-          break
+        }
         case 'done':
-          finish(() => resolve(event.cues))
+          s.asr = addInterval(s.asr, { from: run.cursor, to: event.coveredTo })
+          if (s.burst) s.burst.asrDone = true
+          finish(null)
           break
         case 'cancelled':
-          finish(() => resolve(null))
+          finish(null)
           break
         case 'failed':
-          finish(() => reject(new Error(event.message)))
-          break
-        default:
+          finish(event.message)
           break
       }
-    }).catch((error) => {
-      finish(() =>
-        reject(error instanceof Error ? error : new Error(String(error)))
-      )
     })
-  })
+    .catch((error) => finish(errorMessage(error)))
+}
 
-/** Pre-flight the recognition model; route to the download UI if missing. */
-const ensureModel = async (): Promise<boolean> => {
+/** Stop the current recognition run (once); its `cancelled` event pumps. */
+const cancelAsr = (s: Session) => {
+  const run = s.asrRun
+  if (!run || run.cancelling) return
+  run.cancelling = true
+  void backend.cancelTranscribe().catch(() => undefined)
+}
+
+const runMt = (s: Session, gpu: boolean, until: number) => {
+  const t = playhead()
+  const batch = pickBatch(s.lines, t, native.TRANSLATE_BATCH)
+    .map((i) => s.lines[i])
+    .filter((line) => line.start < until)
+  if (!batch.length) return
+  s.mtRunning = true
+  void backend
+    .translateBatch(
+      batch.map((l) => l.ja),
+      gpu
+    )
+    .then((result) => {
+      if (session !== s) return
+      s.mtGpu = result.gpu
+      // Line objects survive re-sorting, so assigning by reference is safe.
+      batch.forEach((line, k) => {
+        line.zh = result.lines[k] ?? null
+      })
+      s.mtFailures = 0
+      scheduleSave(s)
+    })
+    .catch((error) => {
+      if (session !== s) return
+      s.mtFailures += 1
+      backend.log(`mt failed (${s.mtFailures}): ${errorMessage(error)}`)
+      if (s.mtFailures >= MAX_FAILURES) {
+        // Give the batch up (it stays Japanese) so playback is not blocked.
+        for (const line of batch) line.zh = null
+        fail(s, `翻译失败，显示原文：${errorMessage(error)}`)
+        s.mtFailures = 0
+      }
+    })
+    .finally(() => {
+      if (session !== s) return
+      s.mtRunning = false
+      mount(s)
+      pump()
+    })
+}
+
+const fail = (s: Session, message: string) => {
+  if (!alive(s)) return
+  store().setAiError(message)
+  store().showOsd(message.slice(0, 40), '⚠')
+}
+
+// --- the decision loop ---
+
+const pump = (): void => {
+  const s = session
+  if (!s || !alive(s)) return
+  const src = store().subtitleSource
+  if (s.mounted && src && src.kind !== 'generated') {
+    // The user mounted another subtitle: generation for this video stops.
+    backend.log('foreign subtitle mounted — stopping generation')
+    void stopGeneration()
+    return
+  }
+  if (s.phase === 'burst') pumpBurst(s)
+  else pumpFollow(s)
+  publish(s)
+}
+
+const pumpBurst = (s: Session) => {
+  const b = s.burst
+  if (!b) return
+  if (!b.asrDone) {
+    if (s.asrRun) {
+      // A CPU follow run (e.g. started by the seek itself) must not stand in
+      // for the GPU burst: stop it, the burst run starts once it winds down.
+      if (b.asrGpu && !s.asrRun.gpu) cancelAsr(s)
+      return
+    }
+    const from = coveredEnd(s.asr, b.from) ?? b.from
+    if (from >= b.to - 1) {
+      b.asrDone = true
+    } else {
+      runAsr(s, from, b.to, b.asrGpu)
+      return
+    }
+  }
+  if (s.asrRun) return // a cancelled run is still winding down
+  if (!b.released) {
+    // Hand the GPU from the recognizer to the translator.
+    b.released = true
+    void backend
+      .releaseEngines(true)
+      .catch(() => undefined)
+      .finally(() => pump())
+    return
+  }
+  const t = playhead()
+  const target = Math.min(b.zhTarget, b.to, duration())
+  if (
+    zhFrontier(s.lines, s.asr, t) >= target - 0.5 ||
+    !hasPendingBefore(s.lines, target)
+  ) {
+    if (!s.mtRunning) endBurst(s, 'done')
+    return
+  }
+  if (!s.mtRunning && s.mtFailures < MAX_FAILURES) runMt(s, b.mtGpu, target)
+}
+
+const pumpFollow = (s: Session) => {
+  const t = playhead()
+  const end = duration()
+  if (!s.asrRun && s.asrFailures < MAX_FAILURES) {
+    const from = coveredEnd(s.asr, t) ?? t
+    if (from - t < ASR_LEAD_LOW && from < end - 1) {
+      // Stop where a later covered span begins (no re-recognition).
+      const nextCovered = s.asr.find((iv) => iv.from > from + 0.5)?.from
+      const to = Math.min(
+        from + FOLLOW_ASR_SPAN,
+        end,
+        nextCovered ?? Number.POSITIVE_INFINITY
+      )
+      if (to - from >= 1) runAsr(s, from, to, false)
+    }
+  }
+  if (!s.mtRunning) {
+    const frontier = zhFrontier(s.lines, s.asr, t)
+    if (frontier - t < MT_LEAD_TARGET) runMt(s, false, t + MT_LEAD_TARGET + 30)
+  }
+}
+
+// --- burst ---
+
+/** Decide what may use the GPU right now. */
+const gpuPlan = async (): Promise<{ asr: boolean; mt: boolean }> => {
+  if (!store().subtitleSettings.aiGpu) return { asr: false, mt: false }
+  let freeMb: number | null = null
+  let cuda = false
   try {
-    const statuses = await modelStatus()
-    const sv = statuses.find((m) => m.id === 'sensevoice-int8')
-    if (sv?.downloaded) return true
-    const store = usePlayerStore.getState()
-    store.showOsd('请先在 设置 → 字幕 下载语音识别模型', '⬇')
-    store.openSettingsAt('subtitle')
-    return false
+    const [info, report] = await Promise.all([
+      backend.gpuInfo(),
+      backend.assets(),
+    ])
+    freeMb = info.freeMb
+    cuda = report.assets.some((a) => a.id === 'whisper-cuda' && a.installed)
   } catch {
-    // status check failed (non-Tauri/IPC) — let the pipeline surface errors.
+    // unknown → try the GPU translator only; Rust falls back on failure
+  }
+  return {
+    // CUDA recognition only exists for NVIDIA (freeMb known).
+    asr: cuda && freeMb !== null && freeMb >= ASR_GPU_MB,
+    // Vulkan translation: unknown VRAM → try; Rust retries on the CPU.
+    mt: freeMb === null || freeMb >= MT_GPU_MB,
+  }
+}
+
+const startBurst = async (s: Session, reason: string) => {
+  const gpu = await gpuPlan()
+  if (!alive(s) || s.phase === 'burst') return
+  const t = playhead()
+  const end = duration()
+  const playing = store().playback.playing
+  s.phase = 'burst'
+  s.burst = {
+    from: t,
+    to: Math.min(t + (gpu.asr ? BURST_ASR_GPU : BURST_ASR_CPU), end),
+    zhTarget: Math.min(t + (gpu.mt ? BURST_ZH_GPU : BURST_ZH_CPU), end),
+    asrGpu: gpu.asr,
+    mtGpu: gpu.mt,
+    resumeAfter: playing,
+    pausedSeen: !playing,
+    asrDone: false,
+    released: false,
+  }
+  backend.log(
+    `burst (${reason}) at ${t.toFixed(1)}: asrGpu=${gpu.asr} mtGpu=${gpu.mt} resume=${playing}`
+  )
+  // A follow run elsewhere must not hold the recognizer.
+  if (s.asrRun && !(s.asrRun.from <= t + 1 && s.asrRun.to > t)) cancelAsr(s)
+  if (playing) player?.pause()
+  pump()
+}
+
+type BurstEnd = 'done' | 'skip' | 'user-play'
+
+const endBurst = (s: Session, why: BurstEnd) => {
+  const b = s.burst
+  if (!b) return
+  s.phase = 'follow'
+  s.burst = null
+  backend.log(`burst end: ${why}`)
+  // Whatever still sits on the GPU goes now (in-flight work on it fails and
+  // is retried on the CPU by follow).
+  if (s.asrRun?.gpu) cancelAsr(s)
+  void backend.releaseEngines(true).catch(() => undefined)
+  if (why !== 'user-play' && b.resumeAfter) player?.play()
+  mount(s)
+  pump()
+}
+
+// --- session lifecycle ---
+
+const watchStore = () => {
+  if (unsubscribe) return
+  let lastTime = -1
+  let lastPlaying = store().playback.playing
+  let lastMode = store().subtitleSettings.aiDisplay
+  unsubscribe = usePlayerStore.subscribe((st) => {
+    // Track play/pause even between sessions, or the burst's own pause
+    // reads as "no change" and a later user play goes unnoticed.
+    const playing = st.playback.playing
+    const playingChanged = playing !== lastPlaying
+    lastPlaying = playing
+    const s = session
+    if (!s) return
+    if (playingChanged) {
+      const b = s.burst
+      if (b) {
+        if (!playing) b.pausedSeen = true
+        else if (b.pausedSeen) endBurst(s, 'user-play')
+      }
+    }
+    if (st.subtitleSettings.aiDisplay !== lastMode) {
+      lastMode = st.subtitleSettings.aiDisplay
+      if (s.mounted) mountNow(s)
+    }
+    const t = st.playback.currentTime
+    if (Math.abs(t - lastTime) >= 1) {
+      lastTime = t
+      pump()
+    }
+  })
+}
+
+/** Missing required assets, or null when everything is installed. */
+const missingAssets = async (): Promise<string[] | null> => {
+  try {
+    const report = await backend.assets()
+    const missing = REQUIRED_ASSETS.filter(
+      (id) => !report.assets.some((a) => a.id === id && a.installed)
+    )
+    return missing.length ? [...missing] : null
+  } catch (error) {
+    return [errorMessage(error)]
+  }
+}
+
+const openSession = async (path: string): Promise<Session | null> => {
+  if (session?.path === path) return session
+  await stopSession(true)
+  const s: Session = {
+    id: nextId++,
+    path,
+    lines: [],
+    asr: [],
+    phase: 'follow',
+    burst: null,
+    asrRun: null,
+    mtRunning: false,
+    asrGpu: null,
+    mtGpu: null,
+    asrFailures: 0,
+    mtFailures: 0,
+    mounted: false,
+    saveTimer: null,
+    mountTimer: null,
+  }
+  session = s
+  watchStore()
+  try {
+    const cached = parseTrack(await backend.loadCache(path))
+    if (session !== s) return null
+    if (cached) {
+      s.lines = cached.lines
+      s.asr = cached.asr
+    }
+  } catch {
+    // no cache — start fresh
+  }
+  return session === s ? s : null
+}
+
+const stopSession = async (releaseAll: boolean) => {
+  const s = session
+  session = null
+  if (seekTimer) {
+    clearTimeout(seekTimer)
+    seekTimer = null
+  }
+  if (!s) return
+  if (s.mountTimer) clearTimeout(s.mountTimer)
+  const wasBurst = s.burst
+  if (s.asrRun) await backend.cancelTranscribe().catch(() => undefined)
+  await backend.releaseEngines(!releaseAll).catch(() => undefined)
+  await flushSave(s)
+  if (wasBurst?.resumeAfter && store().media?.path === s.path) player?.play()
+  if (store().media?.path === s.path) {
+    store().setAiGen(null)
+    if (s.mounted && store().subtitleSource?.kind === 'generated') {
+      const mode = store().subtitleSettings.aiDisplay
+      store().setSubtitles(buildCues(s.lines, mode), {
+        label: `AI 字幕 · ${DISPLAY_MODE_LABEL[mode]}`,
+        count: s.lines.length,
+        kind: 'generated',
+      })
+    }
+  }
+}
+
+// --- public API ---
+
+/** 生成字幕: auto-pause, borrow the GPU, resume — then keep up while playing. */
+export const startGeneration = async (): Promise<void> => {
+  const st = store()
+  const path = st.media?.path
+  if (!path) return
+  st.setAiError(null)
+  const missing = await missingAssets()
+  if (missing) {
+    st.showOsd('请先在 设置 → 字幕 下载 AI 字幕组件', '⬇')
+    st.openSettingsAt('subtitle')
+    backend.log(`missing assets: ${missing.join(',')}`)
+    return
+  }
+  if (!st.subtitleSettings.visible) st.updateSubtitleSettings({ visible: true })
+  const s = await openSession(path)
+  if (!s) return
+  if (s.lines.length) mountNow(s)
+  const t = playhead()
+  const ready = zhFrontier(s.lines, s.asr, t) >= t + BURST_ZH_CPU
+  if (ready) {
+    // Already generated here (cache): no pause needed, just keep up.
+    pump()
+  } else {
+    await startBurst(s, 'start')
+  }
+}
+
+/** 直接播放: end the burst now; follow (CPU) does the rest. */
+export const skipBurst = (): void => {
+  const s = session
+  if (s?.burst) endBurst(s, 'skip')
+}
+
+/** Stop generating for this video (what was generated stays on screen). */
+export const stopGeneration = async (): Promise<void> => {
+  await stopSession(false)
+}
+
+/** Media switch / close: stop everything and free every engine. */
+export const resetGeneration = (): void => {
+  void stopSession(true)
+}
+
+export const isGenerating = (): boolean => session !== null
+
+/**
+ * On open: a video that was generated before gets its subtitles back at once
+ * (from the cache) and generation resumes on the CPU — no pause, no GPU.
+ * Returns false when there is no cache (or the assets are gone).
+ */
+export const restoreGeneratedTrack = async (path: string): Promise<boolean> => {
+  let cached: ReturnType<typeof parseTrack> = null
+  try {
+    cached = parseTrack(await backend.loadCache(path))
+  } catch {
+    return false
+  }
+  if (!cached?.lines.length || store().media?.path !== path) return false
+  if (store().subtitleSource) return false
+  if (await missingAssets()) {
+    // Show what exists; nothing can be generated further.
+    const mode = store().subtitleSettings.aiDisplay
+    store().setSubtitles(buildCues(cached.lines, mode), {
+      label: `AI 字幕 · ${DISPLAY_MODE_LABEL[mode]}`,
+      count: cached.lines.length,
+      kind: 'generated',
+    })
     return true
   }
+  const s = await openSession(path)
+  if (!s || store().subtitleSource) return false
+  mountNow(s)
+  pump()
+  return true
 }
 
-/**
- * Core scheduler: if the playhead lacks coverage ahead (or `force` re-anchors
- * to it for a fresh seek/backfill), open one window from there. No-op while a
- * task runs. This is the ONLY place windows are created, so the playhead-
- * following logic and the manual button share one path (no restart storms).
- */
-const scheduleWindow = async (force: boolean): Promise<void> => {
-  const session = mediaSession
-  const store = usePlayerStore.getState()
-  const videoPath = store.media?.path
-  if (!videoPath) {
-    subtitleLog('schedule skip: no media')
-    return
-  }
-  if (store.sttStatus !== 'idle') {
-    return
-  }
-  const playhead = store.playback.currentTime
-  if (!Number.isFinite(playhead) || playhead < 0) {
-    return
-  }
-
-  // Log playhead-driven checks sparsely; the full log drowned real events.
-  const verbose = force || playhead - lastLogPlayhead >= LOG_STEP_SECS
-  if (playhead - lastLogPlayhead >= 3) lastLogPlayhead = playhead
-
-  const until = coveredUntil.get(videoPath) ?? 0
-  // Enough coverage already ahead and not a forced re-anchor → nothing to do.
-  if (!force && playhead < until - TRIGGER_SECS) {
-    if (verbose) {
-      subtitleLog(
-        `schedule skip: covered ahead until=${until.toFixed(1)} playhead=${playhead.toFixed(1)}`
-      )
+/** A user seek: settle, then fill a gap with a burst or re-aim follow. */
+export const onUserSeek = (target: number): void => {
+  if (!session) return
+  if (seekTimer) clearTimeout(seekTimer)
+  seekTimer = setTimeout(() => {
+    seekTimer = null
+    const s = session
+    if (!s || !alive(s) || s.burst) return
+    const run = s.asrRun
+    if (run && !(target >= run.from - 1 && target < run.to)) cancelAsr(s)
+    const uncovered = coveredEnd(s.asr, target) === null
+    if (
+      uncovered &&
+      store().subtitleSettings.aiGpu &&
+      target < duration() - 5
+    ) {
+      void startBurst(s, 'seek')
+    } else {
+      pump()
     }
-    return
-  }
+  }, SEEK_DEBOUNCE_MS)
+}
 
-  // Forced (button / seek): start AT the playhead. Auto-extend: continue from
-  // where coverage ended (but never before the playhead).
-  const start = force ? playhead : Math.max(playhead, until)
-  const duration = store.playback.duration
-  const cap = Number.isFinite(duration) ? duration : start + WINDOW_SECS
-  const end = Math.min(start + WINDOW_SECS, cap)
-  if (end - start < 5) {
-    return // at the very end / nothing left
+/** Short status text for buttons and the source picker. */
+export const aiGenLabel = (gen: AiGenState): string => {
+  if (gen.phase === 'burst') {
+    const what = gen.stage === 'translating' ? '翻译' : '识别'
+    return `${what} ${Math.round(gen.progress * 100)}%`
   }
-  subtitleLog(
-    `window open: [${start.toFixed(1)}, ${end.toFixed(1)}] force=${force}`
-  )
+  if (gen.behind) return '生成中'
+  return gen.stage === 'waiting' ? '跟随' : '后台生成'
+}
 
-  if (!(await ensureModel())) return
-  if (session !== mediaSession) return
+/** Cycle 双语 → 译文 → 原文 (keyboard T). */
+export const cycleDisplayMode = (): void => {
+  const st = store()
+  const mode = nextDisplayMode(st.subtitleSettings.aiDisplay)
+  st.updateSubtitleSettings({ aiDisplay: mode })
+  st.showOsd(`AI 字幕 · ${DISPLAY_MODE_LABEL[mode]}`, '🎬')
+}
 
-  store.setSttError(null)
-  store.setSttStatus('extracting', 0)
-  let cues: SubtitleCue[] | null = null
-  let failed: string | null = null
-  try {
-    cues = await runWindow(videoPath, start, end, session)
-  } catch (error) {
-    failed = errorMessage(error)
-  }
-  const after = usePlayerStore.getState()
-  if (session !== mediaSession || after.media?.path !== videoPath) return
-  // Advance the watermark BEFORE going idle: setSttStatus('idle') fires the
-  // follow subscription synchronously, and an unset watermark made the
-  // scheduler immediately open an OVERLAPPING window (duplicate
-  // transcriptions of the same audio). Clamp to the actual end so a window
-  // cancelled at the video tail doesn't claim silence it never checked.
-  coveredUntil.set(videoPath, Math.max(coveredUntil.get(videoPath) ?? 0, end))
-  after.setSttStatus('idle')
-  if (failed !== null) {
-    // A cancellation surfaces as an error through runWindow's reject path
-    // (cancel during extraction/inference); treat CANCELLED-ish messages as
-    // a quiet stop, not a user-facing failure.
-    if (!/cancel|取消/i.test(failed)) {
-      after.setSttError(failed)
-      after.showOsd(`字幕生成失败: ${failed.slice(0, 60)}`, '⬇')
+/** The current video's generated lines as .srt text (null when none). */
+export const exportGenerated = async (
+  kind: ExportKind
+): Promise<string | null> => {
+  const path = store().media?.path
+  if (!path) return null
+  let lines = session?.path === path ? session.lines : null
+  if (!lines) {
+    try {
+      lines = parseTrack(await backend.loadCache(path))?.lines ?? null
+    } catch {
+      lines = null
     }
-    return
   }
-  if (cues) {
-    ingest(videoPath, cues, session)
-    mountTrack(videoPath, session)
-    void saveSrt(videoPath, cueCache.get(videoPath) ?? [], session)
-  }
+  return lines?.length ? serializeSrt(exportCues(lines, kind)) : null
 }
 
-/** Manual entry point (Controls capsule / settings button). */
-export const startGeneration = async (): Promise<void> => {
-  const store = usePlayerStore.getState()
-  // Clicking 生成字幕 expresses the intent to SEE subtitles — if the layer
-  // was toggled off in an earlier session (persisted), turning it back on
-  // here is what the user means; a hidden layer reads as "feature broken".
-  if (!store.subtitleSettings.visible) {
-    subtitleLog('visible was false — turning subtitles back on')
-    store.updateSubtitleSettings({ visible: true })
-    store.showOsd('字幕已开启', '🎬')
-  }
-  startFollowing()
-  await scheduleWindow(true)
-}
+// --- tests ---
 
-/**
- * Begin playhead-following: a throttled watcher opens the next window when
- * playback nears the covered end. Only acts once a generated track is
- * mounted (i.e. the user pressed 生成字幕) — external .srt files never spawn
- * inference. Subscribing to the store keeps this out of PlayerHost.
- */
-export const startFollowing = (): void => {
-  if (followingStarted) return
-  followingStarted = true
-  let lastSeen = -1
-  usePlayerStore.subscribe((state) => {
-    // generated source mounted, idle, actually playing, and the playhead
-    // stepped forward since the last check → evaluate extending coverage.
-    if (state.subtitleSource?.kind !== 'generated') return
-    if (state.sttStatus !== 'idle') return
-    if (!state.playback.playing) return
-    const t = state.playback.currentTime
-    if (Math.abs(t - lastSeen) < 3) return
-    lastSeen = t
-    void scheduleWindow(false)
-  })
-}
-
-/**
- * A user seek. While following, a seek into uncovered audio re-anchors the
- * window to the new playhead — but DEBOUNCED, because a progress-bar drag
- * fires this on every pointer move and an immediate cancel+restart each time
- * is what made the player stutter.
- */
-export const onUserSeek = (_targetTime: number): void => {
-  const store = usePlayerStore.getState()
-  if (store.media?.path && store.subtitleSource?.kind === 'generated') {
-    if (seekTimer) window.clearTimeout(seekTimer)
-    seekTimer = window.setTimeout(() => {
-      seekTimer = null
-      // If a window is mid-run for the OLD position, drop it so the new
-      // playhead gets its own window promptly.
-      if (isGenerating()) {
-        void cancelTranscribe()
-      }
-      void scheduleWindow(true)
-    }, SEEK_DEBOUNCE_MS)
-  }
-}
-
-export const cancelGeneration = async (): Promise<void> => {
-  await cancelTranscribe()
-}
-
-/** Reset session state (tests). */
-export const resetCoverageForTests = (): void => {
-  resetGeneration()
+export const __test = {
+  setBackend: (b: Backend | null) => {
+    backend = b ?? nativeBackend
+  },
+  reset: () => {
+    session = null
+    if (seekTimer) clearTimeout(seekTimer)
+    seekTimer = null
+    unsubscribe?.()
+    unsubscribe = null
+  },
+  session: () => session,
 }

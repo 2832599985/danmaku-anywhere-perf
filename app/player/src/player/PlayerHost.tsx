@@ -41,9 +41,15 @@ import {
   trackName,
 } from '@/subtitle/embedded'
 import { parseSubtitleText } from '@/subtitle/format'
-import { onUserSeek, resetGeneration } from '@/subtitle/generate'
+import {
+  bindGenerationPlayer,
+  onUserSeek,
+  resetGeneration,
+  restoreGeneratedTrack,
+} from '@/subtitle/generate'
 import { focusEmbeddedExtraction } from '@/subtitle/native'
 import { rankSiblingSubtitles } from '@/subtitle/siblings'
+import { AiSubtitleOverlay } from '@/ui/AiSubtitleOverlay'
 import { Controls } from '@/ui/Controls'
 import { DanmakuSourceDialog } from '@/ui/DanmakuSourceDialog'
 import { EmptyState } from '@/ui/EmptyState'
@@ -817,7 +823,18 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       usePlayerStore
         .getState()
         .showOsd(`内封字幕 · ${trackName(pick)} · ${source.count} 条`, '🎬')
-    })()
+    })().finally(() => {
+      // Lowest priority: AI subtitles generated for this video before (cache
+      // under the data dir) come back, and generation resumes on the CPU.
+      if (stale || usePlayerStore.getState().subtitleSource) return
+      void restoreGeneratedTrack(videoPath)
+        .then((restored) => {
+          if (restored && !stale) {
+            usePlayerStore.getState().showOsd('已恢复 AI 字幕', '🎬')
+          }
+        })
+        .catch(() => undefined)
+    })
     return () => {
       stale = true
     }
@@ -1159,6 +1176,12 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     }
   }, [platform])
 
+  // The AI subtitle burst pauses/resumes through the same commands as the UI.
+  useEffect(() => {
+    bindGenerationPlayer({ play: commands.play, pause: commands.pause })
+    return () => bindGenerationPlayer(null)
+  }, [commands])
+
   useKeyboardControls(commands)
 
   // Expose store + commands for e2e/debugging (harmless in production).
@@ -1395,6 +1418,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             )}
 
             <Osd />
+            <AiSubtitleOverlay />
             {miniPlayer ? (
               <MiniControls visible={controlsVisible || !playing} />
             ) : (

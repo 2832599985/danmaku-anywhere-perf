@@ -589,6 +589,10 @@ the ghost danmaku, which is expected.
 
 ## 20. Subtitle system (2026-09-06 — stage 1 DONE; ASR stages planned)
 
+> **Superseded (2026-11-11):** the SenseVoice/sherpa-onnx generation path below
+> was removed; AI subtitles are now §34 (whisper-server + llama-server sidecars).
+> Stage 1 (external files) still applies.
+
 Local subtitle support, built in two halves. **Stage 1 (landed):** external
 subtitle files (SRT/ASS/VTT) — parse, mount, frame-exact rendering. **Stages
 2-6 (planned):** local speech-to-text generation (SenseVoice via sherpa-onnx in
@@ -1567,7 +1571,7 @@ identically on the unmodified baseline** and are unrelated.
 - The frame-interpolator's generated counter restarts at 0 on every renderer
   rebuild, so any per-second measurement must treat a negative delta as a reset
   (this already produced one false "1080p is broken" conclusion — see §27).
-- `SHERPA_ONNX_LIB_DIR` must point at the local sherpa libs or `tauri build`
+- (obsolete since §34 — sherpa-onnx is no longer a dependency) `SHERPA_ONNX_LIB_DIR` must point at the local sherpa libs or `tauri build`
   tries to download them and fails on a blocked network; the libs are already at
   `C:/_DEV/sherpa-onnx/sherpa-onnx-v1.13.7-win-x64-static-MT-Release-lib/lib`.
 
@@ -1952,3 +1956,73 @@ Chromium at 12/26/36/48px and asserts both the pinned line box and the
 row-to-row distance. It was checked against the unfixed code: it fails at 12px
 (18px box vs the pinned 13.8px), so it is a genuine regression test, not a
 tautology.
+
+## 34. AI bilingual subtitles v2: whisper + Murasaki sidecars (2026-11-11 — DONE, awaiting user check)
+
+Plan and measurements: `PLAN-subtitle-v2.md`. Japanese audio → Chinese (and
+bilingual) subtitles, all local. Replaces the §20 SenseVoice path (sherpa-onnx,
+hound, tar, bzip2 removed from Cargo.toml).
+
+**Engines (separate processes, `src-tauri/src/subtitle/sidecar.rs`).**
+- Recognition: whisper.cpp b5454 `whisper-server` + `ggml-large-v3-turbo-q5_0`,
+  `-l ja -mc 0 --vad -vm <resources/ggml-silero-v5.1.2.bin>`; CPU build or
+  optional CUDA build (NVIDIA only). **No `-dtw`**: it forces flash-attn off,
+  2-5× slower, no accuracy gain (measured).
+- Translation: llama.cpp b10909 **Vulkan** build `llama-server` + Murasaki-4B
+  IQ4_XS, `-c 1024 -np 1 --no-jinja --chat-template chatml`. GPU = `-ngl 99`;
+  CPU = `-ngl 0 -dev none` (the same Vulkan binary, measured to touch no VRAM).
+- Killing a sidecar frees its VRAM. Only one engine is on the GPU at a time
+  (`Engines::ensure` kills the other GPU one first; GPU spawn failure → CPU).
+  A kill-on-close Job Object reaps children if the player dies.
+
+**Data dir (`storage.rs`), never C: unless nothing else exists.** env
+`DANMAKU_PLAYER_DATA_DIR` → `app_config_dir/subtitle-data-dir.txt` → default
+(exe's drive if not C, else the fixed non-C drive with most free space >8 GB,
+else app data) `<X>:\DanmakuPlayerData`, persisted on first use. Layout:
+`models/`, `runtime/{whisper-cpu,whisper-cuda,llama}/`, `downloads/*.part`,
+`subs/<fnv(path)+size+mtime>.json` (per-video track cache), `logs/`.
+Assets (`assets.rs`): resumable Range download, sha256-verified, zip
+flatten-extract; models from hf-mirror→huggingface, runtimes ghfast→github.
+
+**Recognition chunking (`whisper.rs`).** 120 s clips (30 s clips on CPU pay a
+~5.4 s encode each: 176 s vs 63 s for 300 s of audio). Boundary rule: on a
+non-final clip drop cues ending within 0.5 s of the clip end; the next clip
+starts at the last kept cue's end (nothing kept → advance clip_end − 2 s).
+Segments with `no_speech_prob ≥ 0.8` dropped; hallucination cleanup in `clean`.
+
+**Translation (`translator.rs`).** Batches of 8 as `N|line`, temperature 0.3;
+missing lines → one retry; only the leading run of numbered lines is trusted;
+echoes / >50% kana rejected → `null` (shown as Japanese, never retried).
+
+**Scheduler (`src/subtitle/generate.ts`, pure track logic in `aiTrack.ts`).**
+- *Burst*: 「AI 生成中文字幕」 → auto-pause → recognize [t, t+300) on the GPU
+  (CPU: 60 s) → release the recognizer → translate until the Chinese frontier
+  ≥ t+60 (CPU: 25) → release → auto-resume. 直接播放 (`skipBurst`) or the user
+  pressing play ends it at once (no resume on top of the user). The video is
+  only resumed if it was playing when the burst began.
+- GPU plan: `aiGpu` setting; GPU recognition needs the CUDA package and ≥1300 MB
+  free (nvidia-smi); GPU translation needs ≥2800 MB or unknown VRAM.
+- A burst that wants the GPU cancels a CPU follow run still recognizing (a seek
+  starts one before the burst decision — that run once stood in for the burst).
+- *Follow*: CPU only; recognize 240 s spans when the lead < 150 s, translate to
+  keep 120 s of Chinese ahead. Seek into unrecognized audio (debounced 450 ms)
+  → new burst.
+- `watchStore` tracks play state even between sessions — otherwise the burst's
+  own auto-pause reads as "no change" and a later user play is never seen.
+- Mounting any other subtitle stops generation. Priority on open: sibling file
+  > embedded track > cached AI track (`restoreGeneratedTrack`, CPU follow, no
+  pause).
+- Display `aiDisplay` dual/zh/ja (key T, AI track only); dual = Chinese above,
+  Japanese at 0.62× below. Export .srt (双语/中文/日文) from 设置 → 字幕.
+
+**Measured (300 s segment, this machine).** GPU+VAD recognition 3.7 s (Rust path
+4.5 s, first clip 0.9 s); CPU+VAD 63 s. Murasaki Vulkan 2.6 s/batch, 76 tok/s,
++2.46 GB VRAM; CPU mode 18 tok/s. whisper GPU ≈ 0.9-1.1 GB, back to baseline on
+kill.
+
+**Verification.** 37 Rust unit tests; `tests/real_pipeline.rs` (env-gated real
+servers: 82 cues, 24/24 translated on GPU); vitest `aiTrack.test.ts` +
+`generate.test.ts` (mock backend: burst order/GPU handover/resume, user-play,
+skip, low VRAM, no CUDA, GPU off, seek bursts, follow lead, media-switch
+staleness). Rust tests MUST use `--target-dir D:/tmp/cargo-test-target` (the
+default dir overwrites the release exe with a dev build).

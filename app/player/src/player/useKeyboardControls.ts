@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { usePlayerStore } from '@/store/playerStore'
+import { cycleDisplayMode } from '@/subtitle/generate'
 import type { PlayerCommands } from './commands'
 
 const isEditable = (el: EventTarget | null): boolean => {
@@ -193,6 +194,14 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
         case 'KeyS':
           event.preventDefault()
           commands.toggleSubtitles()
+          break
+        case 'KeyT':
+          // 双语 → 译文 → 原文, only meaningful for the AI track
+          if (usePlayerStore.getState().subtitleSource?.kind !== 'generated') {
+            break
+          }
+          event.preventDefault()
+          cycleDisplayMode()
           break
         case 'Comma':
         case 'Period':

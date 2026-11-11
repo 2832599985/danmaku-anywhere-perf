@@ -3,8 +3,14 @@ import { useState } from 'react'
 import { getPlatform } from '@/platform'
 import { usePlayerCommands } from '@/player/commands'
 import { usePlayerStore } from '@/store/playerStore'
+import { DISPLAY_MODE_LABEL } from '@/subtitle/aiTrack'
 import { mountEmbeddedTrack, trackLabel } from '@/subtitle/embedded'
-import { cancelGeneration, startGeneration } from '@/subtitle/generate'
+import {
+  aiGenLabel,
+  cycleDisplayMode,
+  startGeneration,
+  stopGeneration,
+} from '@/subtitle/generate'
 import { GREEN, INK, MONO, PAPER, VERMILION } from '@/theme/theme'
 import { QuickAction } from './QuickPanel'
 
@@ -15,9 +21,9 @@ export const SubtitleSourcePicker = ({ compact = false }) => {
   const embeddedTracks = usePlayerStore((s) => s.embeddedTracks)
   const activeEmbeddedTrack = usePlayerStore((s) => s.activeEmbeddedTrack)
   const embeddedError = usePlayerStore((s) => s.embeddedError)
-  const sttStatus = usePlayerStore((s) => s.sttStatus)
-  const sttProgress = usePlayerStore((s) => s.sttProgress)
-  const sttError = usePlayerStore((s) => s.sttError)
+  const aiGen = usePlayerStore((s) => s.aiGen)
+  const aiError = usePlayerStore((s) => s.aiError)
+  const aiDisplay = usePlayerStore((s) => s.subtitleSettings.aiDisplay)
   const clearSubtitles = usePlayerStore((s) => s.clearSubtitles)
   const isTauri = getPlatform().isTauri
 
@@ -63,7 +69,9 @@ export const SubtitleSourcePicker = ({ compact = false }) => {
     )
   }
 
-  const generating = sttStatus !== 'idle'
+  // Picking another subtitle stops generation by design; only the burst
+  // (video auto-paused for it) locks the other actions.
+  const generating = aiGen?.phase === 'burst'
   const generated = subtitleSource?.kind === 'generated'
   // An embedded track is mounted when its index is recorded; an external file
   // otherwise. Either way the header names it.
@@ -193,7 +201,7 @@ export const SubtitleSourcePicker = ({ compact = false }) => {
 
       {isTauri && (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          {generating ? (
+          {aiGen ? (
             <Box
               sx={{
                 display: 'flex',
@@ -212,13 +220,12 @@ export const SubtitleSourcePicker = ({ compact = false }) => {
                   color: PAPER,
                 }}
               >
-                {sttStatus === 'extracting' ? '提取音频' : '语音识别'}{' '}
-                {Math.round(sttProgress * 100)}%
+                AI 字幕 · {aiGenLabel(aiGen)}
               </Typography>
               <Box
                 component="button"
                 type="button"
-                onClick={() => void cancelGeneration()}
+                onClick={() => void stopGeneration()}
                 sx={{
                   appearance: 'none',
                   border: `2px solid ${PAPER}`,
@@ -231,7 +238,7 @@ export const SubtitleSourcePicker = ({ compact = false }) => {
                   '&:hover': { background: PAPER, color: INK },
                 }}
               >
-                取消
+                停止
               </Box>
             </Box>
           ) : (
@@ -239,10 +246,15 @@ export const SubtitleSourcePicker = ({ compact = false }) => {
               onClick={() => void startGeneration()}
               disabled={!media?.path || pickBusy !== null}
             >
-              {generated ? '继续语音识别' : '语音识别生成字幕'}
+              {generated ? '继续生成 AI 字幕' : 'AI 生成中文字幕'}
             </QuickAction>
           )}
-          {sttError && <Notice tone="error">{sttError}</Notice>}
+          {generated && (
+            <QuickAction onClick={cycleDisplayMode}>
+              显示 · {DISPLAY_MODE_LABEL[aiDisplay]}（T 切换）
+            </QuickAction>
+          )}
+          {aiError && <Notice tone="error">{aiError}</Notice>}
         </Box>
       )}
 
