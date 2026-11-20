@@ -30,8 +30,58 @@ export const GREEN = '#3ddc84'
 export const LINE_FRAME = `3px solid ${PAPER}`
 export const LINE_STRONG = `2px solid ${PAPER}`
 export const LINE_SUBTLE = `1px solid ${alpha(PAPER, 0.22)}`
-/** Legacy alias for controls that intentionally keep a 2px muted edge. */
-export const LINE_WEAK = `2px solid ${alpha(PAPER, 0.3)}`
+/** Hover/active edges that never move layout (see `inkHold`). */
+export const LINE_DASHED = `2px dashed ${alpha(PAPER, 0.28)}`
+export const LINE_RULE_DASHED = `1px dashed ${alpha(PAPER, 0.18)}`
+
+/**
+ * Translucent ink grounds. LIGHT floats over the picture (status, banner,
+ * skip button); HEAVY is for readouts and blocking states (HUD, dialogs).
+ */
+export const INK_SCRIM_LIGHT = alpha(INK, 0.78)
+export const INK_SCRIM_HEAVY = alpha(INK, 0.88)
+
+/**
+ * Stage stacking order — the single source for every overlay z-index.
+ * Only MUI modals (1300) sit above MEDIA_ERROR.
+ */
+export const STAGE_Z = {
+  VIDEO: 0,
+  UPSCALE: 1,
+  DANMAKU: 2,
+  SUBTITLE: 3,
+  COMPARE: 4,
+  IDLE: 5,
+  HUD: 15,
+  CHROME: 30,
+  TOP_BAR: 40,
+  AI_OVERLAY: 42,
+  OSD: 45,
+  MEDIA_ERROR: 50,
+} as const
+
+/** Keyboard focus ring shared by every hand-written control. */
+export const INK_FOCUS_SX: CSSObject = {
+  '&:focus-visible': {
+    outline: `2px solid ${VERMILION}`,
+    outlineOffset: '2px',
+  },
+}
+
+/**
+ * Constant-footprint edge: a transparent frame plus a 1px inset hairline.
+ * Hover/active only swap colours, so the control (and its grid neighbours)
+ * never reflow when the stroke thickens.
+ */
+export const inkHold = (px: 2 | 3 = 2): CSSObject => ({
+  border: `${px}px solid transparent`,
+  boxShadow: `inset 0 0 0 1px ${alpha(PAPER, 0.22)}`,
+})
+/** Turn an `inkHold` edge into its hover/active stroke. */
+export const inkHoldOn = (color: string = PAPER): CSSObject => ({
+  borderColor: color,
+  boxShadow: 'none',
+})
 
 /** Hard comic shadow for key controls; panels go 8–14px. */
 export const HARD_SHADOW = `4px 4px 0 ${VERMILION}`
@@ -67,7 +117,7 @@ export const inkStampPressSx = (
       transition: `transform ${MOTION_PRESS}, box-shadow ${MOTION_PRESS}`,
     },
     '@media (prefers-reduced-motion: reduce)': {
-      transition: 'opacity 120ms linear',
+      transition: 'opacity 120ms linear !important',
       '&:hover': {
         transform: 'none',
         boxShadow: hardShadow(px, color),
@@ -98,36 +148,7 @@ export const MOTION_SUBPAGE = `110ms ${CRISP_EASE}`
 export const MOTION_POPOVER = `140ms ${CRISP_EASE}`
 
 /** Colour cuts are instantaneous; only physical/layout motion is eased. */
-export const INSTANT_CUT =
-  'background-color 0ms, color 0ms, border-color 0ms, box-shadow 0ms'
-
-/**
- * Physical press: hover lifts by 1px and grows the hard shadow by 1px;
- * press travels 3px and collapses the shadow toward 1px. The colour cut stays
- * instantaneous so the ink never appears to "fade in" under the cursor.
- */
-export const pressSx = (
-  shadowPx = 4,
-  color: string = VERMILION
-): CSSObject => ({
-  transition: `${INSTANT_CUT}, transform ${MOTION_PRESS}, box-shadow ${MOTION_PRESS}`,
-  '&:hover': {
-    transform: 'translate(-1px, -1px)',
-    boxShadow: hardShadow(shadowPx + 1, color),
-  },
-  '&:active': {
-    transform: `translate(${Math.max(1, Math.round(shadowPx * 0.75))}px, ${Math.max(1, Math.round(shadowPx * 0.75))}px)`,
-    boxShadow: hardShadow(
-      Math.max(1, shadowPx - Math.max(1, Math.round(shadowPx * 0.75))),
-      color
-    ),
-  },
-  '@media (prefers-reduced-motion: reduce)': {
-    transition: 'none',
-    '&:hover': { transform: 'none' },
-    '&:active': { transform: 'none' },
-  },
-})
+export const INSTANT_CUT = 'background-color 0ms, color 0ms, border-color 0ms'
 
 /** Mono stack for ALL numbers, statuses and english micro-labels. */
 export const MONO = '"JetBrains Mono", ui-monospace, monospace'
@@ -204,6 +225,14 @@ export const theme = createTheme({
     button: { textTransform: 'none', fontWeight: 700 },
     caption: { letterSpacing: '0.01em' },
   },
+  transitions: {
+    easing: {
+      easeInOut: 'cubic-bezier(0.4, 0, 0.2, 1)',
+      easeOut: CRISP_EASE,
+      easeIn: 'cubic-bezier(0.4, 0, 1, 1)',
+      sharp: CRISP_EASE,
+    },
+  },
   components: {
     MuiButton: {
       defaultProps: { disableElevation: true, disableRipple: true },
@@ -214,7 +243,7 @@ export const theme = createTheme({
           transition: `${INSTANT_CUT}, transform ${MOTION_PRESS}, box-shadow ${MOTION_PRESS}`,
         },
         outlined: {
-          border: LINE_WEAK,
+          border: LINE_SUBTLE,
           color: alpha(PAPER, 0.8),
           '&:hover': {
             borderColor: PAPER,
@@ -223,26 +252,14 @@ export const theme = createTheme({
           },
         },
         contained: {
-          ...pressSx(4),
+          ...inkStampPressSx(4, VERMILION, {
+            backgroundColor: VERMILION,
+            color: PAPER,
+            borderColor: VERMILION,
+          }),
           border: LINE_STRONG,
           backgroundColor: PAPER,
           color: INK,
-          boxShadow: HARD_SHADOW,
-          '&:hover': {
-            backgroundColor: VERMILION,
-            color: PAPER,
-            transform: 'translate(-1px, -1px)',
-            boxShadow: hardShadow(5),
-          },
-          '&:active': {
-            transform: 'translate(3px, 3px)',
-            boxShadow: hardShadow(1),
-          },
-          '@media (prefers-reduced-motion: reduce)': {
-            transition: 'none',
-            '&:hover': { transform: 'none' },
-            '&:active': { transform: 'none' },
-          },
         },
       },
     },
@@ -273,39 +290,6 @@ export const theme = createTheme({
         },
       },
     },
-    MuiSlider: {
-      styleOverrides: {
-        root: { color: PAPER, borderRadius: 0 },
-        thumb: {
-          width: 8,
-          height: 22,
-          borderRadius: 0,
-          backgroundColor: VERMILION,
-          border: LINE_STRONG,
-          boxShadow: 'none',
-          '&:hover, &.Mui-focusVisible, &.Mui-active': {
-            boxShadow: 'none',
-          },
-        },
-        track: {
-          border: 'none',
-          borderRadius: 0,
-          backgroundColor: PAPER,
-        },
-        rail: {
-          opacity: 1,
-          borderRadius: 0,
-          backgroundColor: alpha(PAPER, 0.16),
-        },
-        valueLabel: {
-          backgroundColor: INK,
-          border: LINE_STRONG,
-          borderRadius: 0,
-          fontFamily: MONO,
-          fontWeight: 700,
-        },
-      },
-    },
     // Modal root inherits cursor from the stage (which hides it during
     // playback). Without this, the cursor disappears inside every overlay.
     MuiModal: {
@@ -314,6 +298,7 @@ export const theme = createTheme({
       },
     },
     MuiDrawer: {
+      defaultProps: { transitionDuration: { enter: 180, exit: 140 } },
       styleOverrides: {
         paper: {
           backgroundColor: INK,
@@ -323,6 +308,7 @@ export const theme = createTheme({
       },
     },
     MuiDialog: {
+      defaultProps: { transitionDuration: { enter: 180, exit: 140 } },
       styleOverrides: {
         paper: {
           backgroundColor: INK,
@@ -334,6 +320,7 @@ export const theme = createTheme({
       },
     },
     MuiMenu: {
+      defaultProps: { transitionDuration: { enter: 140, exit: 110 } },
       styleOverrides: {
         paper: {
           backgroundColor: INK,
@@ -372,6 +359,20 @@ export const theme = createTheme({
       styleOverrides: {
         root: { borderRadius: 0 },
         outlined: { border: LINE_SUBTLE },
+        filledError: {
+          backgroundColor: INK,
+          color: PAPER,
+          border: `3px solid ${VERMILION}`,
+          boxShadow: hardShadow(6),
+          '& .MuiAlert-icon': { color: VERMILION },
+        },
+        filledWarning: {
+          backgroundColor: INK,
+          color: PAPER,
+          border: `3px solid ${GOLD}`,
+          boxShadow: hardShadow(6, GOLD),
+          '& .MuiAlert-icon': { color: GOLD },
+        },
       },
     },
     MuiTextField: {
@@ -382,7 +383,7 @@ export const theme = createTheme({
         root: {
           borderRadius: 0,
           '& .MuiOutlinedInput-notchedOutline': {
-            border: LINE_WEAK,
+            border: LINE_SUBTLE,
           },
           '&:hover .MuiOutlinedInput-notchedOutline': {
             border: LINE_STRONG,

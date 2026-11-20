@@ -172,8 +172,8 @@ export const EmptyState = () => {
           position: 'absolute',
           left: '50%',
           top: '34%',
-          width: 1300,
-          height: 1300,
+          width: 'max(150vmax, 1300px)',
+          height: 'max(150vmax, 1300px)',
           transform: 'translate(-50%, -50%)',
           background:
             'repeating-conic-gradient(from 0deg at 50% 50%, rgba(244,241,232,.09) 0deg 1.4deg, transparent 1.4deg 7deg)',
@@ -182,9 +182,9 @@ export const EmptyState = () => {
           // Keep the burst at the edges: the spotlight leaves the hero and CTA
           // on calm paper instead of crossing them with moving lines.
           maskImage:
-            'radial-gradient(circle, transparent 22%, rgba(0,0,0,0.85) 75%)',
+            'radial-gradient(circle, transparent 22%, rgba(0,0,0,0.85) 62%, transparent 96%)',
           WebkitMaskImage:
-            'radial-gradient(circle, transparent 22%, rgba(0,0,0,0.85) 75%)',
+            'radial-gradient(circle, transparent 22%, rgba(0,0,0,0.85) 62%, transparent 96%)',
         }}
       />
 
@@ -200,6 +200,7 @@ export const EmptyState = () => {
           overflow: 'hidden',
           opacity: 0.45,
           pointerEvents: 'none',
+          containerType: 'inline-size',
         }}
       >
         {[
@@ -291,7 +292,8 @@ export const EmptyState = () => {
               component="h1"
               sx={{
                 fontSize: 'clamp(40px, 7vw, 74px)',
-                fontWeight: 900,
+                fontWeight: 400,
+                fontSynthesisWeight: 'none',
                 letterSpacing: '0.06em',
                 fontFamily: SERIF_JP,
                 color: INK,
@@ -311,6 +313,10 @@ export const EmptyState = () => {
                 left: -38,
                 color: VERMILION,
                 animation: 'ink-sparkle 2.6s ease-in-out infinite',
+                '@media (prefers-reduced-motion: reduce)': {
+                  animation: 'none',
+                  opacity: 0.85,
+                },
               }}
             />
             <Sparkle
@@ -321,6 +327,10 @@ export const EmptyState = () => {
                 right: -46,
                 color: PAPER,
                 animation: 'ink-sparkle 3.4s ease-in-out 0.7s infinite',
+                '@media (prefers-reduced-motion: reduce)': {
+                  animation: 'none',
+                  opacity: 0.7,
+                },
               }}
             />
           </Box>
@@ -344,9 +354,15 @@ export const EmptyState = () => {
             type="button"
             onClick={() => void commands.openVideo()}
             sx={{
-              all: 'unset',
+              appearance: 'none',
+              font: 'inherit',
+              textAlign: 'inherit',
               cursor: 'pointer',
               position: 'relative',
+              '&:focus-visible': {
+                outline: `2px solid ${VERMILION}`,
+                outlineOffset: '3px',
+              },
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -478,9 +494,15 @@ export const EmptyState = () => {
                         item.path && commands.openVideoFromPath(item.path)
                       }
                       sx={{
-                        all: 'unset',
+                        appearance: 'none',
+                        font: 'inherit',
+                        textAlign: 'inherit',
                         cursor: 'pointer',
                         display: 'flex',
+                        '&:focus-visible': {
+                          outline: `2px solid ${VERMILION}`,
+                          outlineOffset: '2px',
+                        },
                         flexDirection: 'column',
                         border: LINE_SUBTLE,
                         background: 'rgba(244,241,232,.04)',
@@ -557,6 +579,7 @@ export const EmptyState = () => {
                             fontWeight: 700,
                             letterSpacing: '0.1em',
                             lineHeight: 1.4,
+                            fontVariantNumeric: 'tabular-nums',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                           }}
@@ -589,6 +612,7 @@ export const EmptyState = () => {
           width: 352,
           pointerEvents: 'none',
           animation: 'ink-float 6s ease-in-out infinite',
+          '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
           filter: `drop-shadow(6px 6px 0 ${alpha(VERMILION, 0.85)})`,
           // The mascot overlaps the 3rd continue-watching card on anything
           // narrower than the design's 1600 canvas; shrink it on mid widths

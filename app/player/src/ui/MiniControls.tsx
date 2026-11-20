@@ -25,6 +25,10 @@ const buttonSx = {
   padding: 0,
   transition: 'background-color 0ms, color 0ms, border-color 0ms',
   '&:hover': { background: VERMILION, borderColor: VERMILION },
+  '&:focus-visible': {
+    outline: `2px solid ${VERMILION}`,
+    outlineOffset: '1px',
+  },
 } as const
 
 /**

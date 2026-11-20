@@ -6,6 +6,7 @@ import { useOpEdMarks } from '@/player/useOpEdMarks'
 import { usePlayerStore } from '@/store/playerStore'
 import {
   GOLD,
+  hardShadow,
   hatchSx,
   INK,
   LINE_FRAME,
@@ -51,6 +52,9 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
   const frameTimer = useRef<number | null>(null)
   const lastFrameAt = useRef(0)
   const pendingFrame = useRef<number | null>(null)
+  // A 240ms follow matches the ~250ms `timeupdate` cadence; real jumps
+  // (keyboard seek, drag, resume) must land instantly instead.
+  const prevRatio = useRef(0)
 
   const hasDuration = duration > 0
 
@@ -147,6 +151,15 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
     }
   }
 
+  const smooth = !dragging
+  const smallStep =
+    !hasDuration || Math.abs(playedRatio - prevRatio.current) * duration < 1.5
+  const fillTransition = smooth && smallStep ? 'transform 240ms linear' : 'none'
+  const thumbTransition = smooth && smallStep ? 'left 240ms linear' : 'none'
+  useEffect(() => {
+    prevRatio.current = playedRatio
+  })
+
   const tipRatio = dragging ? scrubRatio : hoverRatio
   const showTip = hasDuration && tipRatio !== null
   const tipTime = (tipRatio ?? 0) * duration
@@ -239,7 +252,23 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
         background: INK,
         cursor: hasDuration ? 'pointer' : 'default',
         touchAction: 'none',
+        // 8px of extra hit area above and below the 14px track.
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          inset: '-8px 0',
+        },
+        '&:focus-visible': {
+          outline: `2px solid ${VERMILION}`,
+          outlineOffset: '2px',
+        },
       }}
+      role="slider"
+      tabIndex={hasDuration ? 0 : -1}
+      aria-label="播放进度 / Seek"
+      aria-valuemin={0}
+      aria-valuemax={Math.round(duration)}
+      aria-valuenow={Math.round(currentTime)}
       onPointerDown={handlePointerDown}
       onPointerEnter={(e) => {
         if (!hasDuration) return
@@ -272,10 +301,11 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
           left: 0,
           top: 0,
           bottom: 0,
-          width: `${playedRatio * 100}%`,
+          width: '100%',
           background: PAPER,
-          transition: dragging ? 'none' : 'width 120ms linear',
-          willChange: 'width',
+          transform: `scaleX(${playedRatio})`,
+          transformOrigin: 'left center',
+          transition: fillTransition,
         }}
       />
 
@@ -319,8 +349,7 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
           background: VERMILION,
           border: LINE_STRONG,
           transform: 'translateX(-50%)',
-          transition: dragging ? 'none' : 'left 120ms linear',
-          willChange: 'left',
+          transition: thumbTransition,
           pointerEvents: 'none',
         }}
       />
@@ -336,7 +365,7 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
             width: PREVIEW_W,
             background: INK,
             border: LINE_FRAME,
-            boxShadow: `6px 6px 0 ${alpha(VERMILION, 0.9)}`,
+            boxShadow: hardShadow(6),
             pointerEvents: 'none',
             zIndex: 5,
           }}
@@ -362,7 +391,7 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
           </Box>
           <Box
             sx={{
-              borderTop: `2px solid ${PAPER}`,
+              borderTop: LINE_STRONG,
               padding: '5px 8px',
               display: 'flex',
               justifyContent: 'space-between',
@@ -376,6 +405,7 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
                 fontSize: 13,
                 fontWeight: 700,
                 color: PAPER,
+                fontVariantNumeric: 'tabular-nums',
               }}
             >
               {formatTime(tipTime)}

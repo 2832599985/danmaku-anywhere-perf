@@ -6,12 +6,14 @@ import { usePlayerStore } from '@/store/playerStore'
 import {
   GOLD,
   INK,
+  INK_FOCUS_SX,
   LINE_STRONG,
   LINE_SUBTLE,
   MONO,
   MOTION_PANEL,
   PAPER,
   SANS,
+  STAGE_Z,
   VERMILION,
 } from '@/theme/theme'
 import { CloseIcon, MaximizeIcon, MinimizeIcon, PlayIcon } from './icons'
@@ -45,6 +47,8 @@ const barButtonSx = {
   alignItems: 'center',
   transition: 'background-color 0ms, color 0ms',
   '&:hover': { background: PAPER, color: INK },
+  ...INK_FOCUS_SX,
+  '@media (max-width: 960px)': { padding: '0 10px' },
 } as const
 
 /** Outlined mono badge (HDR10 / 弾 N). */
@@ -131,7 +135,7 @@ export const TopBar = ({ visible, platform }: TopBarProps) => {
         top: 0,
         left: 0,
         right: 0,
-        zIndex: 40,
+        zIndex: STAGE_Z.TOP_BAR,
         height: 48,
         background: INK,
         borderBottom: LINE_STRONG,
@@ -203,7 +207,7 @@ export const TopBar = ({ visible, platform }: TopBarProps) => {
                 fontFamily: MONO,
                 fontSize: 12,
                 color: alpha(PAPER, 0.62),
-                maxWidth: 340,
+                flex: '1 1 0',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -233,7 +237,7 @@ export const TopBar = ({ visible, platform }: TopBarProps) => {
       {/* elastic drag strip between the two clusters */}
       <Box
         {...dragRegion}
-        sx={{ flex: '1 1 auto', minWidth: 8, height: '100%' }}
+        sx={{ flex: '1 1 auto', minWidth: 12, height: '100%' }}
       />
 
       {/* Right: actions + window chrome, never squeezed */}

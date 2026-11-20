@@ -178,6 +178,9 @@ export class SubtitleRenderer {
   private decorate(node: HTMLDivElement, cue: SubtitleCue): void {
     if (cue.scale !== undefined && cue.scale !== 1) {
       node.style.fontSize = `${cue.scale}em`
+      // AI dual subtitles put the original at 0.62×; mark it so CSS can dim
+      // the secondary line without touching the render path.
+      if (cue.scale < 0.85) node.dataset.secondary = 'true'
     }
     if (cue.italic) node.style.fontStyle = 'italic'
     // textContent, never innerHTML: subtitle files are untrusted input.

@@ -165,7 +165,6 @@ export const UpscaleSettings = () => {
   ]
 
   const activePreset = presets.find((p) => p.check())
-  const glyphs = ['◐', '◑', '●']
 
   return (
     <Stack spacing={2.5}>
@@ -223,17 +222,23 @@ export const UpscaleSettings = () => {
                   cursor: 'pointer',
                   position: 'relative',
                   padding: '12px 8px',
-                  border: isActive ? `3px solid ${VERMILION}` : LINE_SUBTLE,
+                  // Constant 2px footprint; the stroke only changes colour.
+                  border: `2px solid ${isActive ? VERMILION : 'transparent'}`,
                   background: isActive ? alpha(VERMILION, 0.12) : 'transparent',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   gap: '4px',
-                  transition: 'border 0ms, background-color 0ms',
-                  '&:hover': isActive
-                    ? {}
-                    : { borderColor: PAPER, borderStyle: 'solid' },
-                  boxShadow: isActive ? hardShadow(4) : 'none',
+                  transition:
+                    'border-color 0ms, background-color 0ms, box-shadow 0ms',
+                  '&:hover': isActive ? {} : { borderColor: PAPER },
+                  boxShadow: isActive
+                    ? hardShadow(4)
+                    : `inset 0 0 0 1px ${alpha(PAPER, 0.22)}`,
+                  '&:focus-visible': {
+                    outline: `2px solid ${VERMILION}`,
+                    outlineOffset: '2px',
+                  },
                 }}
               >
                 {isActive && (
@@ -248,15 +253,21 @@ export const UpscaleSettings = () => {
                     NOW
                   </InkStamp>
                 )}
-                <Typography
-                  sx={{
-                    fontSize: 18,
-                    fontWeight: 700,
-                    color: PAPER,
-                  }}
+                <Box
+                  aria-hidden
+                  sx={{ display: 'flex', alignItems: 'flex-end', gap: '3px' }}
                 >
-                  {glyphs[idx]}
-                </Typography>
+                  {[0, 1, 2].map((level) => (
+                    <Box
+                      key={level}
+                      sx={{
+                        width: 6,
+                        height: 8 + level * 5,
+                        background: level <= idx ? PAPER : alpha(PAPER, 0.16),
+                      }}
+                    />
+                  ))}
+                </Box>
                 <Typography
                   sx={{
                     fontSize: 12,
@@ -552,7 +563,6 @@ export const UpscaleSettings = () => {
                     updateUpscale({ frameInterpolation: { targetFps: v } })
                   }
                   columns={4}
-                  accent
                 />
               )}
 
@@ -638,6 +648,7 @@ export const UpscaleSettings = () => {
                     color: GREEN,
                     textTransform: 'uppercase',
                     letterSpacing: '0.06em',
+                    fontVariantNumeric: 'tabular-nums',
                   }}
                 >
                   {`GENERATING ${upscaleStats.generatedFps.toFixed(1)} F/S`}
@@ -653,6 +664,7 @@ export const UpscaleSettings = () => {
                     fontSize: 26,
                     fontWeight: 700,
                     color: PAPER,
+                    fontVariantNumeric: 'tabular-nums',
                   }}
                 >
                   {upscaleStats.fps.toFixed(1)}
@@ -688,6 +700,7 @@ export const UpscaleSettings = () => {
                     fontSize: 26,
                     fontWeight: 700,
                     color: VERMILION,
+                    fontVariantNumeric: 'tabular-nums',
                   }}
                 >
                   {upscaleStats.cpuFrameMs > 0

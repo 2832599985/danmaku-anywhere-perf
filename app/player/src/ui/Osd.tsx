@@ -1,8 +1,10 @@
 import { Box, Stack, Typography } from '@mui/material'
+import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import type { OsdMessage } from '@/store/playerStore'
 import { usePlayerStore } from '@/store/playerStore'
 import {
+  GREEN,
   hardShadow,
   INK,
   LINE_STRONG,
@@ -10,10 +12,46 @@ import {
   MOTION_STAMP_IN,
   MOTION_STAMP_OUT,
   PAPER,
+  STAGE_Z,
   VERMILION,
 } from '@/theme/theme'
+import {
+  CheckIcon,
+  CompareIcon,
+  DanmakuIcon,
+  NextIcon,
+  PlaylistAddIcon,
+  SeekBackIcon,
+  SeekForwardIcon,
+  SparkleIcon,
+  SubtitleIcon,
+  VolumeIcon,
+  VolumeMuteIcon,
+  WarningIcon,
+} from './icons'
 
 const OSD_DURATION = 900
+
+/**
+ * The store still passes emoji glyphs (other modules own those strings); the
+ * stage maps them to single-colour ink SVGs. Unmapped glyphs are dropped — the
+ * text already says what happened.
+ */
+const OSD_ICONS: Record<string, ReactNode> = {
+  '🔊': <VolumeIcon size={22} />,
+  '🔇': <VolumeMuteIcon size={22} />,
+  '⏩': <SeekForwardIcon size={22} />,
+  '⏪': <SeekBackIcon size={22} />,
+  '⏭': <NextIcon size={22} />,
+  '💬': <DanmakuIcon size={22} />,
+  '🎬': <SubtitleIcon size={22} />,
+  '✨': <SparkleIcon size={22} />,
+  '📃': <PlaylistAddIcon size={22} />,
+  '⇔': <CompareIcon size={22} />,
+  '✓': <CheckIcon size={22} sx={{ color: GREEN }} />,
+  '⚠': <WarningIcon size={22} sx={{ color: VERMILION }} />,
+  '⚠️': <WarningIcon size={22} sx={{ color: VERMILION }} />,
+}
 
 /**
  * Large centered transient overlay (volume/seek feedback). Reads `osd` from the
@@ -46,7 +84,7 @@ export const Osd = () => {
         alignItems: 'center',
         justifyContent: 'center',
         pointerEvents: 'none',
-        zIndex: 30,
+        zIndex: STAGE_Z.OSD,
       }}
     >
       <Stack
@@ -62,28 +100,25 @@ export const Osd = () => {
           px: 2,
           py: 1.25,
           minWidth: 120,
+          maxWidth: 'min(560px, calc(100% - 48px))',
           justifyContent: 'center',
           opacity: visible ? 1 : 0,
           transform: visible ? 'scale(1)' : 'scale(0.92)',
           transition: `opacity ${visible ? MOTION_STAMP_IN : MOTION_STAMP_OUT}, transform ${visible ? MOTION_STAMP_IN : MOTION_STAMP_OUT}`,
           '@media (prefers-reduced-motion: reduce)': {
             transform: 'none',
-            transition: 'opacity 120ms linear',
+            transition: 'opacity 120ms linear !important',
           },
         }}
       >
-        {display?.icon && (
-          <Typography
+        {display?.icon ? (
+          <Box
             component="span"
-            sx={{
-              fontSize: 26,
-              lineHeight: 1,
-              color: PAPER,
-            }}
+            sx={{ display: 'flex', color: PAPER, flexShrink: 0 }}
           >
-            {display.icon}
-          </Typography>
-        )}
+            {OSD_ICONS[display.icon] ?? null}
+          </Box>
+        ) : null}
         <Typography
           component="span"
           sx={{
@@ -92,6 +127,8 @@ export const Osd = () => {
             fontFamily: MONO,
             color: PAPER,
             fontVariantNumeric: 'tabular-nums',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
           }}
         >

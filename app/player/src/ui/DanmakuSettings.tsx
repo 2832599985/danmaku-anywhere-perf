@@ -1,5 +1,3 @@
-import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded'
-import PlaylistAddRounded from '@mui/icons-material/PlaylistAddRounded'
 import { Box, Button, Stack, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import { useState } from 'react'
@@ -21,7 +19,7 @@ import {
   VERMILION,
 } from '@/theme/theme'
 import { FilenameRulesSettings } from './FilenameRulesSettings'
-import { CloseIcon, PlusIcon } from './icons'
+import { CloseIcon, PlaylistAddIcon, PlusIcon, TrashIcon } from './icons'
 import {
   InkLabel,
   InkLabeledSlider,
@@ -104,6 +102,12 @@ export const DanmakuSettings = () => {
               opacity: danmaku.opacity,
               animation: `ink-dm-box ${7 / danmaku.speed}s linear infinite`,
               animationDelay: `${-2 / danmaku.speed}s`,
+              '@media (prefers-reduced-motion: reduce)': {
+                animation: 'none',
+                left: 18,
+                right: 18,
+                whiteSpace: 'normal',
+              },
             }}
           >
             预览:这就是当前样式
@@ -123,6 +127,12 @@ export const DanmakuSettings = () => {
               opacity: danmaku.opacity,
               animation: `ink-dm-box ${9 / danmaku.speed}s linear infinite`,
               animationDelay: `${-3 / danmaku.speed}s`,
+              '@media (prefers-reduced-motion: reduce)': {
+                animation: 'none',
+                left: 18,
+                right: 18,
+                whiteSpace: 'normal',
+              },
             }}
           >
             草 www
@@ -181,9 +191,16 @@ export const DanmakuSettings = () => {
           <Button
             fullWidth
             variant="outlined"
-            startIcon={<PlaylistAddRounded />}
+            startIcon={<PlaylistAddIcon size={16} />}
             onClick={() => setDanmakuDialogOpen(true)}
-            sx={{ textTransform: 'none', fontWeight: 700 }}
+            sx={{
+              textTransform: 'none',
+              fontWeight: 700,
+              '&:focus-visible': {
+                outline: `2px solid ${VERMILION}`,
+                outlineOffset: '2px',
+              },
+            }}
           >
             {danmakuSource ? '换弹幕源…' : '挂载弹幕…'}
           </Button>
@@ -191,10 +208,17 @@ export const DanmakuSettings = () => {
             fullWidth
             variant="outlined"
             color="error"
-            startIcon={<DeleteOutlineRounded />}
+            startIcon={<TrashIcon size={16} />}
             disabled={!danmakuSource}
             onClick={() => clearDanmaku()}
-            sx={{ textTransform: 'none', fontWeight: 700 }}
+            sx={{
+              textTransform: 'none',
+              fontWeight: 700,
+              '&:focus-visible': {
+                outline: `2px solid ${VERMILION}`,
+                outlineOffset: '2px',
+              },
+            }}
           >
             清除弹幕
           </Button>
@@ -424,22 +448,25 @@ export const DanmakuSettings = () => {
           <Box
             component="button"
             type="button"
+            aria-pressed={regexMode}
             onClick={() => setRegexMode(!regexMode)}
             sx={{
               appearance: 'none',
               cursor: 'pointer',
-              background: 'transparent',
-              border: 'none',
-              padding: 0,
+              background: regexMode ? alpha(VERMILION, 0.16) : 'transparent',
+              border: `2px solid ${regexMode ? VERMILION : alpha(PAPER, 0.22)}`,
+              padding: '2px 7px',
               color: regexMode ? VERMILION : alpha(PAPER, 0.5),
               fontFamily: MONO,
               fontSize: 10,
               fontWeight: 700,
               textTransform: 'uppercase',
               letterSpacing: '0.08em',
-              transition: 'color 0ms',
-              '&:hover': {
-                color: PAPER,
+              transition: 'color 0ms, border-color 0ms, background 0ms',
+              '&:hover': { color: PAPER, borderColor: PAPER },
+              '&:focus-visible': {
+                outline: `2px solid ${VERMILION}`,
+                outlineOffset: '2px',
               },
             }}
           >
@@ -480,6 +507,7 @@ export const DanmakuSettings = () => {
                 <Box
                   component="button"
                   type="button"
+                  aria-label={`删除屏蔽词 ${filter.pattern}`}
                   onClick={() => handleRemoveFilter(idx)}
                   sx={{
                     appearance: 'none',
@@ -492,6 +520,10 @@ export const DanmakuSettings = () => {
                     fontWeight: 700,
                     transition: 'color 0ms',
                     '&:hover': { color: VERMILION },
+                    '&:focus-visible': {
+                      outline: `2px solid ${VERMILION}`,
+                      outlineOffset: '1px',
+                    },
                   }}
                 >
                   <CloseIcon size={10} />
@@ -573,14 +605,15 @@ export const DanmakuSettings = () => {
                     color: PAPER,
                     fontSize: 11,
                     fontWeight: 700,
-                    transition: 'all 0ms',
+                    transition:
+                      'background-color 0ms, color 0ms, border-color 0ms',
                     '&:hover': {
                       background: PAPER,
                       color: INK,
                     },
                   }}
                 >
-                  +
+                  <PlusIcon size={11} />
                 </Box>
               </Box>
             )}
@@ -605,14 +638,15 @@ const LabeledSwitch = ({
 }) => (
   <Box
     sx={{
-      border: checked ? `2px solid ${VERMILION}` : LINE_SUBTLE,
+      border: `2px solid ${checked ? VERMILION : 'transparent'}`,
       background: checked ? alpha(VERMILION, 0.1) : 'transparent',
+      boxShadow: checked ? 'none' : `inset 0 0 0 1px ${alpha(PAPER, 0.22)}`,
       padding: '10px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 1,
-      transition: 'border 0ms, background-color 0ms',
+      transition: 'border-color 0ms, background-color 0ms, box-shadow 0ms',
     }}
   >
     <InkLabel zh={label} en={en} size={12} />

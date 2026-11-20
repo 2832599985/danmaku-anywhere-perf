@@ -103,7 +103,10 @@ export const VolumeControl = () => {
           cursor: 'pointer',
           touchAction: 'none',
           flexShrink: 0,
-          '&:focus-visible': { outline: `2px solid ${PAPER}` },
+          '&:focus-visible': {
+            outline: `2px solid ${VERMILION}`,
+            outlineOffset: '2px',
+          },
           '&::before': { content: '""', position: 'absolute', inset: '-8px' },
         }}
       >
@@ -123,8 +126,9 @@ export const VolumeControl = () => {
             left: `${level * 100}%`,
             top: -5,
             bottom: -5,
-            width: 4,
+            width: 6,
             background: VERMILION,
+            border: `2px solid ${PAPER}`,
             transform: 'translateX(-50%)',
             pointerEvents: 'none',
           }}
@@ -138,6 +142,8 @@ export const VolumeControl = () => {
           fontSize: 12,
           color: alpha(PAPER, 0.6),
           fontVariantNumeric: 'tabular-nums',
+          // Release width on the 880px window for the rest of the control row.
+          '@media (max-width: 960px)': { display: 'none' },
           minWidth: 22,
           flexShrink: 0,
         }}

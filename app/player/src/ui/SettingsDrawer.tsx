@@ -1,9 +1,9 @@
-import ArrowForwardRounded from '@mui/icons-material/ArrowForwardRounded'
 import { Box, Button, Modal, Stack, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import { usePlayerStore } from '@/store/playerStore'
 import {
   INK,
+  INK_FOCUS_SX,
   INK_STAGE,
   inkStampPressSx,
   LINE_FRAME,
@@ -16,7 +16,7 @@ import {
   VERMILION,
 } from '@/theme/theme'
 import { DanmakuSettings } from './DanmakuSettings'
-import { MinusIcon, PlusIcon } from './icons'
+import { ArrowRightIcon, MinusIcon, PlusIcon } from './icons'
 import { InkSwitch } from './ink'
 import { SubtitleSettings } from './SubtitleSettings'
 import { UpscaleSettings } from './UpscaleSettings'
@@ -113,6 +113,7 @@ const StepperCard = ({
       <Box
         component="button"
         type="button"
+        aria-label={`减少${label}`}
         onClick={() =>
           onChange(Math.max(min, Math.round((value - step) * 100) / 100))
         }
@@ -134,6 +135,7 @@ const StepperCard = ({
             background: PAPER,
             color: INK,
           },
+          ...INK_FOCUS_SX,
         }}
       >
         <MinusIcon size={16} />
@@ -147,6 +149,7 @@ const StepperCard = ({
             color: PAPER,
             lineHeight: 1.3,
             overflow: 'hidden',
+            fontVariantNumeric: 'tabular-nums',
           }}
         >
           {value}
@@ -164,6 +167,7 @@ const StepperCard = ({
       <Box
         component="button"
         type="button"
+        aria-label={`增加${label}`}
         onClick={() =>
           onChange(Math.min(max, Math.round((value + step) * 100) / 100))
         }
@@ -185,6 +189,7 @@ const StepperCard = ({
             color: PAPER,
             borderColor: VERMILION,
           }),
+          ...INK_FOCUS_SX,
         }}
       >
         <PlusIcon size={16} />
@@ -286,6 +291,7 @@ const SkipOpEdCard = () => {
               key={mode}
               component="button"
               type="button"
+              aria-pressed={active}
               onClick={() =>
                 updatePlaybackSettings({
                   skipOpEd:
@@ -302,7 +308,12 @@ const SkipOpEdCard = () => {
                 cursor: 'pointer',
                 background: active ? VERMILION : 'transparent',
                 color: active ? PAPER : alpha(PAPER, 0.4),
-                transition: 'all 0ms',
+                transition: 'background-color 0ms, color 0ms',
+                '&:hover': {
+                  background: active ? VERMILION : alpha(PAPER, 0.12),
+                  color: PAPER,
+                },
+                ...INK_FOCUS_SX,
               }}
             >
               {mode}
@@ -331,7 +342,13 @@ const PlaybackSettingsPage = () => {
 
   return (
     <Stack spacing={2}>
-      <Stack direction="row" spacing={2}>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: 2,
+        }}
+      >
         <StepperCard
           label="快进步长"
           sub="SEEK STEP · ← / →"
@@ -360,7 +377,7 @@ const PlaybackSettingsPage = () => {
           step={0.5}
           onChange={(v) => updatePlaybackSettings({ holdSpeed: v })}
         />
-      </Stack>
+      </Box>
 
       <ToggleRow
         label="自动连播"
@@ -546,7 +563,7 @@ export const SettingsDrawer = () => {
           sx={{
             width: 210,
             background: INK,
-            borderRight: LINE_STRONG,
+            borderRight: LINE_FRAME,
             display: 'flex',
             flexDirection: 'column',
             padding: '18px 12px',
@@ -606,6 +623,10 @@ export const SettingsDrawer = () => {
                     textAlign: 'left',
                     transition:
                       'background-color 0ms, color 0ms, border-color 0ms',
+                    '&:focus-visible': {
+                      outline: `2px solid ${VERMILION}`,
+                      outlineOffset: '-2px',
+                    },
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '1px',
@@ -679,7 +700,7 @@ export const SettingsDrawer = () => {
             justifyContent="space-between"
             sx={{
               padding: '16px 24px',
-              borderBottom: LINE_FRAME,
+              borderBottom: LINE_STRONG,
               flexShrink: 0,
             }}
           >
@@ -711,7 +732,7 @@ export const SettingsDrawer = () => {
             <Button
               variant="outlined"
               size="small"
-              endIcon={<ArrowForwardRounded />}
+              endIcon={<ArrowRightIcon size={16} />}
               onClick={() => setSettingsOpen(false)}
               sx={{
                 textTransform: 'none',
@@ -731,6 +752,9 @@ export const SettingsDrawer = () => {
               overflowY: 'auto',
               padding: '24px 28px',
               minWidth: 0,
+              maxWidth: 860,
+              margin: '0 auto',
+              width: '100%',
               animation: `ink-settings-page-in ${MOTION_SUBPAGE}`,
               '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
             }}

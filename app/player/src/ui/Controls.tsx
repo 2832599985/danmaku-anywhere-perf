@@ -14,15 +14,17 @@ import { usePlayerStore } from '@/store/playerStore'
 import type { TargetResolution } from '@/store/settings'
 import {
   INK,
+  INK_SCRIM_HEAVY,
+  INK_SCRIM_LIGHT,
   inkStampPressSx,
   LINE_STRONG,
   MONO,
   MOTION_BANNER,
   MOTION_PANEL,
-  MOTION_PRESS,
   OVERLAY_GRADIENT,
   PAPER,
   SERIF_JP,
+  STAGE_Z,
   VERMILION,
 } from '@/theme/theme'
 import {
@@ -35,6 +37,7 @@ import {
   PrevIcon,
   SkipForwardIcon,
 } from './icons'
+import { InkBlinkDot } from './ink'
 import { ProgressBar } from './ProgressBar'
 import {
   DanmakuQuickButton,
@@ -80,6 +83,10 @@ const squareSx = {
   lineHeight: 1,
   transition: 'background-color 0ms, color 0ms',
   '&:hover': { background: PAPER, color: INK },
+  '&:focus-visible': {
+    outline: `2px solid ${VERMILION}`,
+    outlineOffset: '2px',
+  },
   '&:disabled': { opacity: 0.35, cursor: 'default' },
   '&:disabled:hover': { background: 'transparent', color: PAPER },
 } as const
@@ -271,15 +278,17 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             position: 'absolute',
             left: 26,
             top: 96,
-            zIndex: 15,
+            zIndex: STAGE_Z.HUD,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             gap: '8px',
-            background: alpha(INK, 0.6),
+            background: INK_SCRIM_LIGHT,
             borderLeft: `3px solid ${VERMILION}`,
             padding: '10px 6px',
             ...fade,
+            // Decorative: a click here must reach the stage (pause/play).
+            pointerEvents: 'none',
           }}
         >
           <Box
@@ -294,16 +303,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
           >
             再生中
           </Box>
-          <Box
-            component="span"
-            sx={{
-              width: 7,
-              height: 7,
-              background: VERMILION,
-              borderRadius: '50%',
-              animation: 'ink-blink 1.4s steps(1) infinite',
-            }}
-          />
+          <InkBlinkDot />
         </Box>
       )}
 
@@ -315,12 +315,12 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             position: 'absolute',
             top: OVERLAY_TOP,
             left: '50%',
-            zIndex: 15,
+            zIndex: STAGE_Z.HUD,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             gap: '2px',
-            background: alpha(INK, 0.7),
+            background: INK_SCRIM_LIGHT,
             border: LINE_STRONG,
             padding: '4px 12px 6px',
             pointerEvents: 'none',
@@ -331,7 +331,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             transition: `opacity ${MOTION_BANNER}, transform ${MOTION_BANNER}`,
             '@media (prefers-reduced-motion: reduce)': {
               transform: 'translate(-50%, 0)',
-              transition: 'opacity 120ms linear',
+              transition: 'opacity 120ms linear !important',
             },
           }}
         >
@@ -372,14 +372,16 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             position: 'absolute',
             top: OVERLAY_TOP,
             right: 26,
-            zIndex: 15,
-            background: alpha(INK, 0.82),
+            zIndex: STAGE_Z.HUD,
+            background: INK_SCRIM_HEAVY,
             border: LINE_STRONG,
             padding: '8px 12px 10px',
             display: 'flex',
             gap: '18px',
             alignItems: 'flex-end',
             ...fade,
+            // A readout, not a target: never swallow the pause click.
+            pointerEvents: 'none',
           }}
         >
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
@@ -419,7 +421,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
                 component="span"
                 sx={{
                   fontFamily: MONO,
-                  fontSize: 8,
+                  fontSize: 10,
                   letterSpacing: '0.1em',
                   color:
                     interpolationStatus === 'fallback'
@@ -497,48 +499,63 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
           after the mouse stops, long before the OP ends. */}
       {showSkipOp && (
         <Box
-          component="button"
-          type="button"
-          onClick={() => {
-            if (opEnd !== null) commands.seekTo(opEnd)
-          }}
           sx={{
             position: 'absolute',
             right: 30,
-            bottom: (visible ? barHeight : 0) + 18,
-            zIndex: 31,
-            appearance: 'none',
-            border: LINE_STRONG,
-            background: alpha(INK, 0.78),
-            color: PAPER,
-            fontSize: 13,
-            fontWeight: 700,
-            padding: '8px 14px',
-            cursor: 'pointer',
-            letterSpacing: '0.06em',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '7px',
-            ...inkStampPressSx(4, VERMILION, {
-              background: PAPER,
-              color: INK,
-            }),
-            transition: `transform ${MOTION_PRESS}, box-shadow ${MOTION_PRESS}, background-color 0ms, color 0ms, border-color 0ms, bottom ${MOTION_PANEL}`,
+            bottom: 18,
+            zIndex: STAGE_Z.CHROME + 1,
+            pointerEvents: 'none',
+            transform: `translateY(${visible ? -barHeight : 0}px)`,
+            transition: `transform ${MOTION_PANEL}`,
+            '@media (prefers-reduced-motion: reduce)': {
+              transition: 'none',
+            },
           }}
         >
-          跳过 OP
           <Box
-            component="span"
+            component="button"
+            type="button"
+            onClick={() => {
+              if (opEnd !== null) commands.seekTo(opEnd)
+            }}
             sx={{
-              fontFamily: MONO,
-              fontSize: 11,
-              opacity: 0.7,
-              fontVariantNumeric: 'tabular-nums',
+              appearance: 'none',
+              border: LINE_STRONG,
+              background: INK_SCRIM_LIGHT,
+              color: PAPER,
+              fontSize: 13,
+              fontWeight: 700,
+              padding: '8px 14px',
+              cursor: 'pointer',
+              letterSpacing: '0.06em',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '7px',
+              pointerEvents: 'auto',
+              ...inkStampPressSx(4, VERMILION, {
+                background: PAPER,
+                color: INK,
+              }),
+              '&:focus-visible': {
+                outline: `2px solid ${VERMILION}`,
+                outlineOffset: '2px',
+              },
             }}
           >
-            {peakClock(opEnd ?? 0)}
+            跳过 OP
+            <Box
+              component="span"
+              sx={{
+                fontFamily: MONO,
+                fontSize: 11,
+                opacity: 0.7,
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {peakClock(opEnd ?? 0)}
+            </Box>
+            <SkipForwardIcon size={13} />
           </Box>
-          <SkipForwardIcon size={13} />
         </Box>
       )}
 
@@ -551,7 +568,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
           left: 0,
           right: 0,
           bottom: 0,
-          zIndex: 30,
+          zIndex: STAGE_Z.CHROME,
           padding: '52px 24px 16px',
           background: OVERLAY_GRADIENT,
           opacity: visible ? 1 : 0,

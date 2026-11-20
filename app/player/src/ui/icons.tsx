@@ -156,3 +156,70 @@ export const MinusIcon = (props: IconProps) => (
     <path d={'M5 12h14'} />
   </InkSvg>
 )
+
+export const SeekBackIcon = (props: IconProps) => (
+  <InkSvg {...props}>
+    <path d={'M11 5 2 12l9 7Z'} />
+    <path d={'M22 5l-9 7 9 7Z'} />
+  </InkSvg>
+)
+
+export const SeekForwardIcon = (props: IconProps) => (
+  <InkSvg {...props}>
+    <path d={'M13 5l9 7-9 7Z'} />
+    <path d={'M2 5l9 7-9 7Z'} />
+  </InkSvg>
+)
+
+export const TrashIcon = (props: IconProps) => (
+  <InkSvg {...props}>
+    <path d={'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13'} />
+  </InkSvg>
+)
+
+export const PlaylistAddIcon = (props: IconProps) => (
+  <InkSvg {...props}>
+    <path d={'M3 6h11M3 12h11M3 18h8'} />
+    <path d={'M17 13v6M14 16h6'} />
+  </InkSvg>
+)
+
+export const SubtitleIcon = (props: IconProps) => (
+  <InkSvg {...props}>
+    <path d={'M3 5h18v14H3Z'} />
+    <path d={'M6 15h5M13 15h5'} />
+  </InkSvg>
+)
+
+export const DanmakuIcon = (props: IconProps) => (
+  <InkSvg {...props}>
+    <path d={'M3 6h13M3 12h18M3 18h9'} />
+  </InkSvg>
+)
+
+export const SparkleIcon = (props: IconProps) => (
+  <InkSvg {...props}>
+    <path d={'M12 3v18M3 12h18M6 6l12 12M18 6 6 18'} />
+  </InkSvg>
+)
+
+export const WarningIcon = (props: IconProps) => (
+  <InkSvg {...props}>
+    <path d={'M12 3 22 20H2Z'} />
+    <path d={'M12 9v5M12 17v.5'} />
+  </InkSvg>
+)
+
+export const CheckIcon = (props: IconProps) => (
+  <InkSvg {...props}>
+    <path d={'m4 12 5 6L20 6'} />
+  </InkSvg>
+)
+
+export const CompareIcon = (props: IconProps) => (
+  <InkSvg {...props}>
+    <path
+      d={'M6 4v16M18 4v16M3 12h18M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3'}
+    />
+  </InkSvg>
+)

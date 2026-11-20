@@ -6,7 +6,8 @@ import type { PlaylistItem, ResumeEntry } from '@/store/playerStore'
 import { usePlayerStore } from '@/store/playerStore'
 import {
   INK,
-  LINE_STRONG,
+  inkHold,
+  inkHoldOn,
   LINE_SUBTLE,
   MONO,
   PAPER,
@@ -63,7 +64,7 @@ export const PlaylistDrawer = () => {
   const updatePlaybackSettings = usePlayerStore((s) => s.updatePlaybackSettings)
 
   const handleRemoveItem = (
-    e: React.MouseEvent<HTMLButtonElement>,
+    e: React.MouseEvent<HTMLElement>,
     index: number
   ) => {
     e.stopPropagation()
@@ -113,13 +114,14 @@ export const PlaylistDrawer = () => {
               fontFamily: 'inherit',
               fontSize: 12,
               fontWeight: 700,
-              border: LINE_SUBTLE,
+              ...inkHold(2),
               background: 'transparent',
               color: alpha(PAPER, 0.8),
-              transition: 'border 0ms, color 0ms',
-              '&:hover': {
-                border: LINE_STRONG,
-                color: PAPER,
+              transition: 'border-color 0ms, color 0ms, box-shadow 0ms',
+              '&:hover': { ...inkHoldOn(PAPER), color: PAPER },
+              '&:focus-visible': {
+                outline: `2px solid ${VERMILION}`,
+                outlineOffset: '2px',
               },
             }}
           >
@@ -139,15 +141,16 @@ export const PlaylistDrawer = () => {
               fontFamily: 'inherit',
               fontSize: 12,
               fontWeight: 700,
-              border: LINE_SUBTLE,
+              ...inkHold(2),
               background: 'transparent',
               color: alpha(PAPER, 0.8),
-              transition: 'border 0ms, color 0ms',
+              transition: 'border-color 0ms, color 0ms, box-shadow 0ms',
               opacity: playlist.length === 0 ? 0.4 : 1,
               pointerEvents: playlist.length === 0 ? 'none' : 'auto',
-              '&:hover': {
-                border: `2px solid ${VERMILION}`,
-                color: VERMILION,
+              '&:hover': { ...inkHoldOn(VERMILION), color: VERMILION },
+              '&:focus-visible': {
+                outline: `2px solid ${VERMILION}`,
+                outlineOffset: '2px',
               },
             }}
           >
@@ -177,7 +180,13 @@ export const PlaylistDrawer = () => {
         </Stack>
 
         {/* Playlist content */}
-        <Box sx={{ flex: 1, overflowY: 'auto', paddingTop: '16px' }}>
+        <Box
+          sx={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: '16px 16px 12px',
+          }}
+        >
           {playlist.length === 0 ? (
             <Box
               sx={{
@@ -197,7 +206,7 @@ export const PlaylistDrawer = () => {
               </Typography>
             </Box>
           ) : (
-            <Stack spacing={0}>
+            <Stack spacing={1.25}>
               {playlist.map((item, index) => {
                 const isActive = itemKey(item) === activeKey
                 const resume = describeProgress(
@@ -206,10 +215,17 @@ export const PlaylistDrawer = () => {
                 return (
                   <Box
                     key={`${index}:${item.url}`}
-                    component="button"
-                    type="button"
+                    role="button"
+                    tabIndex={0}
+                    aria-current={isActive ? 'true' : undefined}
                     onClick={() => commands.playlistPlayAt(index)}
-                    onContextMenu={(e: React.MouseEvent<HTMLButtonElement>) => {
+                    onKeyDown={(e: React.KeyboardEvent) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        commands.playlistPlayAt(index)
+                      }
+                    }}
+                    onContextMenu={(e: React.MouseEvent<HTMLDivElement>) => {
                       e.preventDefault()
                       handleRemoveItem(e, index)
                     }}
@@ -219,20 +235,28 @@ export const PlaylistDrawer = () => {
                       background: isActive
                         ? `linear-gradient(135deg, ${alpha(VERMILION, 0.12)}, transparent)`
                         : 'transparent',
-                      border: isActive ? `3px solid ${VERMILION}` : LINE_SUBTLE,
+                      // Constant 2px footprint: the stroke only changes colour,
+                      // so nothing reflows when a row becomes active.
+                      border: `2px solid ${isActive ? VERMILION : 'transparent'}`,
+                      boxShadow: isActive
+                        ? `inset 4px 0 0 ${VERMILION}`
+                        : `inset 0 0 0 1px ${alpha(PAPER, 0.22)}`,
                       padding: '9px 11px',
                       display: 'flex',
                       flexDirection: 'column',
                       gap: '7px',
-                      transition: 'border 0ms, background 0ms',
+                      transition:
+                        'border-color 0ms, background 0ms, box-shadow 0ms',
                       position: 'relative',
                       '&:hover': {
-                        border: isActive
-                          ? `3px solid ${VERMILION}`
-                          : LINE_STRONG,
+                        borderColor: isActive ? VERMILION : PAPER,
                         background: isActive
                           ? `linear-gradient(135deg, ${alpha(VERMILION, 0.16)}, transparent)`
                           : alpha(PAPER, 0.06),
+                      },
+                      '&:focus-visible': {
+                        outline: `2px solid ${VERMILION}`,
+                        outlineOffset: '2px',
                       },
                     }}
                   >
@@ -242,7 +266,7 @@ export const PlaylistDrawer = () => {
                         rotate={-3}
                         sx={{
                           position: 'absolute',
-                          top: -12,
+                          top: -10,
                           left: 10,
                           fontSize: 10,
                         }}
@@ -267,6 +291,7 @@ export const PlaylistDrawer = () => {
                       </Typography>
 
                       <Typography
+                        title={item.name}
                         sx={{
                           flex: 1,
                           minWidth: 0,
@@ -276,7 +301,6 @@ export const PlaylistDrawer = () => {
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          title: item.name,
                         }}
                       >
                         {item.name}
@@ -350,6 +374,7 @@ export const PlaylistDrawer = () => {
                       <Box
                         component="button"
                         type="button"
+                        aria-label={`从列表移除 ${item.name}`}
                         onClick={(e) => {
                           e.stopPropagation()
                           handleRemoveItem(e, index)
@@ -371,6 +396,10 @@ export const PlaylistDrawer = () => {
                           flexShrink: 0,
                           '&:hover': {
                             color: VERMILION,
+                          },
+                          '&:focus-visible': {
+                            outline: `2px solid ${VERMILION}`,
+                            outlineOffset: '1px',
                           },
                         }}
                       >

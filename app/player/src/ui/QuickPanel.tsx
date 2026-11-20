@@ -73,9 +73,13 @@ export const FeatureSplitButton = ({
           display: 'flex',
           alignItems: 'stretch',
           flexShrink: 0,
-          border: lit || busy ? `2px solid ${frame}` : LINE_SUBTLE,
+          border: `2px solid ${busy ? VERMILION : lit ? PAPER : 'transparent'}`,
           background: busy ? alpha(VERMILION, 0.12) : 'transparent',
-          boxShadow: open ? hardShadow(3) : 'none',
+          boxShadow: open
+            ? hardShadow(3)
+            : lit || busy
+              ? 'none'
+              : `inset 0 0 0 1px ${alpha(PAPER, 0.22)}`,
         }}
       >
         <Box
@@ -150,12 +154,17 @@ export const FeatureSplitButton = ({
           sx={{
             appearance: 'none',
             border: 0,
-            borderLeft: `2px solid ${frame}`,
+            // On the lit paper ground a paper-coloured line vanishes.
+            borderLeft: `2px solid ${lit ? INK : frame}`,
             width: 22,
             padding: 0,
             display: 'grid',
             placeItems: 'center',
             cursor: 'pointer',
+            '&:focus-visible': {
+              outline: `2px solid ${VERMILION}`,
+              outlineOffset: '-4px',
+            },
             fontSize: 9,
             background: open ? VERMILION : 'transparent',
             color: open ? PAPER : lit && !busy ? INK : PAPER,
@@ -194,7 +203,7 @@ export const FeatureSplitButton = ({
               border: LINE_STRONG,
               borderRadius: 0,
               boxShadow: hardShadow(6),
-              animation: `ink-popover-in ${MOTION_POPOVER}`,
+              animation: `ink-popover-rise ${MOTION_POPOVER}`,
               '@media (prefers-reduced-motion: reduce)': {
                 animation: 'none',
               },
@@ -263,6 +272,10 @@ export const FeatureSplitButton = ({
             textAlign: 'right',
             cursor: 'pointer',
             transition: HARD_CUT,
+            '&:focus-visible': {
+              outline: `2px solid ${VERMILION}`,
+              outlineOffset: '-4px',
+            },
             '&:hover': { background: PAPER, color: INK },
           }}
         >
@@ -321,11 +334,13 @@ export const QuickAction = ({
   onClick,
   disabled = false,
   danger = false,
+  fullWidth = true,
 }: {
   children: ReactNode
   onClick: () => void
   disabled?: boolean
   danger?: boolean
+  fullWidth?: boolean
 }) => (
   <Box
     component="button"
@@ -334,7 +349,7 @@ export const QuickAction = ({
     onClick={onClick}
     sx={{
       appearance: 'none',
-      flex: 1,
+      flex: fullWidth ? 1 : '0 0 auto',
       minWidth: 0,
       border: danger ? `2px solid ${VERMILION}` : LINE_STRONG,
       background: 'transparent',
@@ -347,6 +362,10 @@ export const QuickAction = ({
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       transition: HARD_CUT,
+      '&:focus-visible': {
+        outline: `2px solid ${VERMILION}`,
+        outlineOffset: '2px',
+      },
       '&:hover': danger
         ? { background: VERMILION, color: PAPER }
         : { background: PAPER, color: INK },

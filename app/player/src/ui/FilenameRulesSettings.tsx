@@ -3,9 +3,8 @@ import { alpha } from '@mui/material/styles'
 import { usePlayerStore } from '@/store/playerStore'
 import {
   GOLD,
-  hardShadow,
   hatchSx,
-  INK,
+  LINE_STRONG,
   LINE_SUBTLE,
   MONO,
   PAPER,
@@ -187,21 +186,28 @@ export const FilenameRulesSettings = () => {
                 type="button"
                 onClick={() => removeRule(rule.id)}
                 title="删除这条规则"
+                aria-label="删除规则"
                 sx={{
                   appearance: 'none',
                   cursor: 'pointer',
                   flexShrink: 0,
                   width: 24,
                   height: 24,
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   border: LINE_SUBTLE,
                   background: 'transparent',
                   color: alpha(PAPER, 0.6),
-                  fontSize: 12,
-                  fontWeight: 900,
-                  transition: 'all 0ms',
+                  transition: 'border-color 0ms, color 0ms',
                   '&:hover': {
-                    border: `2px solid ${VERMILION}`,
+                    border: LINE_STRONG,
                     color: VERMILION,
+                  },
+                  '&:focus-visible': {
+                    outline: `2px solid ${VERMILION}`,
+                    outlineOffset: '1px',
                   },
                 }}
               >
@@ -227,11 +233,14 @@ export const FilenameRulesSettings = () => {
             color: VERMILION,
             fontSize: 12,
             fontWeight: 900,
-            boxShadow: hardShadow(3, INK),
-            transition: 'all 0ms',
+            transition: 'background-color 0ms, color 0ms',
             '&:hover': {
               background: VERMILION,
               color: PAPER,
+            },
+            '&:focus-visible': {
+              outline: `2px solid ${VERMILION}`,
+              outlineOffset: '2px',
             },
           }}
         >

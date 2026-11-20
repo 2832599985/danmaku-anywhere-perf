@@ -1,11 +1,4 @@
-import {
-  Box,
-  CircularProgress,
-  Dialog,
-  Stack,
-  TextField,
-  Typography,
-} from '@mui/material'
+import { Box, Dialog, Stack, TextField, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { chooseSeason, episodeFromFilename } from '@/danmaku/autoMatch'
@@ -28,13 +21,16 @@ import {
   hardShadow,
   hatchSx,
   INK,
+  inkHold,
+  inkHoldOn,
   LINE_STRONG,
   LINE_SUBTLE,
   MONO,
   PAPER,
   VERMILION,
 } from '@/theme/theme'
-import { InkPanelHeader } from '@/ui/ink'
+import { InkLoadingTicks, InkNotice, InkPanelHeader } from '@/ui/ink'
+import { ChevronUpIcon } from './icons'
 import { errorMessage } from './shared'
 
 const LocalTab = ({ onDone }: { onDone: () => void }) => {
@@ -85,27 +81,14 @@ const LocalTab = ({ onDone }: { onDone: () => void }) => {
       >
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-            <CircularProgress size={24} />
+            <InkLoadingTicks size={6} />
           </Box>
         ) : (
           '选择弹幕文件 (.xml / .json) · 或拖入'
         )}
       </Box>
 
-      {error && (
-        <Box
-          sx={{
-            padding: '8px 12px',
-            border: `2px solid ${VERMILION}`,
-            background: alpha(VERMILION, 0.08),
-            color: VERMILION,
-            fontSize: 12,
-            fontWeight: 700,
-          }}
-        >
-          {error}
-        </Box>
-      )}
+      {error && <InkNotice tone="error">{error}</InkNotice>}
     </Stack>
   )
 }
@@ -360,28 +343,15 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
             },
           }}
         >
-          {searching ? <CircularProgress size={14} color="inherit" /> : '搜索'}
+          {searching ? <InkLoadingTicks size={4} /> : '搜索'}
         </Box>
       </Box>
 
-      {error && (
-        <Box
-          sx={{
-            padding: '8px 12px',
-            border: `2px solid ${VERMILION}`,
-            background: alpha(VERMILION, 0.08),
-            color: VERMILION,
-            fontSize: 12,
-            fontWeight: 700,
-          }}
-        >
-          {error}
-        </Box>
-      )}
+      {error && <InkNotice tone="error">{error}</InkNotice>}
 
       {searching && (
         <Stack alignItems="center" sx={{ py: 4 }}>
-          <CircularProgress size={28} />
+          <InkLoadingTicks size={7} />
         </Stack>
       )}
 
@@ -520,7 +490,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                 {/* Episodes grid — loaded on demand for this season */}
                 {loading && (
                   <Stack alignItems="center" sx={{ py: 2 }}>
-                    <CircularProgress size={20} />
+                    <InkLoadingTicks size={5} />
                   </Stack>
                 )}
 
@@ -549,9 +519,14 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                             appearance: 'none',
                             cursor: 'pointer',
                             padding: '7px 4px',
-                            border: isTarget
-                              ? `3px solid ${VERMILION}`
-                              : LINE_SUBTLE,
+                            border: `2px solid ${
+                              isTarget ? VERMILION : 'transparent'
+                            }`,
+                            boxShadow: isFetching
+                              ? hardShadow(3)
+                              : isTarget
+                                ? `inset 3px 0 0 ${VERMILION}, inset 0 0 0 1px ${alpha(PAPER, 0.22)}`
+                                : `inset 0 0 0 1px ${alpha(PAPER, 0.22)}`,
                             background: isFetching
                               ? VERMILION
                               : isTarget
@@ -564,16 +539,20 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                                 : alpha(PAPER, 0.8),
                             fontSize: 11,
                             fontWeight: 700,
-                            transition: 'all 0ms',
-                            boxShadow: isFetching ? hardShadow(3) : 'none',
+                            transition:
+                              'border-color 0ms, background 0ms, color 0ms, box-shadow 0ms',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             minHeight: 28,
                             '&:hover:not(:disabled)': {
-                              border: `3px solid ${PAPER}`,
+                              borderColor: isTarget ? VERMILION : PAPER,
                               background: PAPER,
                               color: INK,
+                            },
+                            '&:focus-visible': {
+                              outline: `2px solid ${VERMILION}`,
+                              outlineOffset: '2px',
                             },
                             '&:disabled': {
                               opacity: 0.5,
@@ -581,7 +560,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                           }}
                         >
                           {isFetching ? (
-                            <CircularProgress size={12} color="inherit" />
+                            <InkLoadingTicks size={3} />
                           ) : (
                             episodeLabel(ep)
                           )}
@@ -600,21 +579,22 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                     appearance: 'none',
                     cursor: 'pointer',
                     padding: '4px 8px',
-                    border: LINE_SUBTLE,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    border: `2px solid ${alpha(PAPER, 0.22)}`,
                     background: 'transparent',
                     color: alpha(PAPER, 0.6),
                     fontSize: 11,
                     fontWeight: 700,
-                    transition: 'border 0ms, color 0ms',
+                    transition: 'border-color 0ms, color 0ms',
                     alignSelf: 'flex-start',
                     marginTop: '4px',
-                    '&:hover': {
-                      border: LINE_STRONG,
-                      color: PAPER,
-                    },
+                    '&:hover': { borderColor: PAPER, color: PAPER },
                   }}
                 >
-                  ▴ 收起
+                  <ChevronUpIcon size={10} />
+                  收起
                 </Box>
               </Box>
             ) : (
@@ -736,7 +716,7 @@ export const DanmakuSourceDialog = () => {
         <Stack direction="row" sx={{ borderBottom: LINE_STRONG }}>
           {[
             { value: 1 as const, label: '在线搜索 · 多源' },
-            { value: 0 as const, label: '本地文件 · XML / JSON / ASS' },
+            { value: 0 as const, label: '本地文件 · XML / JSON' },
           ].map((btn) => (
             <Box
               key={btn.value}
@@ -748,13 +728,17 @@ export const DanmakuSourceDialog = () => {
                 flex: 1,
                 cursor: 'pointer',
                 padding: '12px 16px',
-                border: 'none',
-                borderBottom: tab === btn.value ? `3px solid ${PAPER}` : 'none',
+                border: 0,
+                // Constant 3px top accent replaces the old 3px bottom edge that
+                // stacked with the container's 2px rule into a 5px white bar.
+                borderTop: `3px solid ${
+                  tab === btn.value ? VERMILION : 'transparent'
+                }`,
                 background: tab === btn.value ? PAPER : 'transparent',
                 color: tab === btn.value ? INK : alpha(PAPER, 0.6),
                 fontSize: 12,
                 fontWeight: 700,
-                transition: 'all 0ms',
+                transition: 'background-color 0ms, color 0ms, border-color 0ms',
                 '&:hover': {
                   background: tab === btn.value ? PAPER : alpha(PAPER, 0.06),
                 },
@@ -809,16 +793,13 @@ export const DanmakuSourceDialog = () => {
               appearance: 'none',
               cursor: 'pointer',
               padding: '7px 16px',
-              border: LINE_SUBTLE,
+              ...inkHold(2),
               background: 'transparent',
               color: alpha(PAPER, 0.8),
               fontSize: 12,
               fontWeight: 700,
-              transition: 'border 0ms, color 0ms',
-              '&:hover': {
-                border: LINE_STRONG,
-                color: PAPER,
-              },
+              transition: 'border-color 0ms, color 0ms, box-shadow 0ms',
+              '&:hover': { ...inkHoldOn(PAPER), color: PAPER },
             }}
           >
             取消

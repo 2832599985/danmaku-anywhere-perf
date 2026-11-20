@@ -49,7 +49,9 @@ import {
 } from '@/subtitle/generate'
 import { focusEmbeddedExtraction } from '@/subtitle/native'
 import { rankSiblingSubtitles } from '@/subtitle/siblings'
+import { STAGE_Z } from '@/theme/theme'
 import { AiSubtitleOverlay } from '@/ui/AiSubtitleOverlay'
+import { CompareDivider } from '@/ui/CompareDivider'
 import { Controls } from '@/ui/Controls'
 import { DanmakuSourceDialog } from '@/ui/DanmakuSourceDialog'
 import { EmptyState } from '@/ui/EmptyState'
@@ -1359,7 +1361,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
                 height: '100%',
                 objectFit: 'contain',
                 background: '#000',
-                zIndex: 0,
+                zIndex: STAGE_Z.VIDEO,
               }}
             />
             {/* upscale <canvas> is injected here (zIndex 1) by UpscaleController */}
@@ -1368,7 +1370,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
               style={{
                 position: 'absolute',
                 inset: 0,
-                zIndex: 2,
+                zIndex: STAGE_Z.DANMAKU,
                 pointerEvents: 'none',
                 overflow: 'hidden',
               }}
@@ -1383,7 +1385,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
               style={{
                 position: 'absolute',
                 inset: 0,
-                zIndex: 3,
+                zIndex: STAGE_Z.SUBTITLE,
                 pointerEvents: 'none',
                 overflow: 'hidden',
                 display: media ? undefined : 'none',
@@ -1391,6 +1393,8 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             />
 
             {!media && <EmptyState />}
+
+            {!miniPlayer && <CompareDivider />}
 
             {mediaError && (
               <Alert
@@ -1402,7 +1406,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
                   top: '50%',
                   left: '50%',
                   transform: 'translate(-50%, -50%)',
-                  zIndex: 6,
+                  zIndex: STAGE_Z.MEDIA_ERROR,
                   maxWidth: 'min(560px, 88%)',
                 }}
               >

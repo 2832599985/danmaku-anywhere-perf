@@ -2,6 +2,7 @@ import { Box, Stack, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import type { ReactNode } from 'react'
 import {
+  GOLD,
   INK,
   inkStampPressSx,
   LINE_STRONG,
@@ -9,7 +10,7 @@ import {
   PAPER,
   VERMILION,
 } from '@/theme/theme'
-import { CloseIcon } from './icons'
+import { CloseIcon, WarningIcon } from './icons'
 
 /**
  * 墨线 (ink) atoms — the comic-style replacements for MUI ToggleButtonGroup /
@@ -385,6 +386,7 @@ export const InkLabeledSlider = ({
           fontSize: 14,
           fontWeight: 700,
           color: VERMILION,
+          fontVariantNumeric: 'tabular-nums',
         }}
       >
         {display}
@@ -492,7 +494,8 @@ export const InkBlinkDot = ({
       width: size,
       height: size,
       background: color,
-      borderRadius: '50%',
+      // Square, like every other mark in the ink system (zero radius).
+      borderRadius: 0,
       flexShrink: 0,
       animation: 'ink-blink 1.4s steps(1) infinite',
     }}
@@ -575,3 +578,143 @@ export const InkPanelHeader = ({
     </Box>
   </Stack>
 )
+
+// ---------------------------------------------------------------------------
+
+/** Three rising paper ticks — the ink replacement for MUI CircularProgress. */
+export const InkLoadingTicks = ({
+  size = 4,
+  label = '载入中',
+}: {
+  size?: number
+  label?: string
+}) => (
+  <Stack direction="row" alignItems="center" spacing="3px" aria-label={label}>
+    {[0, 1, 2].map((i) => (
+      <Box
+        key={i}
+        component="span"
+        sx={{
+          width: size,
+          height: size,
+          background: PAPER,
+          animation: 'ink-tick 0.9s steps(1) infinite',
+          animationDelay: `${i * 0.15}s`,
+          '@media (prefers-reduced-motion: reduce)': {
+            animation: 'none',
+            background: i === 1 ? VERMILION : PAPER,
+          },
+        }}
+      />
+    ))}
+  </Stack>
+)
+
+/** Ink notice strip: 2px edge, 8% tint, 4px solid bar on the leading edge. */
+export const InkNotice = ({
+  tone = 'info',
+  children,
+}: {
+  tone?: 'error' | 'warning' | 'info'
+  children: ReactNode
+}) => {
+  const color = tone === 'error' ? VERMILION : tone === 'warning' ? GOLD : PAPER
+  return (
+    <Stack
+      direction="row"
+      alignItems="flex-start"
+      spacing={1}
+      role={tone === 'error' ? 'alert' : 'status'}
+      sx={{
+        border: `2px solid ${color}`,
+        borderLeft: `4px solid ${color}`,
+        background: alpha(color, 0.08),
+        color: PAPER,
+        padding: '7px 10px',
+      }}
+    >
+      {tone !== 'info' && (
+        <WarningIcon size={13} sx={{ color, marginTop: '2px' }} />
+      )}
+      <Box sx={{ minWidth: 0, flex: 1 }}>{children}</Box>
+    </Stack>
+  )
+}
+
+/** Standard ink button. `primary` keeps the paper fill + vermilion hard shadow. */
+export const InkButton = ({
+  variant = 'secondary',
+  size = 'md',
+  fullWidth = false,
+  danger = false,
+  onClick,
+  disabled = false,
+  children,
+  ...rest
+}: {
+  variant?: 'primary' | 'secondary'
+  size?: 'sm' | 'md'
+  fullWidth?: boolean
+  danger?: boolean
+  onClick?: () => void
+  disabled?: boolean
+  children: ReactNode
+  'aria-label'?: string
+  title?: string
+}) => {
+  const small = size === 'sm'
+  const base = {
+    appearance: 'none' as const,
+    cursor: disabled ? 'default' : 'pointer',
+    opacity: disabled ? 0.45 : 1,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    fontFamily: 'inherit',
+    fontSize: small ? 11 : 12,
+    fontWeight: 700,
+    padding: small ? '5px 9px' : '7px 13px',
+    whiteSpace: 'nowrap' as const,
+    flex: fullWidth ? 1 : '0 0 auto',
+    minWidth: 0,
+    ...(variant === 'primary' || danger
+      ? inkStampPressSx(3, VERMILION, {
+          background: VERMILION,
+          color: PAPER,
+          borderColor: VERMILION,
+        })
+      : {}),
+  }
+  return (
+    <Box
+      component="button"
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      {...rest}
+      sx={{
+        ...base,
+        border: danger ? `2px solid ${VERMILION}` : LINE_STRONG,
+        ...(variant === 'primary' || danger
+          ? { background: PAPER, color: INK }
+          : {
+              background: 'transparent',
+              color: danger ? VERMILION : PAPER,
+              '&:hover': danger
+                ? { background: VERMILION, color: PAPER }
+                : { background: PAPER, color: INK },
+            }),
+        '&:focus-visible': {
+          outline: `2px solid ${VERMILION}`,
+          outlineOffset: '2px',
+        },
+        '@media (prefers-reduced-motion: reduce)': {
+          transition: 'background-color 0ms !important, color 0ms !important',
+        },
+      }}
+    >
+      {children}
+    </Box>
+  )
+}

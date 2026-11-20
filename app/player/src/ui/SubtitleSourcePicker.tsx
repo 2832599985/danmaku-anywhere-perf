@@ -20,6 +20,7 @@ import {
   PAPER,
   VERMILION,
 } from '@/theme/theme'
+import { InkNotice } from './ink'
 import { QuickAction } from './QuickPanel'
 
 export const SubtitleSourcePicker = ({ compact = false }) => {
@@ -106,7 +107,7 @@ export const SubtitleSourcePicker = ({ compact = false }) => {
       </Typography>
 
       {embeddedError ? (
-        <Notice tone="error">无法读取内封字幕 · {embeddedError}</Notice>
+        <InkNotice tone="error">无法读取内封字幕 · {embeddedError}</InkNotice>
       ) : embeddedTracks.length > 0 ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           <Typography
@@ -260,33 +261,11 @@ export const SubtitleSourcePicker = ({ compact = false }) => {
               显示 · {DISPLAY_MODE_LABEL[aiDisplay]}（T 切换）
             </QuickAction>
           )}
-          {aiError && <Notice tone="error">{aiError}</Notice>}
+          {aiError && <InkNotice tone="error">{aiError}</InkNotice>}
         </Box>
       )}
 
-      {error && <Notice tone="error">{error}</Notice>}
+      {error && <InkNotice tone="error">{error}</InkNotice>}
     </Box>
   )
 }
-
-const Notice = ({
-  tone,
-  children,
-}: {
-  tone: 'error'
-  children: React.ReactNode
-}) => (
-  <Box
-    sx={{
-      border: `2px solid ${tone === 'error' ? VERMILION : PAPER}`,
-      background: alpha(VERMILION, 0.08),
-      color: VERMILION,
-      fontSize: 12,
-      fontWeight: 700,
-      padding: '6px 10px',
-      wordBreak: 'break-word',
-    }}
-  >
-    {children}
-  </Box>
-)

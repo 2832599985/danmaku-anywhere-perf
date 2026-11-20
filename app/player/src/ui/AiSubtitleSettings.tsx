@@ -13,15 +13,7 @@ import {
   setSubtitleDataDir,
   subtitleAssets,
 } from '@/subtitle/native'
-import {
-  GREEN,
-  INK,
-  LINE_STRONG,
-  LINE_SUBTLE,
-  MONO,
-  PAPER,
-  VERMILION,
-} from '@/theme/theme'
+import { GREEN, INK, LINE_SUBTLE, MONO, PAPER, VERMILION } from '@/theme/theme'
 import { InkLabel, type InkOption, InkSwitch, InkToggleGroup } from './ink'
 import { QuickAction } from './QuickPanel'
 import { errorMessage } from './shared'
@@ -179,11 +171,15 @@ export const AiSubtitleSettings = () => {
         CPU 补。识别 Whisper large-v3-turbo，翻译 Murasaki-4B，全部本地运行。
       </Typography>
 
-      <Box sx={{ border: LINE_STRONG, padding: '10px 12px' }}>
+      <Box sx={{ border: LINE_SUBTLE, padding: '10px 12px' }}>
         <Stack direction="row" alignItems="center" gap={1.5}>
           <InkLabel zh="数据目录" en="DATA DIR · 模型 / 缓存" size={13} />
           <Box sx={{ flex: 1 }} />
-          <QuickAction onClick={() => void changeDir()} disabled={!!progress}>
+          <QuickAction
+            fullWidth={false}
+            onClick={() => void changeDir()}
+            disabled={!!progress}
+          >
             更改…
           </QuickAction>
         </Stack>
@@ -207,7 +203,7 @@ export const AiSubtitleSettings = () => {
         </Typography>
       </Box>
 
-      <Box sx={{ border: LINE_STRONG }}>
+      <Box sx={{ border: LINE_SUBTLE }}>
         {visible.map((asset) => {
           const busy = progress?.id === asset.id
           return (
@@ -257,6 +253,7 @@ export const AiSubtitleSettings = () => {
                   fontWeight: 700,
                   color: asset.installed ? GREEN : alpha(PAPER, 0.6),
                   whiteSpace: 'nowrap',
+                  fontVariantNumeric: 'tabular-nums',
                 }}
               >
                 {busy
@@ -269,6 +266,7 @@ export const AiSubtitleSettings = () => {
               </Box>
               {!asset.installed && !busy && (
                 <QuickAction
+                  fullWidth={false}
                   onClick={() => download(asset)}
                   disabled={!!progress}
                 >
@@ -285,7 +283,7 @@ export const AiSubtitleSettings = () => {
         </QuickAction>
       )}
 
-      <Box sx={{ border: LINE_STRONG, padding: '12px' }}>
+      <Box sx={{ border: LINE_SUBTLE, padding: '12px' }}>
         <Stack
           direction="row"
           alignItems="center"
