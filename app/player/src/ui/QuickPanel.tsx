@@ -12,6 +12,7 @@ import {
   VERMILION,
 } from '@/theme/theme'
 import { ChevronUpIcon } from './icons'
+import { InkButton } from './ink'
 
 const HARD_CUT = 'background-color 0ms, color 0ms'
 
@@ -328,7 +329,7 @@ export const QuickRow = ({
 /** Thin rule between groups inside a quick panel. */
 export const QuickDivider = () => <Box sx={{ borderTop: LINE_SUBTLE }} />
 
-/** Full-width outlined action inside a quick panel. */
+/** Outlined action inside a quick panel (shared ink button family). */
 export const QuickAction = ({
   children,
   onClick,
@@ -342,41 +343,14 @@ export const QuickAction = ({
   danger?: boolean
   fullWidth?: boolean
 }) => (
-  <Box
-    component="button"
-    type="button"
+  <InkButton
+    variant="secondary"
+    size="sm"
+    danger={danger}
+    fullWidth={fullWidth}
     disabled={disabled}
     onClick={onClick}
-    sx={{
-      appearance: 'none',
-      flex: fullWidth ? 1 : '0 0 auto',
-      minWidth: 0,
-      border: danger ? `2px solid ${VERMILION}` : LINE_STRONG,
-      background: 'transparent',
-      color: danger ? VERMILION : PAPER,
-      padding: '7px 8px',
-      fontSize: 12,
-      fontWeight: 700,
-      cursor: 'pointer',
-      whiteSpace: 'nowrap',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      transition: HARD_CUT,
-      '&:focus-visible': {
-        outline: `2px solid ${VERMILION}`,
-        outlineOffset: '2px',
-      },
-      '&:hover': danger
-        ? { background: VERMILION, color: PAPER }
-        : { background: PAPER, color: INK },
-      '&:disabled': {
-        opacity: 0.35,
-        cursor: 'default',
-        background: 'transparent',
-        color: danger ? VERMILION : PAPER,
-      },
-    }}
   >
     {children}
-  </Box>
+  </InkButton>
 )

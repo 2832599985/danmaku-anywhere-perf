@@ -643,7 +643,7 @@ export const SettingsDrawer = () => {
                     component="span"
                     sx={{
                       fontFamily: MONO,
-                      fontSize: 8,
+                      fontSize: 9,
                       fontWeight: 700,
                       letterSpacing: '0.16em',
                       color: isSelected ? alpha(INK, 0.55) : alpha(PAPER, 0.3),

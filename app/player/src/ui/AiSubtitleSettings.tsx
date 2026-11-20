@@ -14,7 +14,13 @@ import {
   subtitleAssets,
 } from '@/subtitle/native'
 import { GREEN, INK, LINE_SUBTLE, MONO, PAPER, VERMILION } from '@/theme/theme'
-import { InkLabel, type InkOption, InkSwitch, InkToggleGroup } from './ink'
+import {
+  InkLabel,
+  InkNotice,
+  type InkOption,
+  InkSwitch,
+  InkToggleGroup,
+} from './ink'
 import { QuickAction } from './QuickPanel'
 import { errorMessage } from './shared'
 
@@ -327,19 +333,9 @@ export const AiSubtitleSettings = () => {
       )}
 
       {(message || aiError) && (
-        <Box
-          sx={{
-            border: `2px solid ${VERMILION}`,
-            background: alpha(VERMILION, 0.08),
-            color: VERMILION,
-            fontSize: 12,
-            fontWeight: 700,
-            padding: '6px 10px',
-            wordBreak: 'break-word',
-          }}
-        >
+        <InkNotice tone={message ? 'info' : 'error'}>
           {message ?? aiError}
-        </Box>
+        </InkNotice>
       )}
     </Stack>
   )
