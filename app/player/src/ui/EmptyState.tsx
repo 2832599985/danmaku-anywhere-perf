@@ -6,10 +6,14 @@ import { usePlayerCommands } from '@/player/commands'
 import type { PlaylistItem, ResumeEntry } from '@/store/playerStore'
 import { usePlayerStore } from '@/store/playerStore'
 import {
+  CRISP_EASE,
   halftoneSx,
   hatchSx,
   INK,
   INK_STAGE,
+  inkStampPressSx,
+  LINE_FRAME,
+  LINE_SUBTLE,
   MONO,
   PAPER,
   SERIF_JP,
@@ -43,7 +47,7 @@ const ResumeThumb = ({ path, version }: { path: string; version: number }) => {
 
   const frameSx = {
     height: 88,
-    borderBottom: `2px solid ${alpha(PAPER, 0.3)}`,
+    borderBottom: LINE_SUBTLE,
   }
   if (url) {
     return (
@@ -159,7 +163,6 @@ export const EmptyState = () => {
         inset: 0,
         overflow: 'hidden',
         ...halftoneSx(0.1, 12),
-        animation: 'ink-tone 12s linear infinite',
       }}
     >
       {/* Manga speed-line layer: conic gradient burst. */}
@@ -176,6 +179,12 @@ export const EmptyState = () => {
             'repeating-conic-gradient(from 0deg at 50% 50%, rgba(244,241,232,.09) 0deg 1.4deg, transparent 1.4deg 7deg)',
           opacity: 0.5,
           pointerEvents: 'none',
+          // Keep the burst at the edges: the spotlight leaves the hero and CTA
+          // on calm paper instead of crossing them with moving lines.
+          maskImage:
+            'radial-gradient(circle, transparent 22%, rgba(0,0,0,0.85) 74%)',
+          WebkitMaskImage:
+            'radial-gradient(circle, transparent 22%, rgba(0,0,0,0.85) 74%)',
         }}
       />
 
@@ -284,7 +293,7 @@ export const EmptyState = () => {
                 fontSize: 'clamp(40px, 7vw, 74px)',
                 fontWeight: 900,
                 letterSpacing: '0.06em',
-                fontFamily: `"${SERIF_JP}", sans-serif`,
+                fontFamily: SERIF_JP,
                 color: INK,
                 lineHeight: 1.2,
                 margin: 0,
@@ -329,7 +338,7 @@ export const EmptyState = () => {
             超分辨率 · 补帧 · 弹幕
           </Typography>
 
-          {/* Main button: 3px border, light sweep animation, hard-cut hover. */}
+          {/* Main button: 3px frame, hover-only sheen, hard-shadow stamp. */}
           <Box
             component="button"
             type="button"
@@ -341,39 +350,44 @@ export const EmptyState = () => {
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              border: `3px solid ${PAPER}`,
+              border: LINE_FRAME,
               background: INK_STAGE,
               color: PAPER,
+              fontFamily: 'inherit',
               fontSize: 19,
               fontWeight: 900,
               letterSpacing: '0.1em',
               padding: '15px 46px',
-              boxShadow: `8px 8px 0 ${VERMILION}`,
               overflow: 'hidden',
-              transition:
-                'background-color 100ms steps(1), color 100ms steps(1), box-shadow 100ms steps(1)',
-              '&:hover': {
+              ...inkStampPressSx(8, VERMILION, {
                 background: PAPER,
                 color: INK,
-                boxShadow: `8px 8px 0 ${PAPER}`,
+                borderColor: PAPER,
+              }),
+              // The paper ink mark under the text stays ink; only the fill
+              // inverts on hover, so the hard vermilion shadow never melts.
+              '&::after': {
+                content: '""',
+                position: 'absolute',
+                top: 0,
+                bottom: 0,
+                left: '-30%',
+                width: '30%',
+                background: `linear-gradient(90deg, transparent, ${alpha(VERMILION, 0.55)}, transparent)`,
+                transform: 'translateX(0) skewX(-12deg)',
+                opacity: 0,
+                pointerEvents: 'none',
+                transition: `transform 520ms ${CRISP_EASE}, opacity 120ms linear`,
+              },
+              '&:hover::after': {
+                transform: 'translateX(460%) skewX(-12deg)',
+                opacity: 1,
+              },
+              '@media (prefers-reduced-motion: reduce)': {
+                '&::after': { display: 'none' },
               },
             }}
           >
-            {/* Light sweep gradient band inside. */}
-            <Box
-              aria-hidden
-              sx={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                width: 46,
-                background: `linear-gradient(90deg, transparent, ${alpha(VERMILION, 0.55)}, transparent)`,
-                animation: 'ink-sweep 2.8s linear infinite',
-                pointerEvents: 'none',
-              }}
-            />
             <Typography
               component="span"
               sx={{
@@ -409,7 +423,7 @@ export const EmptyState = () => {
                 sx={{
                   mb: 3,
                   pb: 2,
-                  borderBottom: `2px solid ${alpha(PAPER, 0.2)}`,
+                  borderBottom: LINE_SUBTLE,
                 }}
               >
                 <Typography
@@ -420,7 +434,7 @@ export const EmptyState = () => {
                     letterSpacing: '0.08em',
                   }}
                 >
-                  継続観看
+                  继续观看
                 </Typography>
                 <Typography
                   sx={{
@@ -468,13 +482,21 @@ export const EmptyState = () => {
                         cursor: 'pointer',
                         display: 'flex',
                         flexDirection: 'column',
-                        border: `2px solid ${alpha(PAPER, 0.3)}`,
+                        border: LINE_SUBTLE,
                         background: 'rgba(244,241,232,.04)',
-                        transition:
-                          'border-color 100ms steps(1), background-color 100ms steps(1)',
+                        transition: `background-color 0ms, border-color 0ms, transform 120ms ${CRISP_EASE}, box-shadow 120ms ${CRISP_EASE}`,
                         '&:hover': {
                           borderColor: PAPER,
                           background: alpha(PAPER, 0.09),
+                          transform: 'translate(-2px, -2px)',
+                          boxShadow: `4px 4px 0 ${VERMILION}`,
+                        },
+                        '&:active': {
+                          transform: 'translate(1px, 1px)',
+                          boxShadow: `2px 2px 0 ${VERMILION}`,
+                        },
+                        '@media (prefers-reduced-motion: reduce)': {
+                          '&:hover, &:active': { transform: 'none' },
                         },
                       }}
                     >

@@ -1,7 +1,7 @@
 import { Box, Stack } from '@mui/material'
 import { getPlatform } from '@/platform'
 import { usePlayerStore } from '@/store/playerStore'
-import { LINE_STRONG } from '@/theme/theme'
+import { LINE_SUBTLE } from '@/theme/theme'
 import { AiSubtitleSettings } from './AiSubtitleSettings'
 import { InkLabel, InkLabeledSlider, InkSection, InkSwitch } from './ink'
 import { SubtitleSourcePicker } from './SubtitleSourcePicker'
@@ -18,7 +18,7 @@ export const SubtitleSettings = () => {
       </InkSection>
 
       <InkSection zh="显示" en="DISPLAY">
-        <Box sx={{ border: LINE_STRONG, padding: '12px' }}>
+        <Box sx={{ border: LINE_SUBTLE, padding: '12px' }}>
           <Stack
             direction="row"
             alignItems="center"
@@ -73,7 +73,7 @@ export const SubtitleSettings = () => {
           centerTick
           onChange={(value) => update({ offset: value })}
         />
-        <Box sx={{ border: LINE_STRONG, padding: '12px' }}>
+        <Box sx={{ border: LINE_SUBTLE, padding: '12px' }}>
           <Stack
             direction="row"
             alignItems="center"

@@ -4,7 +4,16 @@ import { preparedUrlForPath } from '@/platform/prepared'
 import { usePlayerCommands } from '@/player/commands'
 import { useOpEdMarks } from '@/player/useOpEdMarks'
 import { usePlayerStore } from '@/store/playerStore'
-import { GOLD, hatchSx, INK, MONO, PAPER, VERMILION } from '@/theme/theme'
+import {
+  GOLD,
+  hatchSx,
+  INK,
+  LINE_FRAME,
+  LINE_STRONG,
+  MONO,
+  PAPER,
+  VERMILION,
+} from '@/theme/theme'
 import { formatTime } from './TimeDisplay'
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n)
@@ -18,7 +27,12 @@ const THUMB_H = 132
  * vermilion block thumb, gold OP/ED ticks inferred from danmaku density, and a
  * hover preview card that decodes the frame at the hovered timestamp.
  */
-export const ProgressBar = () => {
+interface ProgressBarProps {
+  /** Immediate pointer ratio for the density strip; null when not hovering. */
+  onHoverRatio?: (ratio: number | null) => void
+}
+
+export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
   const commands = usePlayerCommands()
   const currentTime = usePlayerStore((s) => s.playback.currentTime)
   const duration = usePlayerStore((s) => s.playback.duration)
@@ -31,7 +45,12 @@ export const ProgressBar = () => {
   const [dragging, setDragging] = useState(false)
   const [scrubRatio, setScrubRatio] = useState<number | null>(null)
   const [hoverRatio, setHoverRatio] = useState<number | null>(null)
-  const lastHoverAt = useRef(0)
+  // The preview card's *visual* position follows the pointer immediately; only
+  // the hidden decoder is rate-limited. `frameRatio` is the throttled target.
+  const [frameRatio, setFrameRatio] = useState<number | null>(null)
+  const frameTimer = useRef<number | null>(null)
+  const lastFrameAt = useRef(0)
+  const pendingFrame = useRef<number | null>(null)
 
   const hasDuration = duration > 0
 
@@ -48,6 +67,46 @@ export const ProgressBar = () => {
   )
   const bufferedRatio = clamp01(hasDuration ? bufferedEnd / duration : 0)
 
+  const publishHover = (ratio: number | null) => {
+    setHoverRatio(ratio)
+    onHoverRatio?.(ratio)
+  }
+
+  const clearFrameTimer = () => {
+    if (frameTimer.current !== null) {
+      window.clearTimeout(frameTimer.current)
+      frameTimer.current = null
+    }
+  }
+
+  // Visual tracking is immediate; frame decode/seek is limited to ~180ms. A
+  // trailing timer makes sure the last pointer position still gets decoded.
+  const queueFrame = (ratio: number) => {
+    pendingFrame.current = ratio
+    const now = performance.now()
+    const wait = 180 - (now - lastFrameAt.current)
+    if (wait <= 0) {
+      lastFrameAt.current = now
+      setFrameRatio(ratio)
+      return
+    }
+    if (frameTimer.current !== null) return
+    frameTimer.current = window.setTimeout(() => {
+      frameTimer.current = null
+      lastFrameAt.current = performance.now()
+      if (pendingFrame.current !== null) setFrameRatio(pendingFrame.current)
+    }, wait)
+  }
+
+  const resetHover = () => {
+    clearFrameTimer()
+    pendingFrame.current = null
+    publishHover(null)
+    setFrameRatio(null)
+  }
+
+  useEffect(() => clearFrameTimer, [])
+
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!hasDuration) return
     e.preventDefault()
@@ -56,18 +115,16 @@ export const ProgressBar = () => {
     setDragging(true)
     const r = ratioFromClientX(e.clientX)
     setScrubRatio(r)
+    publishHover(r)
+    queueFrame(r)
     commands.seekTo(r * duration)
   }
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!hasDuration) return
     const r = ratioFromClientX(e.clientX)
-    // Throttle the preview target; the fill/thumb still track every move.
-    const now = performance.now()
-    if (now - lastHoverAt.current > 200) {
-      lastHoverAt.current = now
-      setHoverRatio(r)
-    }
+    publishHover(r)
+    queueFrame(r)
     if (draggingRef.current) {
       setScrubRatio(r)
       commands.seekTo(r * duration)
@@ -81,6 +138,8 @@ export const ProgressBar = () => {
     draggingRef.current = false
     setDragging(false)
     setScrubRatio(null)
+    publishHover(r)
+    queueFrame(r)
     try {
       barRef.current?.releasePointerCapture(e.pointerId)
     } catch {
@@ -91,6 +150,8 @@ export const ProgressBar = () => {
   const tipRatio = dragging ? scrubRatio : hoverRatio
   const showTip = hasDuration && tipRatio !== null
   const tipTime = (tipRatio ?? 0) * duration
+  // Only this throttled timestamp drives the hidden video seek.
+  const frameTime = frameRatio !== null ? frameRatio * duration : null
 
   const commentsNearTip = useMemo(() => {
     if (!showTip || comments.length === 0) return 0
@@ -117,7 +178,7 @@ export const ProgressBar = () => {
   )
 
   useEffect(() => {
-    if (!showTip || !media) return
+    if (!showTip || !media || frameTime === null) return
     let cancelled = false
 
     if (!decoderRef.current) {
@@ -158,7 +219,7 @@ export const ProgressBar = () => {
 
     decoder.addEventListener('seeked', draw)
     try {
-      decoder.currentTime = tipTime
+      decoder.currentTime = frameTime
     } catch {
       // metadata not ready yet; the next hover tick retries
     }
@@ -166,7 +227,7 @@ export const ProgressBar = () => {
       cancelled = true
       decoder.removeEventListener('seeked', draw)
     }
-  }, [showTip, media?.url, media?.path, tipTime])
+  }, [showTip, media?.url, media?.path, frameTime])
 
   return (
     <Box
@@ -174,16 +235,24 @@ export const ProgressBar = () => {
       sx={{
         position: 'relative',
         height: 14,
-        border: `2px solid ${PAPER}`,
+        border: LINE_STRONG,
         background: INK,
         cursor: hasDuration ? 'pointer' : 'default',
         touchAction: 'none',
       }}
       onPointerDown={handlePointerDown}
+      onPointerEnter={(e) => {
+        if (!hasDuration) return
+        const r = ratioFromClientX(e.clientX)
+        publishHover(r)
+        queueFrame(r)
+      }}
       onPointerMove={handlePointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
-      onPointerLeave={() => setHoverRatio(null)}
+      onPointerLeave={() => {
+        if (!draggingRef.current) resetHover()
+      }}
     >
       {/* buffered */}
       <Box
@@ -206,6 +275,7 @@ export const ProgressBar = () => {
           width: `${playedRatio * 100}%`,
           background: PAPER,
           transition: dragging ? 'none' : 'width 120ms linear',
+          willChange: 'width',
         }}
       />
 
@@ -247,8 +317,10 @@ export const ProgressBar = () => {
           bottom: -7,
           width: 8,
           background: VERMILION,
-          border: `2px solid ${PAPER}`,
+          border: LINE_STRONG,
           transform: 'translateX(-50%)',
+          transition: dragging ? 'none' : 'left 120ms linear',
+          willChange: 'left',
           pointerEvents: 'none',
         }}
       />
@@ -263,7 +335,7 @@ export const ProgressBar = () => {
             left: `clamp(0px, calc(${(tipRatio ?? 0) * 100}% - ${PREVIEW_W / 2}px), calc(100% - ${PREVIEW_W}px))`,
             width: PREVIEW_W,
             background: INK,
-            border: `3px solid ${PAPER}`,
+            border: LINE_FRAME,
             boxShadow: `6px 6px 0 ${alpha(VERMILION, 0.9)}`,
             pointerEvents: 'none',
             zIndex: 5,

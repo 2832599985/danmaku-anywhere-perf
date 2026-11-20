@@ -1,16 +1,19 @@
-import { alpha, Box, Popover, Typography } from '@mui/material'
+import { alpha, Box, Fade, Popover, Typography } from '@mui/material'
 import { type ReactNode, useEffect, useId, useState } from 'react'
 import { usePlayerStore } from '@/store/playerStore'
 import {
   hardShadow,
   INK,
   LINE_STRONG,
+  LINE_SUBTLE,
   MONO,
+  MOTION_POPOVER,
   PAPER,
   VERMILION,
 } from '@/theme/theme'
+import { ChevronUpIcon } from './icons'
 
-const HARD_CUT = 'background-color 100ms steps(1), color 100ms steps(1)'
+const HARD_CUT = 'background-color 0ms, color 0ms'
 
 export interface FeatureSplitButtonProps {
   /** Single glyph shown before the label (弾 / 字 / 超). */
@@ -70,7 +73,7 @@ export const FeatureSplitButton = ({
           display: 'flex',
           alignItems: 'stretch',
           flexShrink: 0,
-          border: `2px solid ${frame}`,
+          border: lit || busy ? `2px solid ${frame}` : LINE_SUBTLE,
           background: busy ? alpha(VERMILION, 0.12) : 'transparent',
           boxShadow: open ? hardShadow(3) : 'none',
         }}
@@ -150,6 +153,8 @@ export const FeatureSplitButton = ({
             borderLeft: `2px solid ${frame}`,
             width: 22,
             padding: 0,
+            display: 'grid',
+            placeItems: 'center',
             cursor: 'pointer',
             fontSize: 9,
             background: open ? VERMILION : 'transparent',
@@ -159,7 +164,7 @@ export const FeatureSplitButton = ({
             '&:hover': { background: VERMILION, color: PAPER },
           }}
         >
-          ▲
+          <ChevronUpIcon size={10} />
         </Box>
       </Box>
 
@@ -167,6 +172,8 @@ export const FeatureSplitButton = ({
         open={open}
         anchorEl={anchor}
         onClose={close}
+        TransitionComponent={Fade}
+        transitionDuration={140}
         disableRestoreFocus={blocked}
         anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
         transformOrigin={{ vertical: 'bottom', horizontal: 'right' }}
@@ -187,6 +194,10 @@ export const FeatureSplitButton = ({
               border: LINE_STRONG,
               borderRadius: 0,
               boxShadow: hardShadow(6),
+              animation: `ink-popover-in ${MOTION_POPOVER}`,
+              '@media (prefers-reduced-motion: reduce)': {
+                animation: 'none',
+              },
             },
           } as object,
         }}
@@ -194,7 +205,7 @@ export const FeatureSplitButton = ({
         <Box
           sx={{
             padding: '10px 14px 8px',
-            borderBottom: `2px solid ${alpha(PAPER, 0.25)}`,
+            borderBottom: LINE_SUBTLE,
             flexShrink: 0,
           }}
         >
@@ -243,7 +254,7 @@ export const FeatureSplitButton = ({
             appearance: 'none',
             flexShrink: 0,
             border: 0,
-            borderTop: `2px solid ${alpha(PAPER, 0.25)}`,
+            borderTop: LINE_SUBTLE,
             background: 'transparent',
             color: alpha(PAPER, 0.7),
             padding: '9px 14px',
@@ -302,9 +313,7 @@ export const QuickRow = ({
 )
 
 /** Thin rule between groups inside a quick panel. */
-export const QuickDivider = () => (
-  <Box sx={{ borderTop: `1px dashed ${alpha(PAPER, 0.2)}` }} />
-)
+export const QuickDivider = () => <Box sx={{ borderTop: LINE_SUBTLE }} />
 
 /** Full-width outlined action inside a quick panel. */
 export const QuickAction = ({
@@ -327,7 +336,7 @@ export const QuickAction = ({
       appearance: 'none',
       flex: 1,
       minWidth: 0,
-      border: `2px solid ${danger ? alpha(VERMILION, 0.8) : alpha(PAPER, 0.5)}`,
+      border: danger ? `2px solid ${VERMILION}` : LINE_STRONG,
       background: 'transparent',
       color: danger ? VERMILION : PAPER,
       padding: '7px 8px',

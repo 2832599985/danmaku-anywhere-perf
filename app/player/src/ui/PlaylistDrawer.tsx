@@ -7,12 +7,13 @@ import { usePlayerStore } from '@/store/playerStore'
 import {
   INK,
   LINE_STRONG,
-  LINE_WEAK,
+  LINE_SUBTLE,
   MONO,
   PAPER,
   VERMILION,
 } from '@/theme/theme'
 import { InkBlinkDot, InkPanelHeader, InkStamp, InkSwitch } from '@/ui/ink'
+import { CloseIcon, PlusIcon } from './icons'
 import { formatTime } from './TimeDisplay'
 
 /** A finished item is one watched to (nearly) the end. */
@@ -95,7 +96,7 @@ export const PlaylistDrawer = () => {
           sx={{
             px: 2,
             py: 1.5,
-            borderBottom: `2px solid ${alpha(PAPER, 0.2)}`,
+            borderBottom: LINE_SUBTLE,
           }}
         >
           <Box
@@ -106,20 +107,24 @@ export const PlaylistDrawer = () => {
               appearance: 'none',
               cursor: 'pointer',
               padding: '7px 12px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
               fontFamily: 'inherit',
               fontSize: 12,
               fontWeight: 700,
-              border: LINE_WEAK,
+              border: LINE_SUBTLE,
               background: 'transparent',
               color: alpha(PAPER, 0.8),
-              transition: 'border 100ms steps(1), color 100ms steps(1)',
+              transition: 'border 0ms, color 0ms',
               '&:hover': {
                 border: LINE_STRONG,
                 color: PAPER,
               },
             }}
           >
-            ＋ 添加
+            <PlusIcon size={12} />
+            添加
           </Box>
 
           <Box
@@ -134,10 +139,10 @@ export const PlaylistDrawer = () => {
               fontFamily: 'inherit',
               fontSize: 12,
               fontWeight: 700,
-              border: LINE_WEAK,
+              border: LINE_SUBTLE,
               background: 'transparent',
               color: alpha(PAPER, 0.8),
-              transition: 'border 100ms steps(1), color 100ms steps(1)',
+              transition: 'border 0ms, color 0ms',
               opacity: playlist.length === 0 ? 0.4 : 1,
               pointerEvents: playlist.length === 0 ? 'none' : 'auto',
               '&:hover': {
@@ -163,6 +168,7 @@ export const PlaylistDrawer = () => {
             </Typography>
             <InkSwitch
               checked={autoAdvance}
+              label="自动连播"
               onChange={(checked: boolean) =>
                 updatePlaybackSettings({ autoAdvance: checked })
               }
@@ -213,18 +219,17 @@ export const PlaylistDrawer = () => {
                       background: isActive
                         ? `linear-gradient(135deg, ${alpha(VERMILION, 0.12)}, transparent)`
                         : 'transparent',
-                      border: isActive
-                        ? `3px solid ${VERMILION}`
-                        : `2px solid ${alpha(PAPER, 0.28)}`,
+                      border: isActive ? `3px solid ${VERMILION}` : LINE_SUBTLE,
                       padding: '9px 11px',
                       display: 'flex',
                       flexDirection: 'column',
                       gap: '7px',
-                      transition:
-                        'border 100ms steps(1), background 100ms steps(1)',
+                      transition: 'border 0ms, background 0ms',
                       position: 'relative',
                       '&:hover': {
-                        border: `2px solid ${PAPER}`,
+                        border: isActive
+                          ? `3px solid ${VERMILION}`
+                          : LINE_STRONG,
                         background: isActive
                           ? `linear-gradient(135deg, ${alpha(VERMILION, 0.16)}, transparent)`
                           : alpha(PAPER, 0.06),
@@ -307,7 +312,7 @@ export const PlaylistDrawer = () => {
                         sx={{
                           flex: 1,
                           height: 5,
-                          border: `2px solid ${alpha(PAPER, 0.16)}`,
+                          border: LINE_SUBTLE,
                           background: INK,
                           position: 'relative',
                           overflow: 'hidden',
@@ -362,14 +367,14 @@ export const PlaylistDrawer = () => {
                           color: alpha(PAPER, 0.4),
                           fontSize: 14,
                           fontWeight: 700,
-                          transition: 'color 100ms steps(1)',
+                          transition: 'color 0ms',
                           flexShrink: 0,
                           '&:hover': {
                             color: VERMILION,
                           },
                         }}
                       >
-                        ✕
+                        <CloseIcon size={11} />
                       </Box>
                     </Stack>
                   </Box>

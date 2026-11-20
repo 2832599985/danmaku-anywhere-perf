@@ -2,21 +2,22 @@ import { Box, Stack, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import type { ReactNode } from 'react'
 import {
-  hardShadow,
   INK,
+  inkStampPressSx,
   LINE_STRONG,
   MONO,
   PAPER,
   VERMILION,
 } from '@/theme/theme'
+import { CloseIcon } from './icons'
 
 /**
  * 墨线 (ink) atoms — the comic-style replacements for MUI ToggleButtonGroup /
  * Switch / Slider, plus the rotated stamp badge and the 振假名-style two-line
- * label. Every hover is a hard cut (steps(1)), never an ease.
+ * label. Every colour swap is instant; only transform/shadow use the crisp curve.
  */
 
-const HARD_CUT = 'background-color 100ms steps(1), color 100ms steps(1)'
+const HARD_CUT = 'background-color 0ms, color 0ms, border-color 0ms'
 
 // ---------------------------------------------------------------------------
 
@@ -121,24 +122,40 @@ export const InkToggleGroup = <T extends string | number>({
             fontWeight: selected ? 900 : 700,
             letterSpacing: '0.02em',
             transition: HARD_CUT,
+            // A transparent 2px frame keeps every cell the same size; the
+            // inset hairline is the passive 1px stroke, so selection never
+            // nudges the label or the grid.
             ...(selected
               ? accent
                 ? {
                     border: `2px solid ${VERMILION}`,
                     background: alpha(VERMILION, 0.16),
                     color: PAPER,
+                    ...inkStampPressSx(3, VERMILION, {
+                      background: alpha(VERMILION, 0.3),
+                      color: PAPER,
+                    }),
                   }
                 : {
                     border: LINE_STRONG,
                     background: PAPER,
                     color: INK,
-                    boxShadow: hardShadow(3),
+                    ...inkStampPressSx(3, VERMILION, {
+                      background: VERMILION,
+                      color: PAPER,
+                      borderColor: VERMILION,
+                    }),
                   }
               : {
-                  border: `2px solid ${alpha(PAPER, 0.3)}`,
+                  border: '2px solid transparent',
+                  boxShadow: `inset 0 0 0 1px ${alpha(PAPER, 0.22)}`,
                   background: 'transparent',
                   color: alpha(PAPER, 0.75),
-                  '&:hover': { borderColor: PAPER, color: PAPER },
+                  '&:hover': {
+                    borderColor: PAPER,
+                    color: PAPER,
+                    boxShadow: 'none',
+                  },
                 }),
           }}
         >
@@ -543,6 +560,9 @@ export const InkPanelHeader = ({
         color: INK,
         fontSize: 13,
         cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         transition: HARD_CUT,
         '&:hover': {
           background: VERMILION,
@@ -551,7 +571,7 @@ export const InkPanelHeader = ({
         },
       }}
     >
-      ✕
+      <CloseIcon size={14} />
     </Box>
   </Stack>
 )

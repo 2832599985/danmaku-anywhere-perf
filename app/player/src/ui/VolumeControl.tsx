@@ -2,10 +2,11 @@ import { alpha, Box, Typography } from '@mui/material'
 import { useRef } from 'react'
 import { usePlayerCommands } from '@/player/commands'
 import { usePlayerStore } from '@/store/playerStore'
-import { INK, MONO, PAPER } from '@/theme/theme'
+import { INK, LINE_STRONG, MONO, PAPER, VERMILION } from '@/theme/theme'
+import { VolumeIcon, VolumeMuteIcon } from './icons'
 
 /**
- * ♪ mute square + a 96×8 rectangular level bar + a mono readout.
+ * Speaker mute square + a 96×8 rectangular level bar + a mono readout.
  * The bar is pointer-driven directly (no MUI Slider) to match the ink design.
  */
 export const VolumeControl = () => {
@@ -46,9 +47,9 @@ export const VolumeControl = () => {
           appearance: 'none',
           width: 38,
           height: 38,
-          border: `2px solid ${alpha(PAPER, 0.6)}`,
+          border: LINE_STRONG,
           background: 'transparent',
-          color: muted ? alpha(PAPER, 0.35) : PAPER,
+          color: muted || level === 0 ? alpha(PAPER, 0.35) : PAPER,
           fontSize: 14,
           cursor: 'pointer',
           display: 'flex',
@@ -57,11 +58,15 @@ export const VolumeControl = () => {
           flexShrink: 0,
           padding: 0,
           lineHeight: 1,
-          transition: 'background-color 100ms steps(1), color 100ms steps(1)',
+          transition: 'background-color 0ms, color 0ms',
           '&:hover': { background: PAPER, color: INK },
         }}
       >
-        ♪
+        {muted || level === 0 ? (
+          <VolumeMuteIcon size={17} />
+        ) : (
+          <VolumeIcon size={17} />
+        )}
       </Box>
 
       <Box
@@ -93,12 +98,13 @@ export const VolumeControl = () => {
           width: 96,
           '@media (max-width: 1000px)': { width: 56 },
           height: 8,
-          border: `2px solid ${PAPER}`,
+          border: LINE_STRONG,
           background: INK,
           cursor: 'pointer',
           touchAction: 'none',
           flexShrink: 0,
           '&:focus-visible': { outline: `2px solid ${PAPER}` },
+          '&::before': { content: '""', position: 'absolute', inset: '-8px' },
         }}
       >
         <Box
@@ -109,6 +115,18 @@ export const VolumeControl = () => {
             bottom: 0,
             width: `${level * 100}%`,
             background: PAPER,
+          }}
+        />
+        <Box
+          sx={{
+            position: 'absolute',
+            left: `${level * 100}%`,
+            top: -5,
+            bottom: -5,
+            width: 4,
+            background: VERMILION,
+            transform: 'translateX(-50%)',
+            pointerEvents: 'none',
           }}
         />
       </Box>

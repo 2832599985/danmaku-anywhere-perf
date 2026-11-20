@@ -21,13 +21,118 @@ export const GOLD = '#ffd23f'
 /** status ACTIVE / match success. */
 export const GREEN = '#3ddc84'
 
+/**
+ * 3-tier ink line hierarchy.
+ * FRAME  — major drawers, dialogs, the preview card and the primary CTA.
+ * STRONG — primary interactive controls, progress/sliders, OSD, active states.
+ * SUBTLE — passive containers and unselected/secondary rules.
+ */
+export const LINE_FRAME = `3px solid ${PAPER}`
 export const LINE_STRONG = `2px solid ${PAPER}`
+export const LINE_SUBTLE = `1px solid ${alpha(PAPER, 0.22)}`
+/** Legacy alias for controls that intentionally keep a 2px muted edge. */
 export const LINE_WEAK = `2px solid ${alpha(PAPER, 0.3)}`
 
 /** Hard comic shadow for key controls; panels go 8–14px. */
 export const HARD_SHADOW = `4px 4px 0 ${VERMILION}`
 export const hardShadow = (px: number, color: string = VERMILION): string =>
   `${px}px ${px}px 0 ${color}`
+
+/** One crisp curve shared by chrome, panels and page switches. */
+export const CRISP_EASE = 'cubic-bezier(0.16, 1, 0.3, 1)'
+export const CRISP_MOTION = `180ms ${CRISP_EASE}`
+/** The stamp press: 65ms, no bounce, weight lands instantly. */
+export const STAMP_EASE = 'cubic-bezier(0.2, 0, 0, 1)'
+export const STAMP_MOTION = `65ms ${STAMP_EASE}`
+
+/**
+ * Hard-shadow stamp press used by every physical button. Hover lifts the block
+ * by 1px and grows its shadow by 1px; pressing stamps it into the shadow (the
+ * shadow collapses proportionally). Colour cuts are instant.
+ */
+export const inkStampPressSx = (
+  px = 4,
+  color: string = VERMILION,
+  hover: CSSObject = {}
+): CSSObject => {
+  const depth = Math.max(1, Math.round(px * 0.75))
+  const pressed = Math.max(1, px - depth)
+  return {
+    boxShadow: hardShadow(px, color),
+    transition: `transform ${MOTION_PRESS}, box-shadow ${MOTION_PRESS}, background-color 0ms, color 0ms, border-color 0ms`,
+    '&:hover': {
+      transform: 'translate(-1px, -1px)',
+      boxShadow: hardShadow(px + 1, color),
+      ...hover,
+    },
+    '&:active': {
+      transform: `translate(${depth}px, ${depth}px)`,
+      boxShadow: hardShadow(pressed, color),
+      transition: `transform ${STAMP_MOTION}, box-shadow ${STAMP_MOTION}`,
+    },
+    '@media (prefers-reduced-motion: reduce)': {
+      transition: 'opacity 120ms linear',
+      '&:hover': {
+        transform: 'none',
+        boxShadow: hardShadow(px, color),
+        ...hover,
+      },
+      '&:active': {
+        transform: 'none',
+        boxShadow: hardShadow(px, color),
+      },
+    },
+  }
+}
+
+/**
+ * Motion system — "comic cut + stamp press".
+ * PANEL is the shared show/hide curve for every persistent chrome surface.
+ * PRESS is the 65ms tactile travel of a hard-shadow control.
+ */
+export const MOTION_PANEL = '180ms cubic-bezier(0.16, 1, 0.3, 1)'
+export const MOTION_PRESS = '65ms cubic-bezier(0.2, 0, 0, 1)'
+export const MOTION_STORY = '140ms cubic-bezier(0.16, 1, 0.3, 1)'
+export const MOTION_STAMP_IN = '90ms cubic-bezier(0.16, 1, 0.3, 1)'
+export const MOTION_STAMP_OUT = '180ms cubic-bezier(0.16, 1, 0.3, 1)'
+/** Mounted-danmaku confirmation banner. */
+export const MOTION_BANNER = '160ms cubic-bezier(0.16, 1, 0.3, 1)'
+/** Settings sub-page cross-cut. */
+export const MOTION_SUBPAGE = '110ms cubic-bezier(0.16, 1, 0.3, 1)'
+/** Quick-panel popover rise. */
+export const MOTION_POPOVER = '140ms cubic-bezier(0.16, 1, 0.3, 1)'
+
+/** Colour cuts are instantaneous; only physical/layout motion is eased. */
+export const INSTANT_CUT =
+  'background-color 0ms, color 0ms, border-color 0ms, box-shadow 0ms'
+
+/**
+ * Physical press: hover lifts by 1px and grows the hard shadow by 1px;
+ * press travels 3px and collapses the shadow toward 1px. The colour cut stays
+ * instantaneous so the ink never appears to "fade in" under the cursor.
+ */
+export const pressSx = (
+  shadowPx = 4,
+  color: string = VERMILION
+): CSSObject => ({
+  transition: `${INSTANT_CUT}, transform ${MOTION_PRESS}, box-shadow ${MOTION_PRESS}`,
+  '&:hover': {
+    transform: 'translate(-1px, -1px)',
+    boxShadow: hardShadow(shadowPx + 1, color),
+  },
+  '&:active': {
+    transform: `translate(${Math.max(1, Math.round(shadowPx * 0.75))}px, ${Math.max(1, Math.round(shadowPx * 0.75))}px)`,
+    boxShadow: hardShadow(
+      Math.max(1, shadowPx - Math.max(1, Math.round(shadowPx * 0.75))),
+      color
+    ),
+  },
+  '@media (prefers-reduced-motion: reduce)': {
+    transition: 'none',
+    '&:hover': { transform: 'none' },
+    '&:active': { transform: 'none' },
+  },
+})
 
 /** Mono stack for ALL numbers, statuses and english micro-labels. */
 export const MONO = '"JetBrains Mono", ui-monospace, monospace'
@@ -111,18 +216,19 @@ export const theme = createTheme({
         root: {
           borderRadius: 0,
           fontWeight: 700,
-          transition: 'background-color 100ms steps(1), color 100ms steps(1)',
+          transition: `${INSTANT_CUT}, transform ${MOTION_PRESS}, box-shadow ${MOTION_PRESS}`,
         },
         outlined: {
           border: LINE_WEAK,
           color: alpha(PAPER, 0.8),
           '&:hover': {
-            border: LINE_STRONG,
+            borderColor: PAPER,
             backgroundColor: PAPER,
             color: INK,
           },
         },
         contained: {
+          ...pressSx(4),
           border: LINE_STRONG,
           backgroundColor: PAPER,
           color: INK,
@@ -130,7 +236,17 @@ export const theme = createTheme({
           '&:hover': {
             backgroundColor: VERMILION,
             color: PAPER,
-            boxShadow: HARD_SHADOW,
+            transform: 'translate(-1px, -1px)',
+            boxShadow: hardShadow(5),
+          },
+          '&:active': {
+            transform: 'translate(3px, 3px)',
+            boxShadow: hardShadow(1),
+          },
+          '@media (prefers-reduced-motion: reduce)': {
+            transition: 'none',
+            '&:hover': { transform: 'none' },
+            '&:active': { transform: 'none' },
           },
         },
       },
@@ -141,7 +257,7 @@ export const theme = createTheme({
         root: {
           borderRadius: 0,
           color: alpha(PAPER, 0.88),
-          transition: 'background-color 100ms steps(1), color 100ms steps(1)',
+          transition: INSTANT_CUT,
           '&:hover': {
             backgroundColor: PAPER,
             color: INK,
@@ -207,7 +323,7 @@ export const theme = createTheme({
         paper: {
           backgroundColor: INK,
           backgroundImage: 'none',
-          borderLeft: `3px solid ${PAPER}`,
+          borderLeft: LINE_FRAME,
         },
       },
     },
@@ -216,7 +332,7 @@ export const theme = createTheme({
         paper: {
           backgroundColor: INK,
           backgroundImage: 'none',
-          border: `3px solid ${PAPER}`,
+          border: LINE_FRAME,
           borderRadius: 0,
           boxShadow: `12px 12px 0 ${alpha(VERMILION, 0.9)}`,
         },
@@ -260,7 +376,7 @@ export const theme = createTheme({
     MuiAlert: {
       styleOverrides: {
         root: { borderRadius: 0 },
-        outlined: { border: LINE_WEAK },
+        outlined: { border: LINE_SUBTLE },
       },
     },
     MuiTextField: {

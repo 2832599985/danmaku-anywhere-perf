@@ -11,6 +11,7 @@ import {
   PAPER,
   VERMILION,
 } from '@/theme/theme'
+import { CloseIcon } from './icons'
 import { InkLabel, InkSwitch } from './ink'
 
 export const FilenameRulesSettings = () => {
@@ -197,14 +198,14 @@ export const FilenameRulesSettings = () => {
                   color: alpha(PAPER, 0.6),
                   fontSize: 12,
                   fontWeight: 900,
-                  transition: 'all 100ms steps(1)',
+                  transition: 'all 0ms',
                   '&:hover': {
                     border: `2px solid ${VERMILION}`,
                     color: VERMILION,
                   },
                 }}
               >
-                ✕
+                <CloseIcon size={10} />
               </Box>
             </Box>
           ))}
@@ -227,7 +228,7 @@ export const FilenameRulesSettings = () => {
             fontSize: 12,
             fontWeight: 900,
             boxShadow: hardShadow(3, INK),
-            transition: 'all 100ms steps(1)',
+            transition: 'all 0ms',
             '&:hover': {
               background: VERMILION,
               color: PAPER,

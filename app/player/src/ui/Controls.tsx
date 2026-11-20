@@ -14,12 +14,27 @@ import { usePlayerStore } from '@/store/playerStore'
 import type { TargetResolution } from '@/store/settings'
 import {
   INK,
+  inkStampPressSx,
+  LINE_STRONG,
   MONO,
+  MOTION_BANNER,
+  MOTION_PANEL,
+  MOTION_PRESS,
   OVERLAY_GRADIENT,
   PAPER,
   SERIF_JP,
   VERMILION,
 } from '@/theme/theme'
+import {
+  ExitFullscreenIcon,
+  FullscreenIcon,
+  MiniPlayerIcon,
+  NextIcon,
+  PauseIcon,
+  PlayIcon,
+  PrevIcon,
+  SkipForwardIcon,
+} from './icons'
 import { ProgressBar } from './ProgressBar'
 import {
   DanmakuQuickButton,
@@ -52,7 +67,7 @@ const squareSx = {
   appearance: 'none',
   width: 38,
   height: 38,
-  border: `2px solid ${alpha(PAPER, 0.6)}`,
+  border: LINE_STRONG,
   background: 'transparent',
   color: PAPER,
   fontSize: 13,
@@ -63,7 +78,7 @@ const squareSx = {
   flexShrink: 0,
   padding: 0,
   lineHeight: 1,
-  transition: 'background-color 100ms steps(1), color 100ms steps(1)',
+  transition: 'background-color 0ms, color 0ms',
   '&:hover': { background: PAPER, color: INK },
   '&:disabled': { opacity: 0.35, cursor: 'default' },
   '&:disabled:hover': { background: 'transparent', color: PAPER },
@@ -97,6 +112,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
   const upscaleStatus = usePlayerStore((s) => s.upscaleStatus)
 
   const [rateAnchor, setRateAnchor] = useState<HTMLElement | null>(null)
+  const [densityHover, setDensityHover] = useState<number | null>(null)
   const barRef = useRef<HTMLDivElement | null>(null)
   const [barHeight, setBarHeight] = useState(0)
 
@@ -177,19 +193,35 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
   // centre of the video, repeating what the top-bar badge and the danmaku
   // button already say.
   const [bannerVisible, setBannerVisible] = useState(false)
+  const [bannerMounted, setBannerMounted] = useState(false)
   const sourceKey = danmakuSource
     ? `${danmakuSource.label}|${danmakuSource.count}`
     : null
   useEffect(() => {
     if (!sourceKey) {
       setBannerVisible(false)
+      setBannerMounted(false)
       return
     }
-    setBannerVisible(true)
+    setBannerMounted(true)
+    // Mount at opacity 0, then flip on the next frame so the slide-down fade
+    // actually has a starting frame to transition from.
+    setBannerVisible(false)
+    const enter = window.requestAnimationFrame(() => setBannerVisible(true))
     const timer = window.setTimeout(() => setBannerVisible(false), 3500)
-    return () => window.clearTimeout(timer)
+    return () => {
+      window.cancelAnimationFrame(enter)
+      window.clearTimeout(timer)
+    }
   }, [sourceKey])
-  const showBanner = danmakuSource !== null && bannerVisible
+  // Keep the banner mounted for the exit transition instead of vanishing on
+  // the same frame its timer fires.
+  useEffect(() => {
+    if (bannerVisible || !bannerMounted) return
+    const timer = window.setTimeout(() => setBannerMounted(false), 160)
+    return () => window.clearTimeout(timer)
+  }, [bannerVisible, bannerMounted])
+  const showBanner = danmakuSource !== null && bannerMounted
 
   // OP/ED marks for the skip-OP button.
   const { opEnd } = useOpEdMarks(comments, duration)
@@ -220,9 +252,15 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
 
   const fade = {
     opacity: visible ? 1 : 0,
-    transition: 'opacity 220ms ease',
+    transition: `opacity ${MOTION_PANEL}`,
     pointerEvents: visible ? ('auto' as const) : ('none' as const),
   }
+
+  const playedRatio = duration > 0 ? currentTime / duration : 0
+  const hoveredBucket =
+    densityHover === null
+      ? -1
+      : Math.min(47, Math.max(0, Math.floor(densityHover * 48)))
 
   return (
     <>
@@ -277,16 +315,24 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             position: 'absolute',
             top: OVERLAY_TOP,
             left: '50%',
-            transform: 'translateX(-50%)',
             zIndex: 15,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             gap: '2px',
             background: alpha(INK, 0.7),
-            border: `2px solid ${PAPER}`,
+            border: LINE_STRONG,
             padding: '4px 12px 6px',
             pointerEvents: 'none',
+            opacity: bannerVisible ? 1 : 0,
+            transform: bannerVisible
+              ? 'translate(-50%, 0)'
+              : 'translate(-50%, -6px)',
+            transition: `opacity ${MOTION_BANNER}, transform ${MOTION_BANNER}`,
+            '@media (prefers-reduced-motion: reduce)': {
+              transform: 'translate(-50%, 0)',
+              transition: 'opacity 120ms linear',
+            },
           }}
         >
           <Box
@@ -328,7 +374,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             right: 26,
             zIndex: 15,
             background: alpha(INK, 0.82),
-            border: `2px solid ${PAPER}`,
+            border: LINE_STRONG,
             padding: '8px 12px 10px',
             display: 'flex',
             gap: '18px',
@@ -356,6 +402,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
                 fontWeight: 700,
                 color: PAPER,
                 lineHeight: 1,
+                fontVariantNumeric: 'tabular-nums',
               }}
             >
               {upscaleStats.fps}
@@ -378,6 +425,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
                     interpolationStatus === 'fallback'
                       ? VERMILION
                       : alpha(PAPER, 0.45),
+                  fontVariantNumeric: 'tabular-nums',
                 }}
               >
                 {interpolationStatus === 'fallback'
@@ -406,6 +454,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
                 fontWeight: 700,
                 color: PAPER,
                 lineHeight: 1.6,
+                fontVariantNumeric: 'tabular-nums',
               }}
             >
               {SCALE_LABEL[upscale.targetResolution]}
@@ -431,6 +480,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
                 fontWeight: 700,
                 color: PAPER,
                 lineHeight: 1.6,
+                fontVariantNumeric: 'tabular-nums',
               }}
             >
               {upscaleStats.cpuFrameMs > 0
@@ -458,7 +508,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             bottom: (visible ? barHeight : 0) + 18,
             zIndex: 31,
             appearance: 'none',
-            border: `2px solid ${PAPER}`,
+            border: LINE_STRONG,
             background: alpha(INK, 0.78),
             color: PAPER,
             fontSize: 13,
@@ -466,23 +516,29 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             padding: '8px 14px',
             cursor: 'pointer',
             letterSpacing: '0.06em',
-            boxShadow: `4px 4px 0 ${VERMILION}`,
-            transition:
-              'background-color 100ms steps(1), color 100ms steps(1), bottom 220ms ease',
-            '&:hover': { background: PAPER, color: INK },
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '7px',
+            ...inkStampPressSx(4, VERMILION, {
+              background: PAPER,
+              color: INK,
+            }),
+            transition: `transform ${MOTION_PRESS}, box-shadow ${MOTION_PRESS}, background-color 0ms, color 0ms, border-color 0ms, bottom ${MOTION_PANEL}`,
           }}
         >
-          跳过 OP ▶︎{' '}
+          跳过 OP
           <Box
             component="span"
             sx={{
               fontFamily: MONO,
               fontSize: 11,
               opacity: 0.7,
+              fontVariantNumeric: 'tabular-nums',
             }}
           >
             {peakClock(opEnd ?? 0)}
           </Box>
+          <SkipForwardIcon size={13} />
         </Box>
       )}
 
@@ -500,7 +556,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
           background: OVERLAY_GRADIENT,
           opacity: visible ? 1 : 0,
           transform: visible ? 'translateY(0)' : 'translateY(12px)',
-          transition: 'opacity 220ms ease, transform 220ms ease',
+          transition: `opacity ${MOTION_PANEL}, transform ${MOTION_PANEL}`,
           pointerEvents: visible ? 'auto' : 'none',
         }}
       >
@@ -516,18 +572,30 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
                   marginBottom: '5px',
                 }}
               >
-                {density.bins.map((count, i) => (
-                  <Box
-                    key={`bin-${i}`}
-                    sx={{
-                      flex: 1,
-                      minHeight: 2,
-                      height: `${(count / density.max) * 100}%`,
-                      opacity: 0.9,
-                      background: `linear-gradient(to top, ${VERMILION}, ${alpha(PAPER, 0.85)})`,
-                    }}
-                  />
-                ))}
+                {density.bins.map((count, i) => {
+                  const played = (i + 0.5) / density.bins.length <= playedRatio
+                  const hovered = i === hoveredBucket
+                  return (
+                    <Box
+                      key={`bin-${i}`}
+                      sx={{
+                        flex: 1,
+                        minHeight: 2,
+                        height: `${(count / density.max) * 100}%`,
+                        opacity: played ? 1 : hovered ? 0.78 : 0.42,
+                        background: played
+                          ? `linear-gradient(to top, ${VERMILION}, ${alpha(PAPER, 0.92)})`
+                          : alpha(PAPER, hovered ? 0.38 : 0.12),
+                        outline: hovered ? `2px solid ${PAPER}` : 'none',
+                        outlineOffset: 1,
+                        position: 'relative',
+                        zIndex: hovered ? 1 : 0,
+                        transition:
+                          'background 0ms, opacity 0ms, outline-color 0ms',
+                      }}
+                    />
+                  )
+                })}
               </Box>
               <Box
                 sx={{
@@ -562,7 +630,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             </>
           )}
 
-          <ProgressBar />
+          <ProgressBar onHoverRatio={setDensityHover} />
         </Box>
 
         {/* control row */}
@@ -584,10 +652,9 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
               appearance: 'none',
               width: 46,
               height: 46,
-              border: `2px solid ${PAPER}`,
+              border: LINE_STRONG,
               background: PAPER,
               color: INK,
-              fontSize: 17,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -595,13 +662,13 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
               flexShrink: 0,
               padding: 0,
               lineHeight: 1,
-              boxShadow: `4px 4px 0 ${VERMILION}`,
-              transition:
-                'background-color 100ms steps(1), color 100ms steps(1)',
-              '&:hover': { background: VERMILION, color: PAPER },
+              ...inkStampPressSx(4, VERMILION, {
+                background: VERMILION,
+                color: PAPER,
+              }),
             }}
           >
-            {playing ? '❚❚' : '▶'}
+            {playing ? <PauseIcon size={17} /> : <PlayIcon size={17} />}
           </Box>
 
           <Box
@@ -610,9 +677,9 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             aria-label="上一个 / Previous"
             disabled={!canPrev}
             onClick={() => commands.playlistPrev()}
-            sx={{ ...squareSx, fontSize: 12 }}
+            sx={squareSx}
           >
-            |◀
+            <PrevIcon size={16} />
           </Box>
           <Box
             component="button"
@@ -620,9 +687,9 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             aria-label="下一个 / Next"
             disabled={!canNext}
             onClick={() => commands.playlistNext()}
-            sx={{ ...squareSx, fontSize: 12 }}
+            sx={squareSx}
           >
-            ▶|
+            <NextIcon size={16} />
           </Box>
 
           <TimeDisplay />
@@ -639,7 +706,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             }
             sx={{
               appearance: 'none',
-              border: `2px solid ${alpha(PAPER, 0.6)}`,
+              border: LINE_STRONG,
               background: 'transparent',
               color: playbackRate !== 1 ? VERMILION : PAPER,
               fontFamily: MONO,
@@ -649,8 +716,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
               cursor: 'pointer',
               flexShrink: 0,
               whiteSpace: 'nowrap',
-              transition:
-                'background-color 100ms steps(1), color 100ms steps(1)',
+              transition: 'background-color 0ms, color 0ms',
               '&:hover': { background: PAPER, color: INK },
             }}
           >
@@ -692,7 +758,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
               onClick={() => void commands.toggleMiniPlayer()}
               sx={squareSx}
             >
-              ▣
+              <MiniPlayerIcon size={16} />
             </Box>
           )}
 
@@ -705,7 +771,11 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             onClick={() => commands.toggleFullscreen()}
             sx={squareSx}
           >
-            ⛶
+            {fullscreen ? (
+              <ExitFullscreenIcon size={17} />
+            ) : (
+              <FullscreenIcon size={17} />
+            )}
           </Box>
         </Box>
       </Box>

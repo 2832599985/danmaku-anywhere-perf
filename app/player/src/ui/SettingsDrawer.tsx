@@ -5,12 +5,19 @@ import { usePlayerStore } from '@/store/playerStore'
 import {
   INK,
   INK_STAGE,
+  inkStampPressSx,
+  LINE_FRAME,
   LINE_STRONG,
+  LINE_SUBTLE,
   MONO,
+  MOTION_PANEL,
+  MOTION_SUBPAGE,
   PAPER,
   VERMILION,
 } from '@/theme/theme'
 import { DanmakuSettings } from './DanmakuSettings'
+import { MinusIcon, PlusIcon } from './icons'
+import { InkSwitch } from './ink'
 import { SubtitleSettings } from './SubtitleSettings'
 import { UpscaleSettings } from './UpscaleSettings'
 
@@ -71,7 +78,7 @@ const StepperCard = ({
   <Box
     sx={{
       flex: 1,
-      border: LINE_STRONG,
+      border: LINE_SUBTLE,
       background: alpha(PAPER, 0.04),
       padding: '14px',
       display: 'flex',
@@ -119,14 +126,17 @@ const StepperCard = ({
           color: PAPER,
           cursor: 'pointer',
           fontWeight: 700,
-          transition: 'all 100ms steps(1)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'background-color 0ms, color 0ms, border-color 0ms',
           '&:hover': {
             background: PAPER,
             color: INK,
           },
         }}
       >
-        −
+        <MinusIcon size={16} />
       </Box>
       <Box sx={{ minWidth: 74, textAlign: 'center' }}>
         <Typography
@@ -167,16 +177,17 @@ const StepperCard = ({
           color: INK,
           cursor: 'pointer',
           fontWeight: 700,
-          boxShadow: `3px 3px 0 ${VERMILION}`,
-          transition: 'all 100ms steps(1)',
-          '&:hover': {
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          ...inkStampPressSx(3, VERMILION, {
             background: VERMILION,
             color: PAPER,
             borderColor: VERMILION,
-          },
+          }),
         }}
       >
-        ＋
+        <PlusIcon size={16} />
       </Box>
     </Stack>
   </Box>
@@ -194,7 +205,7 @@ const ToggleRow = ({
   on: boolean
   onToggle: () => void
 }) => (
-  <Box sx={{ border: LINE_STRONG, padding: '16px 12px' }}>
+  <Box sx={{ border: LINE_SUBTLE, padding: '16px 12px' }}>
     <Stack
       direction="row"
       alignItems="center"
@@ -219,28 +230,7 @@ const ToggleRow = ({
           </Typography>
         )}
       </Box>
-      <Box
-        component="button"
-        type="button"
-        onClick={onToggle}
-        sx={{
-          appearance: 'none',
-          cursor: 'pointer',
-          padding: '4px 9px',
-          border: LINE_STRONG,
-          background: on ? VERMILION : 'transparent',
-          color: on ? PAPER : alpha(PAPER, 0.4),
-          fontFamily: MONO,
-          fontSize: 11,
-          fontWeight: 700,
-          textTransform: 'uppercase',
-          letterSpacing: '0.08em',
-          transition: 'all 100ms steps(1)',
-          '&:hover': { borderColor: PAPER },
-        }}
-      >
-        {on ? 'ON' : 'OFF'}
-      </Box>
+      <InkSwitch checked={on} onChange={onToggle} label={label} />
     </Stack>
   </Box>
 )
@@ -254,7 +244,7 @@ const SkipOpEdCard = () => {
     <Box
       sx={{
         flex: 1,
-        border: LINE_STRONG,
+        border: LINE_SUBTLE,
         background: alpha(PAPER, 0.04),
         padding: '14px',
         display: 'flex',
@@ -312,7 +302,7 @@ const SkipOpEdCard = () => {
                 cursor: 'pointer',
                 background: active ? VERMILION : 'transparent',
                 color: active ? PAPER : alpha(PAPER, 0.4),
-                transition: 'all 100ms steps(1)',
+                transition: 'all 0ms',
               }}
             >
               {mode}
@@ -547,6 +537,8 @@ export const SettingsDrawer = () => {
           background: INK_STAGE,
           display: 'flex',
           zIndex: 1300,
+          animation: `ink-panel-in ${MOTION_PANEL}`,
+          '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
         }}
       >
         {/* Left navigation rail */}
@@ -605,11 +597,15 @@ export const SettingsDrawer = () => {
                     appearance: 'none',
                     cursor: 'pointer',
                     padding: '8px 12px',
-                    border: isSelected ? `5px solid ${VERMILION}` : 'none',
+                    border: 0,
+                    borderLeft: isSelected
+                      ? `5px solid ${VERMILION}`
+                      : '5px solid transparent',
                     background: isSelected ? PAPER : 'transparent',
                     color: isSelected ? INK : alpha(PAPER, 0.5),
                     textAlign: 'left',
-                    transition: 'all 100ms steps(1)',
+                    transition:
+                      'background-color 0ms, color 0ms, border-color 0ms',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '1px',
@@ -683,7 +679,7 @@ export const SettingsDrawer = () => {
             justifyContent="space-between"
             sx={{
               padding: '16px 24px',
-              borderBottom: `3px solid ${PAPER}`,
+              borderBottom: LINE_FRAME,
               flexShrink: 0,
             }}
           >
@@ -735,6 +731,8 @@ export const SettingsDrawer = () => {
               overflowY: 'auto',
               padding: '24px 28px',
               minWidth: 0,
+              animation: `ink-settings-page-in ${MOTION_SUBPAGE}`,
+              '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
             }}
           >
             {page === 'playback' && <PlaybackSettingsPage />}

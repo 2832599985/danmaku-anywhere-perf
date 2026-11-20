@@ -14,8 +14,7 @@ import {
   GREEN,
   hardShadow,
   INK,
-  LINE_STRONG,
-  LINE_WEAK,
+  LINE_SUBTLE,
   MONO,
   PAPER,
   VERMILION,
@@ -224,14 +223,13 @@ export const UpscaleSettings = () => {
                   cursor: 'pointer',
                   position: 'relative',
                   padding: '12px 8px',
-                  border: isActive ? `3px solid ${VERMILION}` : LINE_WEAK,
+                  border: isActive ? `3px solid ${VERMILION}` : LINE_SUBTLE,
                   background: isActive ? alpha(VERMILION, 0.12) : 'transparent',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
                   gap: '4px',
-                  transition:
-                    'border 100ms steps(1), background-color 100ms steps(1)',
+                  transition: 'border 0ms, background-color 0ms',
                   '&:hover': isActive
                     ? {}
                     : { borderColor: PAPER, borderStyle: 'solid' },
@@ -285,7 +283,7 @@ export const UpscaleSettings = () => {
       </InkSection>
 
       {/* Master block */}
-      <Box sx={{ border: LINE_STRONG, padding: '12px' }}>
+      <Box sx={{ border: LINE_SUBTLE, padding: '12px' }}>
         <Stack spacing={1.5}>
           <Stack
             direction="row"
@@ -317,7 +315,7 @@ export const UpscaleSettings = () => {
               gap: '8px',
               padding: '6px 8px',
               background: INK,
-              border: LINE_WEAK,
+              border: LINE_SUBTLE,
               minHeight: 28,
             }}
           >
@@ -608,7 +606,7 @@ export const UpscaleSettings = () => {
 
       {/* Live HUD */}
       {upscaleStatus === 'active' && upscaleStats !== null && (
-        <Box sx={{ border: LINE_STRONG, padding: '12px' }}>
+        <Box sx={{ border: LINE_SUBTLE, padding: '12px' }}>
           <Stack spacing={1.5}>
             <Stack
               direction="row"

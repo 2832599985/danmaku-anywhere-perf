@@ -1,6 +1,12 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test } from '@playwright/test'
+import type { PlayerCommands } from '../src/player/commands'
+import type { usePlayerStore } from '../src/store/playerStore'
+
+type PlayerWindow = Window & {
+  __player: { commands: PlayerCommands; store: typeof usePlayerStore }
+}
 
 /**
  * Row spacing regression. With the engine's old fixed 32px tracks, a 26px font
@@ -52,13 +58,11 @@ test('danmaku rows never overlap, whatever the font size', async ({ page }) => {
   await page.evaluate((b64) => {
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
     const url = URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' }))
-    const w = window as unknown as {
-      __player: { store: { getState: () => any } }
-    }
+    const w = window as unknown as PlayerWindow
     w.__player.store.getState().setMedia({ url, name: 'test.mp4' })
   }, videoBase64)
 
-  await page.evaluate(() => (window as any).__player.commands.play())
+  await page.evaluate(() => (window as PlayerWindow).__player.commands.play())
   await expect
     .poll(
       async () =>
@@ -78,12 +82,12 @@ test('danmaku rows never overlap, whatever the font size', async ({ page }) => {
     })
     // Set the size FIRST, then mount: every node is created at that size.
     await page.evaluate((size) => {
-      ;(window as any).__player.store
+      ;(window as PlayerWindow).__player.store
         .getState()
         .updateDanmakuSettings({ fontSize: size })
     }, fontSize)
     await page.evaluate((comments) => {
-      ;(window as any).__player.store
+      ;(window as PlayerWindow).__player.store
         .getState()
         .setComments(comments, { label: 'e2e', count: comments.length })
     }, BURST)

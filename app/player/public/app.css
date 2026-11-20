@@ -44,20 +44,75 @@ body,
     opacity: 0.25;
   }
 }
-@keyframes ink-tone {
+/* Crisp comic-panel motion. 120–160ms, one decelerating curve. */
+@keyframes ink-panel-in {
   from {
-    background-position: 0 0;
+    opacity: 0;
+    transform: translateY(6px);
   }
   to {
-    background-position: 14px 14px;
+    opacity: 1;
+    transform: translateY(0);
   }
 }
-@keyframes ink-sweep {
-  0% {
-    transform: translateX(-60%);
+@keyframes ink-panel-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
   }
-  100% {
-    transform: translateX(360%);
+  to {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Quick-panel storyboard rise (the popover anchors upward). */
+@keyframes ink-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Settings sub-page cross-cut: a short upward settle, never a full slide. */
+@keyframes ink-settings-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes ink-page-in {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes ink-modal-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes ink-modal-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
   }
 }
 @keyframes ink-sparkle {
@@ -185,4 +240,22 @@ body,
 }
 .sub-root:not(.sub-outline) .sub-line {
   text-shadow: 0 0 0.12em rgba(10, 10, 12, 0.9);
+}
+
+/* ---------------------------------------------------------------------------
+ * Reduced motion — the stage stays legible and calm. Continuous drifts,
+ * sparkles, blinks and stamp transforms become static; opacity changes remain
+ * effectively instantaneous rather than looping forever.
+ * ------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
 }

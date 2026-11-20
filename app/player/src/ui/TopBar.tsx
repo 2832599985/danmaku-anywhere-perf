@@ -3,7 +3,18 @@ import type { ReactNode } from 'react'
 import type { Platform } from '@/platform'
 import { usePlayerCommands } from '@/player/commands'
 import { usePlayerStore } from '@/store/playerStore'
-import { GOLD, INK, MONO, PAPER, SANS, VERMILION } from '@/theme/theme'
+import {
+  GOLD,
+  INK,
+  LINE_STRONG,
+  LINE_SUBTLE,
+  MONO,
+  MOTION_PANEL,
+  PAPER,
+  SANS,
+  VERMILION,
+} from '@/theme/theme'
+import { CloseIcon, MaximizeIcon, MinimizeIcon, PlayIcon } from './icons'
 
 interface TopBarProps {
   /** When false, the bar fades and slides up out of view. */
@@ -19,7 +30,7 @@ const dragRegion = { 'data-tauri-drag-region': true }
 const barButtonSx = {
   appearance: 'none',
   border: 0,
-  borderLeft: `1px solid ${alpha(PAPER, 0.14)}`,
+  borderLeft: LINE_SUBTLE,
   background: 'transparent',
   color: alpha(PAPER, 0.8),
   fontFamily: SANS,
@@ -32,7 +43,7 @@ const barButtonSx = {
   flexShrink: 0,
   display: 'flex',
   alignItems: 'center',
-  transition: 'background-color 100ms steps(1), color 100ms steps(1)',
+  transition: 'background-color 0ms, color 0ms',
   '&:hover': { background: PAPER, color: INK },
 } as const
 
@@ -90,22 +101,22 @@ export const TopBar = ({ visible, platform }: TopBarProps) => {
 
   const chrome = [
     {
-      glyph: '─',
-      size: 14,
+      id: 'minimize',
+      icon: MinimizeIcon,
       label: '最小化 / Minimize',
       onClick: () => platform.minimizeWindow(),
       danger: false,
     },
     {
-      glyph: '□',
-      size: 12,
+      id: 'maximize',
+      icon: MaximizeIcon,
       label: '最大化 / Maximize',
       onClick: () => platform.toggleMaximizeWindow(),
       danger: false,
     },
     {
-      glyph: '✕',
-      size: 14,
+      id: 'close',
+      icon: CloseIcon,
       label: '关闭 / Close',
       onClick: () => platform.closeWindow(),
       danger: true,
@@ -123,13 +134,13 @@ export const TopBar = ({ visible, platform }: TopBarProps) => {
         zIndex: 40,
         height: 48,
         background: INK,
-        borderBottom: `2px solid ${PAPER}`,
+        borderBottom: LINE_STRONG,
         display: 'flex',
         alignItems: 'center',
         paddingLeft: '12px',
         opacity: visible ? 1 : 0,
         transform: visible ? 'translateY(0)' : 'translateY(-48px)',
-        transition: 'opacity 180ms steps(1), transform 180ms steps(1)',
+        transition: `opacity ${MOTION_PANEL}, transform ${MOTION_PANEL}`,
         pointerEvents: visible ? 'auto' : 'none',
       }}
     >
@@ -158,7 +169,7 @@ export const TopBar = ({ visible, platform }: TopBarProps) => {
             flexShrink: 0,
           }}
         >
-          ▶
+          <PlayIcon size={14} strokeWidth={2.5} />
         </Box>
         <Box
           component="span"
@@ -240,6 +251,7 @@ export const TopBar = ({ visible, platform }: TopBarProps) => {
             component="button"
             type="button"
             onClick={a.onClick}
+            aria-label={`${a.glyph} ${a.label}`}
             sx={{ ...barButtonSx, gap: '6px' }}
           >
             <Box component="span" sx={{ opacity: 0.7 }}>
@@ -252,23 +264,23 @@ export const TopBar = ({ visible, platform }: TopBarProps) => {
         {platform.isTauri &&
           chrome.map((c) => (
             <Box
-              key={c.glyph}
+              key={c.id}
               component="button"
               type="button"
               aria-label={c.label}
               onClick={c.onClick}
               sx={{
                 ...barButtonSx,
-                fontFamily: MONO,
-                fontSize: c.size,
                 color: alpha(PAPER, 0.75),
-                padding: '0 15px',
+                width: 46,
+                padding: 0,
+                justifyContent: 'center',
                 ...(c.danger && {
                   '&:hover': { background: VERMILION, color: PAPER },
                 }),
               }}
             >
-              {c.glyph}
+              <c.icon size={16} />
             </Box>
           ))}
       </Box>

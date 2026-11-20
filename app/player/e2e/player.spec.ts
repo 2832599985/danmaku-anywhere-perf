@@ -50,9 +50,7 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
   await page.evaluate((b64) => {
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
     const url = URL.createObjectURL(new Blob([bytes], { type: 'video/mp4' }))
-    const w = window as unknown as {
-      __player: { store: { getState: () => any } }
-    }
+    const w = window as unknown as PlayerWindow
     w.__player.store.getState().setMedia({ url, name: 'test.mp4' })
   }, videoBase64)
 
@@ -81,7 +79,7 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
   expect(meta?.duration).toBeGreaterThan(9)
 
   // --- play ---
-  await page.evaluate(() => (window as any).__player.commands.play())
+  await page.evaluate(() => (window as PlayerWindow).__player.commands.play())
   await expect
     .poll(async () => (await readVideo())?.currentTime ?? 0, {
       timeout: 10_000,
@@ -90,7 +88,7 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
 
   // --- 1b: danmaku mounting ---
   await page.evaluate((comments) => {
-    ;(window as any).__player.store
+    ;(window as PlayerWindow).__player.store
       .getState()
       .setComments(comments, { label: 'e2e', count: comments.length })
   }, SAMPLE_COMMENTS)
@@ -102,7 +100,9 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
   expect(danmakuCount).toBeGreaterThan(0)
 
   // --- 2a/2c: volume via ArrowUp/ArrowDown ---
-  await page.evaluate(() => (window as any).__player.commands.setVolume(0.5))
+  await page.evaluate(() =>
+    (window as PlayerWindow).__player.commands.setVolume(0.5)
+  )
   // A real key press is keydown + keyup. The right-arrow seek now fires on
   // keyup (so a hold can be distinguished from a tap), so a faithful press
   // must dispatch both.
@@ -176,10 +176,10 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
 
   // --- 2b: seek via ArrowLeft/ArrowRight (step = 1s, paused for determinism) ---
   await page.evaluate(() => {
-    const s = (window as any).__player.store.getState()
+    const s = (window as PlayerWindow).__player.store.getState()
     s.updatePlaybackSettings({ seekStepSec: 1 })
-    ;(window as any).__player.commands.pause()
-    ;(window as any).__player.commands.seekTo(3)
+    ;(window as PlayerWindow).__player.commands.pause()
+    ;(window as PlayerWindow).__player.commands.seekTo(3)
   })
   await expect
     .poll(async () => (await readVideo())?.currentTime ?? 0)
@@ -199,7 +199,7 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
   // the *global* rate, not 1×. The video stays paused here, which also lets us
   // assert that a hold does NOT seek (currentTime is frozen while paused).
   await page.evaluate(() =>
-    (window as any).__player.commands.setPlaybackRate(1.5)
+    (window as PlayerWindow).__player.commands.setPlaybackRate(1.5)
   )
   await expect.poll(readRate, { timeout: 5_000 }).toBe(1.5)
   const tBeforeHold = (await readVideo())?.currentTime ?? 0
@@ -224,7 +224,9 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
     .toBeGreaterThan(tBeforeHold + 0.5)
 
   // --- 2e: hold left arrow = rewind at holdSpeed, release keeps it paused ---
-  await page.evaluate(() => (window as any).__player.commands.seekTo(5))
+  await page.evaluate(() =>
+    (window as PlayerWindow).__player.commands.seekTo(5)
+  )
   await expect
     .poll(async () => (await readVideo())?.currentTime ?? 0)
     .toBeGreaterThan(4.5)
@@ -268,15 +270,21 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
 
   // restore the default rate so the GPU tests below aren't run at 1.5×
   await page.evaluate(() =>
-    (window as any).__player.commands.setPlaybackRate(1)
+    (window as PlayerWindow).__player.commands.setPlaybackRate(1)
   )
 
   // resume playback for the GPU tests (video must be a live texture source)
-  await page.evaluate(() => (window as any).__player.commands.play())
+  await page.evaluate(() => (window as PlayerWindow).__player.commands.play())
 
   // --- 1c/1d: upscale + interpolation (WebGPU) ---
   const gpu = await page.evaluate(async () => {
-    const nav = navigator as any
+    const nav = navigator as Navigator & {
+      gpu?: {
+        requestAdapter: () => Promise<{
+          features: { has: (feature: string) => boolean }
+        } | null>
+      }
+    }
     if (!nav.gpu) return { adapter: false, shaderF16: false }
     try {
       const adapter = await nav.gpu.requestAdapter()
@@ -292,7 +300,7 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
 
   if (gpu.adapter) {
     await page.evaluate(() => {
-      ;(window as any).__player.store.getState().updateUpscale({
+      ;(window as PlayerWindow).__player.store.getState().updateUpscale({
         enabled: true,
         modeId: 'builtin-mode-a',
         targetResolution: 'x2',

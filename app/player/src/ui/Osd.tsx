@@ -1,8 +1,17 @@
-import { Box, Fade, Stack, Typography } from '@mui/material'
+import { Box, Stack, Typography } from '@mui/material'
 import { useEffect, useState } from 'react'
 import type { OsdMessage } from '@/store/playerStore'
 import { usePlayerStore } from '@/store/playerStore'
-import { INK, LINE_STRONG, MONO, PAPER } from '@/theme/theme'
+import {
+  hardShadow,
+  INK,
+  LINE_STRONG,
+  MONO,
+  MOTION_STAMP_IN,
+  MOTION_STAMP_OUT,
+  PAPER,
+  VERMILION,
+} from '@/theme/theme'
 
 const OSD_DURATION = 900
 
@@ -15,6 +24,8 @@ export const Osd = () => {
   const clearOsd = usePlayerStore((s) => s.clearOsd)
   // keep last content mounted through the fade-out after `osd` clears
   const [content, setContent] = useState<OsdMessage | null>(osd)
+  const visible = Boolean(osd)
+  const display = osd ?? content
 
   useEffect(() => {
     if (osd) setContent(osd)
@@ -38,47 +49,55 @@ export const Osd = () => {
         zIndex: 30,
       }}
     >
-      <Fade in={Boolean(osd)} timeout={{ enter: 120, exit: 320 }}>
-        <Stack
-          direction="row"
-          alignItems="center"
-          spacing={1}
-          sx={{
-            background: INK,
-            border: LINE_STRONG,
-            px: 2,
-            py: 1.25,
-            minWidth: 120,
-            justifyContent: 'center',
-          }}
-        >
-          {content?.icon && (
-            <Typography
-              component="span"
-              sx={{
-                fontSize: 26,
-                lineHeight: 1,
-                color: PAPER,
-              }}
-            >
-              {content.icon}
-            </Typography>
-          )}
+      <Stack
+        direction="row"
+        alignItems="center"
+        spacing={1}
+        role="status"
+        aria-live="polite"
+        sx={{
+          background: INK,
+          border: LINE_STRONG,
+          boxShadow: hardShadow(4, VERMILION),
+          px: 2,
+          py: 1.25,
+          minWidth: 120,
+          justifyContent: 'center',
+          opacity: visible ? 1 : 0,
+          transform: visible ? 'scale(1)' : 'scale(0.92)',
+          transition: `opacity ${visible ? MOTION_STAMP_IN : MOTION_STAMP_OUT}, transform ${visible ? MOTION_STAMP_IN : MOTION_STAMP_OUT}`,
+          '@media (prefers-reduced-motion: reduce)': {
+            transform: 'none',
+            transition: 'opacity 120ms linear',
+          },
+        }}
+      >
+        {display?.icon && (
           <Typography
             component="span"
             sx={{
-              fontSize: 18,
-              fontWeight: 700,
-              fontFamily: MONO,
+              fontSize: 26,
+              lineHeight: 1,
               color: PAPER,
-              fontVariantNumeric: 'tabular-nums',
-              whiteSpace: 'nowrap',
             }}
           >
-            {content?.text}
+            {display.icon}
           </Typography>
-        </Stack>
-      </Fade>
+        )}
+        <Typography
+          component="span"
+          sx={{
+            fontSize: 18,
+            fontWeight: 700,
+            fontFamily: MONO,
+            color: PAPER,
+            fontVariantNumeric: 'tabular-nums',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {display?.text}
+        </Typography>
+      </Stack>
     </Box>
   )
 }

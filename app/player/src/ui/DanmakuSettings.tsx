@@ -15,12 +15,14 @@ import {
   hatchSx,
   INK,
   LINE_STRONG,
+  LINE_SUBTLE,
   LINE_WEAK,
   MONO,
   PAPER,
   VERMILION,
 } from '@/theme/theme'
 import { FilenameRulesSettings } from './FilenameRulesSettings'
+import { CloseIcon, PlusIcon } from './icons'
 import {
   InkLabel,
   InkLabeledSlider,
@@ -148,7 +150,7 @@ export const DanmakuSettings = () => {
 
       {/* ---------------------------------------------------------------- */}
       <InkSection zh="来源" en="SOURCE">
-        <Box sx={{ border: LINE_STRONG, padding: '12px' }}>
+        <Box sx={{ border: LINE_SUBTLE, padding: '12px' }}>
           <Stack
             direction="row"
             alignItems="center"
@@ -307,7 +309,7 @@ export const DanmakuSettings = () => {
 
       {/* ---------------------------------------------------------------- */}
       <InkSection zh="匹配" en="MATCHING">
-        <Box sx={{ border: LINE_STRONG, padding: '12px' }}>
+        <Box sx={{ border: LINE_SUBTLE, padding: '12px' }}>
           <Stack
             direction="row"
             alignItems="center"
@@ -337,7 +339,7 @@ export const DanmakuSettings = () => {
 
         <Box
           sx={{
-            border: LINE_STRONG,
+            border: LINE_SUBTLE,
             padding: '12px',
             display: 'flex',
             flexDirection: 'column',
@@ -436,7 +438,7 @@ export const DanmakuSettings = () => {
               fontWeight: 700,
               textTransform: 'uppercase',
               letterSpacing: '0.08em',
-              transition: 'color 100ms steps(1)',
+              transition: 'color 0ms',
               '&:hover': {
                 color: PAPER,
               },
@@ -457,7 +459,7 @@ export const DanmakuSettings = () => {
                   alignItems: 'center',
                   gap: '4px',
                   padding: '4px 8px',
-                  border: LINE_WEAK,
+                  border: LINE_SUBTLE,
                   background: 'transparent',
                   borderRadius: 0,
                 }}
@@ -489,11 +491,11 @@ export const DanmakuSettings = () => {
                     color: alpha(PAPER, 0.6),
                     fontSize: 12,
                     fontWeight: 700,
-                    transition: 'color 100ms steps(1)',
+                    transition: 'color 0ms',
                     '&:hover': { color: VERMILION },
                   }}
                 >
-                  ✕
+                  <CloseIcon size={10} />
                 </Box>
               </Box>
             ))}
@@ -507,6 +509,9 @@ export const DanmakuSettings = () => {
                 sx={{
                   appearance: 'none',
                   cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
                   padding: '4px 8px',
                   border: `2px dashed ${alpha(PAPER, 0.3)}`,
                   background: 'transparent',
@@ -514,14 +519,15 @@ export const DanmakuSettings = () => {
                   fontFamily: MONO,
                   fontSize: 11,
                   fontWeight: 700,
-                  transition: 'border 100ms steps(1), color 100ms steps(1)',
+                  transition: 'border 0ms, color 0ms',
                   '&:hover': {
                     borderColor: PAPER,
                     color: PAPER,
                   },
                 }}
               >
-                ＋ 添加
+                <PlusIcon size={11} />
+                添加
               </Box>
             ) : (
               <Box sx={{ display: 'flex', gap: '4px' }}>
@@ -568,7 +574,7 @@ export const DanmakuSettings = () => {
                     color: PAPER,
                     fontSize: 11,
                     fontWeight: 700,
-                    transition: 'all 100ms steps(1)',
+                    transition: 'all 0ms',
                     '&:hover': {
                       background: PAPER,
                       color: INK,
@@ -600,14 +606,14 @@ const LabeledSwitch = ({
 }) => (
   <Box
     sx={{
-      border: checked ? `2px solid ${VERMILION}` : LINE_WEAK,
+      border: checked ? `2px solid ${VERMILION}` : LINE_SUBTLE,
       background: checked ? alpha(VERMILION, 0.1) : 'transparent',
       padding: '10px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
       gap: 1,
-      transition: 'border 100ms steps(1), background-color 100ms steps(1)',
+      transition: 'border 0ms, background-color 0ms',
     }}
   >
     <InkLabel zh={label} en={en} size={12} />

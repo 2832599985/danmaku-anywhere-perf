@@ -29,7 +29,7 @@ import {
   hatchSx,
   INK,
   LINE_STRONG,
-  LINE_WEAK,
+  LINE_SUBTLE,
   MONO,
   PAPER,
   VERMILION,
@@ -76,7 +76,7 @@ const LocalTab = ({ onDone }: { onDone: () => void }) => {
           color: alpha(PAPER, 0.6),
           fontSize: 12,
           fontWeight: 700,
-          transition: 'border 100ms steps(1), color 100ms steps(1)',
+          transition: 'border 0ms, color 0ms',
           '&:hover': {
             borderColor: PAPER,
             color: PAPER,
@@ -349,7 +349,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
             fontSize: 14,
             fontWeight: 900,
             boxShadow: hardShadow(4, PAPER),
-            transition: 'background 100ms steps(1), color 100ms steps(1)',
+            transition: 'background 0ms, color 0ms',
             flexShrink: 0,
             '&:hover:not(:disabled)': {
               background: PAPER,
@@ -447,7 +447,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                       ...hatchSx(),
                       width: 44,
                       height: 58,
-                      border: LINE_WEAK,
+                      border: LINE_SUBTLE,
                       flexShrink: 0,
                     }}
                   />
@@ -551,7 +551,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                             padding: '7px 4px',
                             border: isTarget
                               ? `3px solid ${VERMILION}`
-                              : LINE_WEAK,
+                              : LINE_SUBTLE,
                             background: isFetching
                               ? VERMILION
                               : isTarget
@@ -564,7 +564,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                                 : alpha(PAPER, 0.8),
                             fontSize: 11,
                             fontWeight: 700,
-                            transition: 'all 100ms steps(1)',
+                            transition: 'all 0ms',
                             boxShadow: isFetching ? hardShadow(3) : 'none',
                             display: 'flex',
                             alignItems: 'center',
@@ -600,12 +600,12 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                     appearance: 'none',
                     cursor: 'pointer',
                     padding: '4px 8px',
-                    border: LINE_WEAK,
+                    border: LINE_SUBTLE,
                     background: 'transparent',
                     color: alpha(PAPER, 0.6),
                     fontSize: 11,
                     fontWeight: 700,
-                    transition: 'border 100ms steps(1), color 100ms steps(1)',
+                    transition: 'border 0ms, color 0ms',
                     alignSelf: 'flex-start',
                     marginTop: '4px',
                     '&:hover': {
@@ -631,7 +631,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                   appearance: 'none',
                   cursor: 'pointer',
                   padding: '9px 11px',
-                  border: isBest ? `3px solid ${GREEN}` : LINE_WEAK,
+                  border: isBest ? `3px solid ${GREEN}` : LINE_SUBTLE,
                   background: 'transparent',
                   color: alpha(PAPER, 0.8),
                   fontSize: 12,
@@ -639,8 +639,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 1,
-                  transition:
-                    'border 100ms steps(1), background 100ms steps(1)',
+                  transition: 'border 0ms, background 0ms',
                   '&:hover': {
                     border: LINE_STRONG,
                     background: alpha(PAPER, 0.06),
@@ -652,7 +651,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                     ...hatchSx(),
                     width: 36,
                     height: 48,
-                    border: LINE_WEAK,
+                    border: LINE_SUBTLE,
                     flexShrink: 0,
                   }}
                 />
@@ -755,7 +754,7 @@ export const DanmakuSourceDialog = () => {
                 color: tab === btn.value ? INK : alpha(PAPER, 0.6),
                 fontSize: 12,
                 fontWeight: 700,
-                transition: 'all 100ms steps(1)',
+                transition: 'all 0ms',
                 '&:hover': {
                   background: tab === btn.value ? PAPER : alpha(PAPER, 0.06),
                 },
@@ -810,12 +809,12 @@ export const DanmakuSourceDialog = () => {
               appearance: 'none',
               cursor: 'pointer',
               padding: '7px 16px',
-              border: LINE_WEAK,
+              border: LINE_SUBTLE,
               background: 'transparent',
               color: alpha(PAPER, 0.8),
               fontSize: 12,
               fontWeight: 700,
-              transition: 'border 100ms steps(1), color 100ms steps(1)',
+              transition: 'border 0ms, color 0ms',
               '&:hover': {
                 border: LINE_STRONG,
                 color: PAPER,
