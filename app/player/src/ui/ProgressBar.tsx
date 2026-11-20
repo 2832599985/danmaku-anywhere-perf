@@ -15,6 +15,7 @@ import {
   PAPER,
   VERMILION,
 } from '@/theme/theme'
+import { InkLoadingTicks } from './ink'
 import { formatTime } from './TimeDisplay'
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n)
@@ -49,6 +50,9 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
   // The preview card's *visual* position follows the pointer immediately; only
   // the hidden decoder is rate-limited. `frameRatio` is the throttled target.
   const [frameRatio, setFrameRatio] = useState<number | null>(null)
+  // Whether the canvas holds a frame for the CURRENT `frameRatio`. The card
+  // shows a placeholder until the decoder reports one.
+  const [frameReady, setFrameReady] = useState(false)
   const frameTimer = useRef<number | null>(null)
   const lastFrameAt = useRef(0)
   const pendingFrame = useRef<number | null>(null)
@@ -190,9 +194,15 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
     []
   )
 
+  // The card is gone between hovers; the next one always starts undecoded.
+  useEffect(() => {
+    if (!showTip) setFrameReady(false)
+  }, [showTip])
+
   useEffect(() => {
     if (!showTip || !media || frameTime === null) return
     let cancelled = false
+    setFrameReady(false)
 
     if (!decoderRef.current) {
       const v = document.createElement('video')
@@ -212,7 +222,7 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
     const draw = () => {
       if (cancelled) return
       const canvas = canvasRef.current
-      if (!canvas || !decoder.videoWidth) return
+      if (!canvas || !decoder.videoWidth || decoder.readyState < 2) return
       const ctx = canvas.getContext('2d')
       if (!ctx) return
       const scale = Math.min(
@@ -228,17 +238,29 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
       } catch {
         // tainted/undecodable frame — keep the ink fill
       }
+      setFrameReady(true)
+    }
+    // A file the decoder rejects must not leave the card saying 解码中 forever.
+    const fail = () => {
+      if (!cancelled) setFrameReady(true)
     }
 
     decoder.addEventListener('seeked', draw)
+    decoder.addEventListener('loadeddata', draw)
+    decoder.addEventListener('error', fail)
     try {
-      decoder.currentTime = frameTime
+      // Assigning the time it already holds fires no `seeked`: draw the frame
+      // that is already there instead of waiting for an event that won't come.
+      if (Math.abs(decoder.currentTime - frameTime) < 0.001) draw()
+      else decoder.currentTime = frameTime
     } catch {
       // metadata not ready yet; the next hover tick retries
     }
     return () => {
       cancelled = true
       decoder.removeEventListener('seeked', draw)
+      decoder.removeEventListener('loadeddata', draw)
+      decoder.removeEventListener('error', fail)
     }
   }, [showTip, media?.url, media?.path, frameTime])
 
@@ -250,7 +272,7 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
         height: 14,
         border: LINE_STRONG,
         background: INK,
-        cursor: hasDuration ? 'pointer' : 'default',
+        cursor: dragging ? 'grabbing' : hasDuration ? 'pointer' : 'default',
         touchAction: 'none',
         // 8px of extra hit area above and below the 14px track.
         '&::before': {
@@ -346,13 +368,33 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
           top: -7,
           bottom: -7,
           width: 8,
-          background: VERMILION,
+          // Grabbed = inverted block (the same press cut as every button).
+          background: dragging ? PAPER : VERMILION,
           border: LINE_STRONG,
+          borderColor: dragging ? VERMILION : PAPER,
           transform: 'translateX(-50%)',
           transition: thumbTransition,
           pointerEvents: 'none',
         }}
       />
+
+      {/* Hover crosshair — follows the pointer with no transition, so the
+          hairline and the preview card always show the same instant. */}
+      {showTip && tipRatio !== null && (
+        <Box
+          sx={{
+            position: 'absolute',
+            left: `clamp(1px, ${tipRatio * 100}%, calc(100% - 1px))`,
+            top: -7,
+            bottom: -7,
+            width: '2px',
+            background: VERMILION,
+            transform: 'translateX(-50%)',
+            pointerEvents: 'none',
+            zIndex: 2,
+          }}
+        />
+      )}
 
       {/* seek preview card */}
       {showTip && (
@@ -388,6 +430,34 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
                 position: 'relative',
               }}
             />
+            {/* Until the decoder reports a frame the hatch shows through —
+                say why instead of letting it read as a broken preview. */}
+            {!frameReady && (
+              <Box
+                sx={{
+                  position: 'absolute',
+                  inset: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '7px',
+                }}
+              >
+                <InkLoadingTicks size={4} label="预览解码中" />
+                <Typography
+                  component="span"
+                  sx={{
+                    fontFamily: MONO,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.2em',
+                    color: alpha(PAPER, 0.55),
+                  }}
+                >
+                  解码中
+                </Typography>
+              </Box>
+            )}
           </Box>
           <Box
             sx={{

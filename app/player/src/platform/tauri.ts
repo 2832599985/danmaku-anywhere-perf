@@ -402,6 +402,33 @@ export const tauriPlatform: Platform = {
     }
   },
 
+  onFileDragHover(cb: (active: boolean) => void): () => void {
+    let unlisten: (() => void) | null = null
+    let cancelled = false
+    void import('@tauri-apps/api/webview').then(({ getCurrentWebview }) => {
+      if (cancelled) return
+      void getCurrentWebview()
+        .onDragDropEvent((event) => {
+          // `over` fires on every pointer move; the flag only changes twice.
+          if (event.payload.type === 'enter') cb(true)
+          else if (
+            event.payload.type === 'leave' ||
+            event.payload.type === 'drop'
+          ) {
+            cb(false)
+          }
+        })
+        .then((fn) => {
+          if (cancelled) fn()
+          else unlisten = fn
+        })
+    })
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  },
+
   onOpenFiles(cb: (paths: string[]) => void): () => void {
     let unlisten: (() => void) | null = null
     let cancelled = false

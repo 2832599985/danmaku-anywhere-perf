@@ -110,7 +110,7 @@ export const DanmakuSettings = () => {
               },
             }}
           >
-            预览:这就是当前样式
+            预览：这就是当前样式
           </Typography>
 
           {/* Second scrolling comment */}

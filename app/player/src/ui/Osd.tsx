@@ -1,6 +1,6 @@
 import { Box, Stack, Typography } from '@mui/material'
 import type { ReactNode } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { OsdMessage } from '@/store/playerStore'
 import { usePlayerStore } from '@/store/playerStore'
 import {
@@ -64,9 +64,27 @@ export const Osd = () => {
   const [content, setContent] = useState<OsdMessage | null>(osd)
   const visible = Boolean(osd)
   const display = osd ?? content
+  // Bumped whenever a NEW message replaces one that is still on screen (a held
+  // volume key, repeated seeks). The content block is keyed on it, so each tap
+  // replays the 90ms compress-and-settle pulse below without touching opacity.
+  const [stamp, setStamp] = useState(0)
+  const lastId = useRef<number | null>(null)
 
   useEffect(() => {
     if (osd) setContent(osd)
+  }, [osd])
+
+  useEffect(() => {
+    if (!osd) {
+      lastId.current = null
+      return
+    }
+    // The first message after the block faded out is NOT a repeat: it plays the
+    // normal stamp-in (opacity 0 → 1) and must not be compressed.
+    if (lastId.current !== null && lastId.current !== osd.id) {
+      setStamp((n) => n + 1)
+    }
+    lastId.current = osd.id
   }, [osd])
 
   useEffect(() => {
@@ -111,29 +129,45 @@ export const Osd = () => {
           },
         }}
       >
-        {display?.icon ? (
-          <Box
-            component="span"
-            sx={{ display: 'flex', color: PAPER, flexShrink: 0 }}
-          >
-            {OSD_ICONS[display.icon] ?? null}
-          </Box>
-        ) : null}
-        <Typography
-          component="span"
+        <Box
+          key={stamp}
           sx={{
-            fontSize: 18,
-            fontWeight: 700,
-            fontFamily: MONO,
-            color: PAPER,
-            fontVariantNumeric: 'tabular-nums',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            minWidth: 0,
+            // Only after the first repeat — the opening message keeps its
+            // scale(0.92) → 1 stamp-in from the outer Stack.
+            animation:
+              stamp > 0 ? `ink-stamp-pulse ${MOTION_STAMP_IN}` : 'none',
+            '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
           }}
         >
-          {display?.text}
-        </Typography>
+          {display?.icon ? (
+            <Box
+              component="span"
+              sx={{ display: 'flex', color: PAPER, flexShrink: 0 }}
+            >
+              {OSD_ICONS[display.icon] ?? null}
+            </Box>
+          ) : null}
+          <Typography
+            component="span"
+            sx={{
+              fontSize: 18,
+              fontWeight: 700,
+              fontFamily: MONO,
+              color: PAPER,
+              fontVariantNumeric: 'tabular-nums',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {display?.text}
+          </Typography>
+        </Box>
       </Stack>
     </Box>
   )

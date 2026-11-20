@@ -57,6 +57,17 @@ body,
   }
 }
 
+/* Consecutive OSD taps (volume up-up-up): re-stamp the block instead of
+ * replaying the fade-in from opacity 0, which blinked on every keypress. */
+@keyframes ink-stamp-pulse {
+  from {
+    transform: scale(0.96);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
 /* Quick-panel storyboard rise. MUI Fade owns opacity; this owns the lift. */
 @keyframes ink-popover-rise {
   from {

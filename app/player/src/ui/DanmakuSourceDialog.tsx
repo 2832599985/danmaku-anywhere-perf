@@ -507,6 +507,9 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                         target > 0 &&
                         String(ep.episodeNumber) === String(target)
                       const isFetching = fetchingId === `${ep.source}:${ep.id}`
+                      // The visible label is swapped for loading ticks while
+                      // this cell fetches, which used to leave it nameless.
+                      const label = episodeLabel(ep)
                       return (
                         <Box
                           key={`${ep.source}:${ep.id}`}
@@ -515,6 +518,11 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                           onClick={() => void handlePickEpisode(season, ep)}
                           disabled={fetchingId !== null}
                           title={ep.title}
+                          aria-label={
+                            ep.title && ep.title !== label
+                              ? `${label} ${ep.title}`
+                              : label
+                          }
                           sx={{
                             appearance: 'none',
                             cursor: 'pointer',

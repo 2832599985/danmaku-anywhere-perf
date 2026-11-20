@@ -45,12 +45,12 @@ const MODES: InkOption<UpscaleModeId>[] = [
 ]
 
 const MODE_CAPTIONS: Record<UpscaleModeId, string> = {
-  'builtin-mode-a': '还原型:适合大多数现代番剧',
-  'builtin-mode-b': '去伪影:适合网络低码率片源',
-  'builtin-mode-c': '强降噪:适合老片与实拍',
-  'builtin-mode-aa': '双重还原:线条更锐利',
-  'builtin-mode-bb': '双重去伪影:压缩痕迹重灾区',
-  'builtin-mode-ca': '先降噪再锐化线稿,适合老番与低码率片源',
+  'builtin-mode-a': '还原型：适合大多数现代番剧',
+  'builtin-mode-b': '去伪影：适合网络低码率片源',
+  'builtin-mode-c': '强降噪：适合老片与实拍',
+  'builtin-mode-aa': '双重还原：线条更锐利',
+  'builtin-mode-bb': '双重去伪影：压缩痕迹重灾区',
+  'builtin-mode-ca': '先降噪再锐化线稿，适合老番与低码率片源',
 }
 
 const TIERS: InkOption<PerformanceTier>[] = [

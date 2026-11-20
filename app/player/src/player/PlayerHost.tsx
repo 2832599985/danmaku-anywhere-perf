@@ -54,6 +54,7 @@ import { AiSubtitleOverlay } from '@/ui/AiSubtitleOverlay'
 import { CompareDivider } from '@/ui/CompareDivider'
 import { Controls } from '@/ui/Controls'
 import { DanmakuSourceDialog } from '@/ui/DanmakuSourceDialog'
+import { DropOverlay } from '@/ui/DropOverlay'
 import { EmptyState } from '@/ui/EmptyState'
 import { MiniControls } from '@/ui/MiniControls'
 import { Osd } from '@/ui/Osd'
@@ -961,7 +962,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     const loadSubtitleFromText = async (text: string, name: string) => {
       const cues = parseSubtitleText(text, name)
       if (!cues.length) {
-        throw new Error(`未解析到字幕内容: ${name}`)
+        throw new Error(`未解析到字幕内容：${name}`)
       }
       store().setSubtitles(cues, {
         label: name,
@@ -1113,7 +1114,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
           s.setCompareRatio(0.5)
           s.showOsd('增强 ⇔ 原片 对比', '⇔')
         } else {
-          s.showOsd('超分未运行,无法对比', '⇔')
+          s.showOsd('超分未运行，无法对比', '⇔')
         }
       },
       openVideo: async () => {
@@ -1217,10 +1218,21 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     }
   }, [platform, commands])
 
+  // --- browser drag-over hint ---
+  // Tauri's native drop does not produce DOM drag events, so in the exe the
+  // same state is driven by `onFileDragHover` below. `types` can still be
+  // empty at the first event of a drag, so an empty list counts as a file drag.
+  const [dragActive, setDragActive] = useState(false)
+  const isFileDrag = (event: React.DragEvent): boolean => {
+    const types = Array.from(event.dataTransfer?.types ?? [])
+    return types.length === 0 || types.includes('Files')
+  }
+
   // --- browser drag-drop ---
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault()
+      setDragActive(false)
       const files = Array.from(event.dataTransfer.files)
       const videos = files.filter(
         (f) =>
@@ -1244,6 +1256,11 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     },
     [commands]
   )
+
+  // Native (Tauri) drag-over: the stage never receives DOM drag events under
+  // Tauri's own drop handling, so the same dashed hint is driven from the
+  // window's drag events. (Browser builds get it from the stage handlers.)
+  useEffect(() => platform.onFileDragHover(setDragActive), [platform])
 
   // --- controls auto-hide ---
   const revealControls = useCallback(() => {
@@ -1329,7 +1346,20 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
                 setControlsVisible(false)
               }
             }}
-            onDragOver={(e) => e.preventDefault()}
+            onDragEnter={(event) => {
+              if (miniPlayer || !isFileDrag(event)) return
+              event.preventDefault()
+              setDragActive(true)
+            }}
+            onDragOver={(event) => {
+              if (isFileDrag(event)) event.preventDefault()
+            }}
+            onDragLeave={(event) => {
+              // Still inside the stage (moving across a child) — not a leave.
+              const next = event.relatedTarget as Node | null
+              if (next && event.currentTarget.contains(next)) return
+              setDragActive(false)
+            }}
             onDrop={onDrop}
             // While mini, the picture itself moves the window and a
             // double-click brings the normal window back (onMiniMouseDown)
@@ -1395,6 +1425,8 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             {!media && <EmptyState />}
 
             {!miniPlayer && <CompareDivider />}
+
+            {!miniPlayer && <DropOverlay visible={dragActive} />}
 
             {mediaError && (
               <Alert

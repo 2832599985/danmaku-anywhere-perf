@@ -163,6 +163,13 @@ export interface Platform {
   onFileDrop(cb: (paths: string[]) => void): () => void
 
   /**
+   * OS file drag HOVERING the window (Tauri): `true` on enter, `false` on
+   * leave/drop. Drives the dashed drop hint. A noop in the browser, where the
+   * standard DOM drag events on the drop target already do this.
+   */
+  onFileDragHover(cb: (active: boolean) => void): () => void
+
+  /**
    * Files the OS asked us to open (Explorer 「打开方式」 / file association):
    * the command-line files of this launch, delivered once, then the files of
    * every later launch while this window is running (Tauri). Returns an

@@ -1,6 +1,6 @@
 import { Box } from '@mui/material'
 import { alpha } from '@mui/material/styles'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { usePlayerCommands } from '@/player/commands'
 import { usePlayerStore } from '@/store/playerStore'
 import {
@@ -12,6 +12,7 @@ import {
   VERMILION,
 } from '@/theme/theme'
 import { ExitFullscreenIcon, PauseIcon, PlayIcon } from './icons'
+import { formatTime } from './TimeDisplay'
 
 const buttonSx = {
   width: 30,
@@ -45,14 +46,20 @@ export const MiniControls = ({ visible }: { visible: boolean }) => {
   const ratio = duration > 0 ? Math.min(currentTime / duration, 1) : 0
   const barRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef(false)
+  // Pointer position over the strip, for the hover readout (null = away).
+  const [hoverRatio, setHoverRatio] = useState<number | null>(null)
+
+  const ratioFromClientX = (clientX: number): number => {
+    const el = barRef.current
+    if (!el) return 0
+    const rect = el.getBoundingClientRect()
+    if (rect.width <= 0) return 0
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+  }
 
   const commit = (clientX: number) => {
-    const el = barRef.current
-    if (!el || duration <= 0) return
-    const rect = el.getBoundingClientRect()
-    if (rect.width <= 0) return
-    const next = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
-    commands.seekTo(next * duration)
+    if (!barRef.current || duration <= 0) return
+    commands.seekTo(ratioFromClientX(clientX) * duration)
   }
 
   return (
@@ -135,10 +142,17 @@ export const MiniControls = ({ visible }: { visible: boolean }) => {
           draggingRef.current = true
           commit(e.clientX)
         }}
+        onPointerEnter={(e: React.PointerEvent<HTMLDivElement>) => {
+          if (duration > 0) setHoverRatio(ratioFromClientX(e.clientX))
+        }}
         onPointerMove={(e: React.PointerEvent<HTMLDivElement>) => {
+          if (duration > 0) setHoverRatio(ratioFromClientX(e.clientX))
           if (!draggingRef.current) return
           e.stopPropagation()
           commit(e.clientX)
+        }}
+        onPointerLeave={() => {
+          if (!draggingRef.current) setHoverRatio(null)
         }}
         onPointerUp={(e: React.PointerEvent<HTMLDivElement>) => {
           e.stopPropagation()
@@ -195,6 +209,31 @@ export const MiniControls = ({ visible }: { visible: boolean }) => {
           }}
         />
       </Box>
+
+      {/* Hover readout: the tiny window has no room for a preview card, so the
+          timestamp sits just above the strip and clamps inside it. */}
+      {visible && hoverRatio !== null && duration > 0 && (
+        <Box
+          sx={{
+            position: 'absolute',
+            bottom: 14,
+            left: `clamp(0px, calc(${hoverRatio * 100}% - 37px), calc(100% - 74px))`,
+            width: 74,
+            textAlign: 'center',
+            fontFamily: MONO,
+            fontSize: 11,
+            fontWeight: 700,
+            color: PAPER,
+            fontVariantNumeric: 'tabular-nums',
+            background: INK,
+            border: LINE_STRONG,
+            padding: '1px 0',
+            pointerEvents: 'none',
+          }}
+        >
+          {formatTime(hoverRatio * duration)}
+        </Box>
+      )}
 
       <Box
         sx={{

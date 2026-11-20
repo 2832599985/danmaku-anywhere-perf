@@ -299,6 +299,12 @@ export const InkSlider = ({
         userSelect: 'none',
         // enlarge the hit area without changing the drawn track
         '&::before': { content: '""', position: 'absolute', inset: -8 },
+        '&:active': { cursor: 'grabbing' },
+        // Pressed = inline colour cut, the same inverse the buttons use.
+        '&:active [data-ink-thumb]': {
+          background: PAPER,
+          borderColor: VERMILION,
+        },
         '&:focus-visible': { outline: `2px solid ${VERMILION}` },
       }}
     >
@@ -327,6 +333,7 @@ export const InkSlider = ({
       )}
       {/* thumb */}
       <Box
+        data-ink-thumb
         sx={{
           position: 'absolute',
           left: `${ratio * 100}%`,

@@ -125,6 +125,11 @@ export const browserPlatform: Platform = {
     return () => undefined
   },
 
+  onFileDragHover(): () => void {
+    // The stage's own dragenter/dragleave drive the hint in the browser.
+    return () => undefined
+  },
+
   onOpenFiles(): () => void {
     return () => undefined
   },

@@ -90,17 +90,44 @@ export const TopBar = ({ visible, platform }: TopBarProps) => {
   const playlist = usePlayerStore((s) => s.playlist)
   const setDanmakuDialogOpen = usePlayerStore((s) => s.setDanmakuDialogOpen)
   const openSettingsAt = usePlayerStore((s) => s.openSettingsAt)
+  const playlistOpen = usePlayerStore((s) => s.playlistOpen)
+  const danmakuDialogOpen = usePlayerStore((s) => s.danmakuDialogOpen)
+  const settingsOpen = usePlayerStore((s) => s.settingsOpen)
+  const settingsSection = usePlayerStore((s) => s.settingsSection)
 
+  // A 3px vermilion rule under the button whose panel is currently open. The
+  // inset shadow never changes the bar's height, so nothing reflows.
   const actions = [
-    { glyph: '開', label: '打开', onClick: () => void commands.openVideo() },
-    { glyph: '弾', label: '弹幕源', onClick: () => setDanmakuDialogOpen(true) },
+    {
+      glyph: '開',
+      label: '打开',
+      onClick: () => void commands.openVideo(),
+      active: false,
+    },
+    {
+      glyph: '弾',
+      label: '弹幕源',
+      onClick: () => setDanmakuDialogOpen(true),
+      active: danmakuDialogOpen,
+    },
     {
       glyph: '列',
       label: `列表${playlist.length > 1 ? ` · ${playlist.length}` : ''}`,
       onClick: () => commands.togglePlaylist(),
+      active: playlistOpen,
     },
-    { glyph: '超', label: '增强', onClick: () => openSettingsAt('upscale') },
-    { glyph: '設', label: '设置', onClick: () => openSettingsAt('playback') },
+    {
+      glyph: '超',
+      label: '增强',
+      onClick: () => openSettingsAt('upscale'),
+      active: settingsOpen && settingsSection === 'upscale',
+    },
+    {
+      glyph: '設',
+      label: '设置',
+      onClick: () => openSettingsAt('playback'),
+      active: settingsOpen && settingsSection !== 'upscale',
+    },
   ]
 
   const chrome = [
@@ -256,7 +283,14 @@ export const TopBar = ({ visible, platform }: TopBarProps) => {
             type="button"
             onClick={a.onClick}
             aria-label={`${a.glyph} ${a.label}`}
-            sx={{ ...barButtonSx, gap: '6px' }}
+            sx={{
+              ...barButtonSx,
+              gap: '6px',
+              ...(a.active && {
+                boxShadow: `inset 0 -3px 0 ${VERMILION}`,
+                color: PAPER,
+              }),
+            }}
           >
             <Box component="span" sx={{ opacity: 0.7 }}>
               {a.glyph}

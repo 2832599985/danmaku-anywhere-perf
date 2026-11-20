@@ -2,6 +2,7 @@ import { Box, Button, Modal, Stack, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import { usePlayerStore } from '@/store/playerStore'
 import {
+  halftoneSx,
   INK,
   INK_FOCUS_SX,
   INK_STAGE,
@@ -691,6 +692,9 @@ export const SettingsDrawer = () => {
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
+            // The signature paper grain, barely there (3.5% dots on a 16px
+            // grid): enough to stop the page reading as flat black.
+            ...halftoneSx(0.035, 16),
           }}
         >
           {/* Header row */}
