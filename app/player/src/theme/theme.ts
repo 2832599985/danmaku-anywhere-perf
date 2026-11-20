@@ -40,10 +40,6 @@ export const hardShadow = (px: number, color: string = VERMILION): string =>
 
 /** One crisp curve shared by chrome, panels and page switches. */
 export const CRISP_EASE = 'cubic-bezier(0.16, 1, 0.3, 1)'
-export const CRISP_MOTION = `180ms ${CRISP_EASE}`
-/** The stamp press: 65ms, no bounce, weight lands instantly. */
-export const STAMP_EASE = 'cubic-bezier(0.2, 0, 0, 1)'
-export const STAMP_MOTION = `65ms ${STAMP_EASE}`
 
 /**
  * Hard-shadow stamp press used by every physical button. Hover lifts the block
@@ -68,7 +64,7 @@ export const inkStampPressSx = (
     '&:active': {
       transform: `translate(${depth}px, ${depth}px)`,
       boxShadow: hardShadow(pressed, color),
-      transition: `transform ${STAMP_MOTION}, box-shadow ${STAMP_MOTION}`,
+      transition: `transform ${MOTION_PRESS}, box-shadow ${MOTION_PRESS}`,
     },
     '@media (prefers-reduced-motion: reduce)': {
       transition: 'opacity 120ms linear',
@@ -90,17 +86,16 @@ export const inkStampPressSx = (
  * PANEL is the shared show/hide curve for every persistent chrome surface.
  * PRESS is the 65ms tactile travel of a hard-shadow control.
  */
-export const MOTION_PANEL = '180ms cubic-bezier(0.16, 1, 0.3, 1)'
+export const MOTION_PANEL = `180ms ${CRISP_EASE}`
 export const MOTION_PRESS = '65ms cubic-bezier(0.2, 0, 0, 1)'
-export const MOTION_STORY = '140ms cubic-bezier(0.16, 1, 0.3, 1)'
-export const MOTION_STAMP_IN = '90ms cubic-bezier(0.16, 1, 0.3, 1)'
-export const MOTION_STAMP_OUT = '180ms cubic-bezier(0.16, 1, 0.3, 1)'
+export const MOTION_STAMP_IN = `90ms ${CRISP_EASE}`
+export const MOTION_STAMP_OUT = `180ms ${CRISP_EASE}`
 /** Mounted-danmaku confirmation banner. */
-export const MOTION_BANNER = '160ms cubic-bezier(0.16, 1, 0.3, 1)'
+export const MOTION_BANNER = `160ms ${CRISP_EASE}`
 /** Settings sub-page cross-cut. */
-export const MOTION_SUBPAGE = '110ms cubic-bezier(0.16, 1, 0.3, 1)'
+export const MOTION_SUBPAGE = `110ms ${CRISP_EASE}`
 /** Quick-panel popover rise. */
-export const MOTION_POPOVER = '140ms cubic-bezier(0.16, 1, 0.3, 1)'
+export const MOTION_POPOVER = `140ms ${CRISP_EASE}`
 
 /** Colour cuts are instantaneous; only physical/layout motion is eased. */
 export const INSTANT_CUT =

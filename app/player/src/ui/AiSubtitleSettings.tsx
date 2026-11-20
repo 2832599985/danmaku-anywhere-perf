@@ -13,7 +13,15 @@ import {
   setSubtitleDataDir,
   subtitleAssets,
 } from '@/subtitle/native'
-import { GREEN, INK, LINE_STRONG, MONO, PAPER, VERMILION } from '@/theme/theme'
+import {
+  GREEN,
+  INK,
+  LINE_STRONG,
+  LINE_SUBTLE,
+  MONO,
+  PAPER,
+  VERMILION,
+} from '@/theme/theme'
 import { InkLabel, type InkOption, InkSwitch, InkToggleGroup } from './ink'
 import { QuickAction } from './QuickPanel'
 import { errorMessage } from './shared'
@@ -210,7 +218,7 @@ export const AiSubtitleSettings = () => {
                 alignItems: 'center',
                 gap: 1.5,
                 padding: '8px 12px',
-                borderBottom: `1px solid ${alpha(PAPER, 0.15)}`,
+                borderBottom: LINE_SUBTLE,
                 '&:last-of-type': { borderBottom: 'none' },
                 position: 'relative',
                 background: alpha(INK, 0.4),

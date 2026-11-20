@@ -79,12 +79,12 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
     }
   }
 
-  // Visual tracking is immediate; frame decode/seek is limited to ~180ms. A
+  // Visual tracking is immediate; frame decode/seek is limited to ~160ms. A
   // trailing timer makes sure the last pointer position still gets decoded.
   const queueFrame = (ratio: number) => {
     pendingFrame.current = ratio
     const now = performance.now()
-    const wait = 180 - (now - lastFrameAt.current)
+    const wait = 160 - (now - lastFrameAt.current)
     if (wait <= 0) {
       lastFrameAt.current = now
       setFrameRatio(ratio)

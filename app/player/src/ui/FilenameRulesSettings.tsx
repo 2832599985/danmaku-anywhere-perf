@@ -6,7 +6,7 @@ import {
   hardShadow,
   hatchSx,
   INK,
-  LINE_WEAK,
+  LINE_SUBTLE,
   MONO,
   PAPER,
   VERMILION,
@@ -25,7 +25,7 @@ export const FilenameRulesSettings = () => {
 
   return (
     <Stack spacing={1.5}>
-      <Box sx={{ border: LINE_WEAK, padding: '12px' }}>
+      <Box sx={{ border: LINE_SUBTLE, padding: '12px' }}>
         <Stack
           direction="row"
           alignItems="center"
@@ -104,7 +104,7 @@ export const FilenameRulesSettings = () => {
       {sorted.length === 0 ? (
         <Box
           sx={{
-            border: LINE_WEAK,
+            border: LINE_SUBTLE,
             ...hatchSx(),
             padding: '20px 14px',
             textAlign: 'center',
@@ -132,7 +132,7 @@ export const FilenameRulesSettings = () => {
             <Box
               key={rule.id}
               sx={{
-                border: LINE_WEAK,
+                border: LINE_SUBTLE,
                 background: alpha(PAPER, 0.03),
                 padding: '9px 11px',
                 display: 'flex',
@@ -193,7 +193,7 @@ export const FilenameRulesSettings = () => {
                   flexShrink: 0,
                   width: 24,
                   height: 24,
-                  border: LINE_WEAK,
+                  border: LINE_SUBTLE,
                   background: 'transparent',
                   color: alpha(PAPER, 0.6),
                   fontSize: 12,

@@ -11,7 +11,15 @@ import {
   startGeneration,
   stopGeneration,
 } from '@/subtitle/generate'
-import { GREEN, INK, MONO, PAPER, VERMILION } from '@/theme/theme'
+import {
+  GREEN,
+  INK,
+  LINE_STRONG,
+  LINE_SUBTLE,
+  MONO,
+  PAPER,
+  VERMILION,
+} from '@/theme/theme'
 import { QuickAction } from './QuickPanel'
 
 export const SubtitleSourcePicker = ({ compact = false }) => {
@@ -128,9 +136,7 @@ export const SubtitleSourcePicker = ({ compact = false }) => {
                   gap: '10px',
                   width: '100%',
                   textAlign: 'left',
-                  border: active
-                    ? `2px solid ${VERMILION}`
-                    : `2px solid ${alpha(PAPER, 0.3)}`,
+                  border: active ? `2px solid ${VERMILION}` : LINE_SUBTLE,
                   background: active ? alpha(VERMILION, 0.15) : 'transparent',
                   color: disabled ? alpha(PAPER, 0.45) : PAPER,
                   padding: compact ? '6px 10px' : '8px 12px',
@@ -228,7 +234,7 @@ export const SubtitleSourcePicker = ({ compact = false }) => {
                 onClick={() => void stopGeneration()}
                 sx={{
                   appearance: 'none',
-                  border: `2px solid ${PAPER}`,
+                  border: LINE_STRONG,
                   background: 'transparent',
                   color: PAPER,
                   padding: '3px 10px',

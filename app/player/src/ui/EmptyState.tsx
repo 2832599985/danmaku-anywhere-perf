@@ -182,9 +182,9 @@ export const EmptyState = () => {
           // Keep the burst at the edges: the spotlight leaves the hero and CTA
           // on calm paper instead of crossing them with moving lines.
           maskImage:
-            'radial-gradient(circle, transparent 22%, rgba(0,0,0,0.85) 74%)',
+            'radial-gradient(circle, transparent 22%, rgba(0,0,0,0.85) 75%)',
           WebkitMaskImage:
-            'radial-gradient(circle, transparent 22%, rgba(0,0,0,0.85) 74%)',
+            'radial-gradient(circle, transparent 22%, rgba(0,0,0,0.85) 75%)',
         }}
       />
 
