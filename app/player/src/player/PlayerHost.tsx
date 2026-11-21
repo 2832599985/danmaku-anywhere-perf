@@ -87,6 +87,42 @@ const THUMB_PERIOD_MS = 15_000
 const SINGLE_CLICK_DELAY_MS = 250
 
 const basename = (p: string): string => p.split(/[\\/]/).pop() || p
+
+/**
+ * Pause until the browser is idle (or `delayMs` has passed). Used after the
+ * video's first frame is on screen to stagger heavy open-time tasks (WebGPU
+ * shader compile, ffprobe/ffmpeg child spawns, AI sidecar restore, online
+ * danmaku matching, folder scans) so they never pile onto the cold-launch
+ * decode spike at once.
+ */
+const waitForSettle = (
+  delayMs: number,
+  isStale: () => boolean
+): Promise<boolean> =>
+  new Promise((resolve) => {
+    const timer = window.setTimeout(() => {
+      if (isStale()) {
+        resolve(false)
+        return
+      }
+      const win = window as Window & {
+        requestIdleCallback?: (
+          cb: () => void,
+          opts?: { timeout: number }
+        ) => number
+      }
+      if (typeof win.requestIdleCallback === 'function') {
+        win.requestIdleCallback(() => resolve(!isStale()), { timeout: 600 })
+      } else {
+        resolve(!isStale())
+      }
+    }, delayMs)
+    if (isStale()) {
+      window.clearTimeout(timer)
+      resolve(false)
+    }
+  })
+
 const formatClock = (input: number): string => {
   const sec = Number.isFinite(input) && input > 0 ? input : 0
   const s = Math.floor(sec % 60)
@@ -147,10 +183,17 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   // danmaku/subtitles, detects HDR or restores a resume point against the
   // OUTGOING file while a container remux is in flight (FLV/TS/AVI).
   const [sourceKey, setSourceKey] = useState<string | null>(null)
+  // Key of the media whose first decoded frame has arrived (and whose HDR
+  // transfer check has completed). Staggering WebGPU upscale initialization and
+  // heavy background tasks (ffprobe/ffmpeg, AI subtitle restore, online match,
+  // folder scans) behind the first frame keeps cold-launch video decode from
+  // colliding with shader compilation and child process spawns.
+  const [firstFrameKey, setFirstFrameKey] = useState<string | null>(null)
 
   const media = usePlayerStore((s) => s.media)
   const mediaKey = media ? (media.path ?? media.url) : null
   const sourceReady = mediaKey !== null && sourceKey === mediaKey
+  const firstFrameReady = sourceReady && firstFrameKey === mediaKey
   const mediaError = usePlayerStore((s) => s.mediaError)
   const comments = usePlayerStore((s) => s.comments)
   const danmakuSettings = usePlayerStore((s) => s.danmakuSettings)
@@ -239,6 +282,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     if (!video) return
     if (!media) {
       setSourceKey(null)
+      setFirstFrameKey(null)
       video.removeAttribute('src')
       video.load()
       upscaleCtrlRef.current?.reset()
@@ -247,6 +291,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     const key = media.path ?? media.url
     let stale = false
     setSourceKey(null)
+    setFirstFrameKey(null)
     upscaleCtrlRef.current?.reset()
     void platform
       .prepareMediaUrl(media)
@@ -283,9 +328,12 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   // --- detect HDR from the first decoded frame (drives the upscale decision) ---
   useEffect(() => {
     if (!video || !media || !sourceReady) return
+    const key = media.path ?? media.url
     let cancelled = false
+    let settled = false
     const detect = () => {
-      if (cancelled) return
+      if (cancelled || settled) return
+      settled = true
       const transfer = detectHdrTransfer(video)
       const store = usePlayerStore.getState()
       store.setHdr(transfer)
@@ -295,6 +343,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
           '🌈'
         )
       }
+      setFirstFrameKey(key)
     }
     type RVFC = HTMLVideoElement & {
       requestVideoFrameCallback?: (cb: () => void) => number
@@ -302,11 +351,20 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     const v = video as RVFC
     if (typeof v.requestVideoFrameCallback === 'function') {
       v.requestVideoFrameCallback(detect)
-    } else {
-      video.addEventListener('loadeddata', detect, { once: true })
     }
+    // Also listen on loadeddata + fallback timer so a paused video or a custom
+    // protocol where rVFC waits for playback still unlocks upscale and
+    // background tasks promptly once a frame is decoded.
+    video.addEventListener('loadeddata', detect, { once: true })
+    if (video.readyState >= 2) {
+      detect()
+    }
+    const fallbackTimer = window.setTimeout(() => {
+      if (!cancelled && !settled && video.readyState >= 1) detect()
+    }, 1500)
     return () => {
       cancelled = true
+      window.clearTimeout(fallbackTimer)
       video.removeEventListener('loadeddata', detect)
     }
   }, [media, video, sourceReady])
@@ -397,9 +455,14 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   // The Anime4K path renders through an 8-bit sRGB WebGPU canvas, which would
   // clip/mangle HDR (PQ/BT.2020). So for HDR sources we keep the native <video>
   // (which WebView2 outputs/tone-maps correctly) and skip upscaling.
+  // Gated on `firstFrameReady` so:
+  //   1. The native <video> gets its hardware decoder up and paints its first
+  //      frame before WebGPU requests a device and compiles shaders.
+  //   2. HDR transfer detection has already run, so an HDR source never
+  //      spins up a WebGPU pipeline just to immediately tear it down.
   useEffect(() => {
     const ctrl = upscaleCtrlRef.current
-    if (!ctrl || !video || !media || !sourceReady) return
+    if (!ctrl || !video || !media || !firstFrameReady) return
     if (isHdr && upscale.enabled) {
       // disable() (not reset()) so the reported status matches reality — the
       // panel would otherwise keep claiming upscale/interpolation are running.
@@ -407,7 +470,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       return
     }
     void ctrl.apply(upscale)
-  }, [upscale, isHdr, media, video, sourceReady])
+  }, [upscale, isHdr, media, video, firstFrameReady])
 
   // --- A/B compare split -> controller clip-path ---
   useEffect(() => {
@@ -504,6 +567,11 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       // Every await boundary re-reads the store and re-checks identity so a
       // media switch or an explicit load mid-flight can't be clobbered.
       //
+      // Deferred briefly behind playback start so network requests, AI title
+      // extraction and JSON parsing don't compete with cold-launch video decode
+      // and WebGPU initialization.
+      if (!(await waitForSettle(400, () => stale))) return
+
       // When the match is not decisive we OPEN THE PICKER instead of guessing:
       // the dialog comes up pre-searched on the parsed title with the episode
       // we believe we want highlighted. A filename with no episode/season/movie
@@ -703,10 +771,17 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   // folder holding many shows contributes only its own episodes. Files whose
   // episode number cannot be determined are skipped, never guessed.
   useEffect(() => {
-    if (!platform.isTauri || !media?.path || !autoAddSiblings) return
+    if (
+      !platform.isTauri ||
+      !media?.path ||
+      !autoAddSiblings ||
+      !firstFrameReady
+    )
+      return
     const videoPath = media.path
     let stale = false
     void (async () => {
+      if (!(await waitForSettle(350, () => stale))) return
       const paths = await platform.listVideoFiles(dirname(videoPath))
       if (stale) return
       const batch = selectBatch(
@@ -743,7 +818,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     return () => {
       stale = true
     }
-  }, [media, platform, autoAddSiblings])
+  }, [media, platform, autoAddSiblings, firstFrameReady])
 
   // --- auto-load subtitles: sibling file first, then the container's own ---
   // Two sources, in that order. A subtitle file next to the video
@@ -763,20 +838,18 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     // Probes and extractions still reading the PREVIOUS file stop now instead
     // of competing with this one for the disk.
     void focusEmbeddedExtraction(media?.path ?? '').catch(() => undefined)
-    if (!media?.path) return
+    if (!media?.path || !firstFrameReady) return
     const videoPath = media.path
     let stale = false
     void (async () => {
-      // Probe the embedded tracks on EVERY open, whatever ends up mounted: the
-      // picker in 设置 → 字幕 must offer them even when a sibling file wins, and
-      // "没有内封字幕" has to mean "we looked", not "we never tried". Started
-      // now but NOT awaited yet — a slow ffprobe (network share, a virus
-      // scanner's first look) must not hold up an ordinary `.srt`.
-      const probing = loadEmbeddedTracks(videoPath)
+      // Check fast local sibling subtitle files first without spawning ffprobe,
+      // so cold-launch playback + WebGPU initialization aren't hit by an extra
+      // child process at t=0.
       const siblings = rankSiblingSubtitles(
         videoPath,
         await platform.listSubtitleFiles(dirname(videoPath))
       )
+      let mountedSibling = false
       for (const candidate of siblings) {
         if (stale) return
         let text: string
@@ -796,10 +869,16 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
           kind: 'file',
         })
         s.showOsd(`自动加载字幕 · ${cues.length} 条`, '🎬')
-        return
+        mountedSibling = true
+        break
       }
-      const tracks = await probing
-      if (stale) return
+      // Stagger the ffprobe child-process spawn behind the initial frame /
+      // WebGPU setup spike. If a sibling file already mounted, we can wait a
+      // bit longer before populating the embedded track picker in the background.
+      if (!(await waitForSettle(mountedSibling ? 900 : 250, () => stale)))
+        return
+      const tracks = await loadEmbeddedTracks(videoPath)
+      if (stale || mountedSibling) return
       const pick = pickDefaultTrack(tracks)
       if (!pick) return
       let result: EmbeddedMountResult
@@ -829,19 +908,22 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     })().finally(() => {
       // Lowest priority: AI subtitles generated for this video before (cache
       // under the data dir) come back, and generation resumes on the CPU.
+      // Deferred so whisper-server / llama-server never spawn on top of the
+      // initial cold-start commit-charge peak.
       if (stale || usePlayerStore.getState().subtitleSource) return
-      void restoreGeneratedTrack(videoPath)
-        .then((restored) => {
-          if (restored && !stale) {
-            usePlayerStore.getState().showOsd('已恢复 AI 字幕', '🎬')
-          }
-        })
-        .catch(() => undefined)
+      void (async () => {
+        if (!(await waitForSettle(800, () => stale))) return
+        if (stale || usePlayerStore.getState().subtitleSource) return
+        const restored = await restoreGeneratedTrack(videoPath)
+        if (restored && !stale) {
+          usePlayerStore.getState().showOsd('已恢复 AI 字幕', '🎬')
+        }
+      })().catch(() => undefined)
     })
     return () => {
       stale = true
     }
-  }, [media, platform])
+  }, [media, platform, firstFrameReady])
 
   // --- resume history: restore last position on open, persist while watching ---
   // Only local files (with a stable `path`) are tracked; browser blob opens have

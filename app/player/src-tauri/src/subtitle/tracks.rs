@@ -252,6 +252,37 @@ fn hide_console(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_console(_command: &mut Command) {}
 
+/// True when a process spawn failed because Windows was temporarily out of
+/// commit charge (`ERROR_COMMITMENT_LIMIT` = 1455, "页面文件太小，无法完成操作")
+/// or system resources (`ERROR_NO_SYSTEM_RESOURCES` = 1450, `OutOfMemory`).
+/// Cold-launching the player while opening a video spikes commit charge as
+/// WebView2's GPU process and hardware decoder initialize; a brief pause lets
+/// the spike settle so ffprobe/ffmpeg can start.
+fn is_transient_spawn_error(err: &std::io::Error) -> bool {
+    matches!(err.raw_os_error(), Some(1455 | 1450 | 8))
+        || err.kind() == std::io::ErrorKind::OutOfMemory
+}
+
+/// Spawn `command`, retrying after a short backoff if the OS reports a
+/// transient commit-limit / memory spike.
+pub(crate) fn spawn_with_retry(
+    command: &mut Command,
+    cancelled: &dyn Fn() -> bool,
+) -> std::io::Result<std::process::Child> {
+    const DELAYS_MS: [u64; 3] = [250, 600, 1200];
+    let mut attempt = 0;
+    loop {
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(err) if attempt < DELAYS_MS.len() && is_transient_spawn_error(&err) && !cancelled() => {
+                thread::sleep(Duration::from_millis(DELAYS_MS[attempt]));
+                attempt += 1;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
 /// Run a command to completion, killing it when `timeout` passes.
 ///
 /// `Command::output()` has no deadline: a wedged ffprobe/ffmpeg would leave
@@ -271,9 +302,8 @@ pub(crate) fn run_with_timeout(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("无法运行 {name}: {e}"))?;
+    let mut child =
+        spawn_with_retry(&mut command, cancelled).map_err(|e| format!("无法运行 {name}: {e}"))?;
     let drain = |pipe: Option<Box<dyn Read + Send>>| {
         thread::spawn(move || {
             let mut bytes = Vec::new();
@@ -739,6 +769,18 @@ mod tests {
         let message = run_with_timeout(command, "nothing", Duration::from_secs(5), &keep_going)
             .expect_err("spawn failure must surface");
         assert!(message.contains("无法运行"), "unexpected message: {message}");
+    }
+
+    #[test]
+    fn transient_spawn_errors_match_windows_commit_limit() {
+        let commit_limit = std::io::Error::from_raw_os_error(1455);
+        assert!(is_transient_spawn_error(&commit_limit));
+        let no_sys_res = std::io::Error::from_raw_os_error(1450);
+        assert!(is_transient_spawn_error(&no_sys_res));
+        let oom = std::io::Error::from(std::io::ErrorKind::OutOfMemory);
+        assert!(is_transient_spawn_error(&oom));
+        let not_found = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert!(!is_transient_spawn_error(&not_found));
     }
 
     #[test]

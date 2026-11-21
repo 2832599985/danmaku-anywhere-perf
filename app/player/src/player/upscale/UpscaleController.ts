@@ -277,7 +277,7 @@ export class UpscaleController {
     const epoch = ++this.epoch
     this.callbacks.onStatus?.('initializing')
     try {
-      await waitForVideoReady(this.video, this.video.HAVE_METADATA)
+      await waitForVideoReady(this.video, this.video.HAVE_CURRENT_DATA)
       if (this.destroyed || epoch !== this.epoch) return
 
       const canvas = this.ensureCanvas()
@@ -287,40 +287,68 @@ export class UpscaleController {
       canvas.width = targetDimensions.width
       canvas.height = targetDimensions.height
 
-      const renderer = await Renderer.create({
-        video: this.video,
-        canvas,
-        effects: buildEffects(settings),
-        targetDimensions,
-        frameInterpolation: buildFrameInterpolation(settings),
-        presentationMode: 'raf',
-        diagnostics: { reportIntervalMs: DIAGNOSTICS_INTERVAL_MS },
-        onDiagnostics: (summary) => {
-          // Guard on renderer IDENTITY, not the operation epoch. update()
-          // bumps this.epoch (to discard stale async update results) but keeps
-          // the very same Renderer alive, so an epoch guard here would silently
-          // kill the diagnostics stream after the first settings update — the
-          // HUD froze / vanished until the next video rebuilt the closure.
-          // Identity stays true across updates and only goes false once a fresh
-          // enable() replaces this renderer (or it is torn down).
-          if (this.renderer === renderer) this.reportStats(summary)
-        },
-        onFirstFrameRendered: () => {
-          if (this.renderer === renderer) this.showCanvas()
-        },
-        onFrameInterpolationFallback: () => {
-          if (this.renderer === renderer) {
-            this.callbacks.onInterpolationStatus?.('fallback')
+      const createRenderer = (
+        frameInterpolation: FrameInterpolationOptions
+      ): Promise<Renderer> =>
+        Renderer.create({
+          video: this.video,
+          canvas,
+          effects: buildEffects(settings),
+          targetDimensions,
+          frameInterpolation,
+          presentationMode: 'raf',
+          diagnostics: { reportIntervalMs: DIAGNOSTICS_INTERVAL_MS },
+          onDiagnostics: (summary) => {
+            // Guard on renderer IDENTITY, not the operation epoch. update()
+            // bumps this.epoch (to discard stale async update results) but keeps
+            // the very same Renderer alive, so an epoch guard here would silently
+            // kill the diagnostics stream after the first settings update — the
+            // HUD froze / vanished until the next video rebuilt the closure.
+            // Identity stays true across updates and only goes false once a fresh
+            // enable() replaces this renderer (or it is torn down).
+            if (this.renderer === renderer) this.reportStats(summary)
+          },
+          onFirstFrameRendered: () => {
+            if (this.renderer === renderer) this.showCanvas()
+          },
+          onFrameInterpolationFallback: () => {
+            if (this.renderer === renderer) {
+              this.callbacks.onInterpolationStatus?.('fallback')
+            }
+          },
+          onError: (error) => {
+            // A late error from a renderer that has already been replaced must
+            // not disable the live one.
+            if (this.renderer !== renderer) return
+            this.callbacks.onStatus?.('error', error.message)
+            this.disable()
+          },
+        })
+
+      let renderer: Renderer
+      const desiredFi = buildFrameInterpolation(settings)
+      try {
+        renderer = await createRenderer(desiredFi)
+      } catch (firstError) {
+        if (this.destroyed || epoch !== this.epoch) return
+        // Cold-start GPU / commit-memory spikes can fail the initial WebGPU
+        // device or Framegen shader compile while the video decoder is also
+        // spinning up. Give the GPU process a moment to settle and retry; if
+        // Framegen was requested and still fails, fall back to Anime4K without
+        // interpolation rather than dropping enhancement altogether.
+        await new Promise((resolve) => window.setTimeout(resolve, 400))
+        if (this.destroyed || epoch !== this.epoch) return
+        try {
+          renderer = await createRenderer(desiredFi)
+        } catch (secondError) {
+          if (!desiredFi.enabled || this.destroyed || epoch !== this.epoch) {
+            throw firstError
           }
-        },
-        onError: (error) => {
-          // A late error from a renderer that has already been replaced must
-          // not disable the live one.
-          if (this.renderer !== renderer) return
-          this.callbacks.onStatus?.('error', error.message)
-          this.disable()
-        },
-      })
+          renderer = await createRenderer({ ...desiredFi, enabled: false })
+          this.callbacks.onInterpolationStatus?.('fallback')
+          void secondError
+        }
+      }
 
       if (this.destroyed || epoch !== this.epoch) {
         renderer.destroy()

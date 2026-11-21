@@ -70,7 +70,10 @@ pub fn extract_wav(
         .stderr(Stdio::piped());
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
-    let mut child = command.spawn().map_err(|e| {
+    let mut child = super::tracks::spawn_with_retry(&mut command, &|| {
+        cancel.load(Ordering::Relaxed)
+    })
+    .map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             "未找到 ffmpeg（请将 ffmpeg.exe 放到程序目录或加入 PATH）".to_string()
         } else {

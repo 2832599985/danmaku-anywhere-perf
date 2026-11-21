@@ -69,7 +69,8 @@ impl Sidecar {
             .stderr(log_file);
         #[cfg(windows)]
         command.creation_flags(CREATE_NO_WINDOW);
-        let child = command.spawn().map_err(|e| format!("启动 {name} 失败: {e}"))?;
+        let child = super::tracks::spawn_with_retry(&mut command, &|| false)
+            .map_err(|e| format!("启动 {name} 失败: {e}"))?;
         job::adopt(&child);
         let mut sidecar = Sidecar {
             child,

@@ -450,7 +450,22 @@ export const tauriPlatform: Platform = {
       // Taken once per process: once taken they are delivered even if this
       // subscription is torn down meanwhile, or they would be lost.
       const launched = await invoke<string[]>('launch_files_take')
-      if (launched.length) cb(launched)
+      if (!launched.length) return
+      // On cold launch (Explorer 「打开方式」 / file association), WebView2's
+      // renderer, GPU process and font/layout sub-systems are still settling.
+      // Wait for document load + two painted frames before handing the file to
+      // the media pipeline so initial window paint and hardware decode don't
+      // collide on the same startup spike.
+      if (document.readyState !== 'complete') {
+        await new Promise<void>((resolve) => {
+          window.addEventListener('load', () => resolve(), { once: true })
+          window.setTimeout(resolve, 1500)
+        })
+      }
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      })
+      cb(launched)
     })()
     return () => {
       cancelled = true
