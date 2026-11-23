@@ -41,10 +41,17 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
   const bufferedEnd = usePlayerStore((s) => s.playback.bufferedEnd)
   const comments = usePlayerStore((s) => s.comments)
   const media = usePlayerStore((s) => s.media)
+  const holdControls = usePlayerStore((s) => s.holdControls)
 
   const barRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef(false)
   const [dragging, setDragging] = useState(false)
+
+  useEffect(() => {
+    if (!dragging) return
+    holdControls(1)
+    return () => holdControls(-1)
+  }, [dragging, holdControls])
   const [scrubRatio, setScrubRatio] = useState<number | null>(null)
   const [hoverRatio, setHoverRatio] = useState<number | null>(null)
   // The preview card's *visual* position follows the pointer immediately; only

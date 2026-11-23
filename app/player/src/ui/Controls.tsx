@@ -118,7 +118,6 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
   const holdControls = usePlayerStore((s) => s.holdControls)
 
   const [rateAnchor, setRateAnchor] = useState<HTMLElement | null>(null)
-  const [barHovered, setBarHovered] = useState(false)
   const [densityHover, setDensityHover] = useState<number | null>(null)
   const barRef = useRef<HTMLDivElement | null>(null)
   const [barHeight, setBarHeight] = useState(0)
@@ -129,12 +128,6 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
     holdControls(1)
     return () => holdControls(-1)
   }, [rateOpen, holdControls])
-
-  useEffect(() => {
-    if (!barHovered) return
-    holdControls(1)
-    return () => holdControls(-1)
-  }, [barHovered, holdControls])
 
   // The bar's height depends on its own content (the danmaku density strip
   // appears once comments load, the status capsules come and go), so the
@@ -449,8 +442,6 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
       <Box
         ref={barRef}
         data-controls-bar
-        onMouseEnter={() => setBarHovered(true)}
-        onMouseLeave={() => setBarHovered(false)}
         sx={{
           position: 'absolute',
           left: 0,

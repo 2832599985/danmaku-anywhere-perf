@@ -226,6 +226,8 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
 
   const [controlsVisible, setControlsVisible] = useState(true)
   const hideTimer = useRef<number | null>(null)
+  const pointerInsideStageRef = useRef(false)
+  const prevHoldCountRef = useRef(0)
   /** Window geometry changes are async; ignore a second toggle mid-flight. */
   const miniBusyRef = useRef(false)
   // A single click on the picture plays/pauses only once it is certain not
@@ -1436,37 +1438,54 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
 
   // --- controls auto-hide (both playing and paused) ---
   // Pausing no longer pins the chrome permanently: controls appear briefly on
-  // pause or mouse movement, stay locked while hovering chrome / opening a
-  // quick panel or menu (`controlsHoldCount > 0`), and fade out after 2.6s of
-  // inactivity so the user always gets an unobstructed picture.
+  // pause or mouse movement, stay locked only while a popover/menu is open or
+  // the seek thumb is dragged (`controlsHoldCount > 0`), and fade out after
+  // 2.6s of inactivity (or immediately when the pointer leaves the window).
+  const clearHideTimer = useCallback(() => {
+    if (hideTimer.current !== null) {
+      window.clearTimeout(hideTimer.current)
+      hideTimer.current = null
+    }
+  }, [])
+
   const revealControls = useCallback(() => {
     setControlsVisible(true)
-    if (hideTimer.current) window.clearTimeout(hideTimer.current)
+    clearHideTimer()
     hideTimer.current = window.setTimeout(() => {
+      hideTimer.current = null
       if (usePlayerStore.getState().controlsHoldCount === 0) {
         setControlsVisible(false)
       }
     }, 2600)
-  }, [])
+  }, [clearHideTimer])
 
-  // Show chrome briefly on play/pause transitions and whenever the last
-  // hover/popover lock releases so the 2.6s countdown starts cleanly.
+  // Show chrome briefly on play/pause transitions so pausing confirms state
+  // then fades out cleanly after 2.6s.
   useEffect(() => {
     if (!media) return
     revealControls()
   }, [playing, media, revealControls])
 
+  // When the last popover/menu/drag lock releases, either start a fresh
+  // countdown (pointer inside) or hide right away (pointer already left).
   useEffect(() => {
-    if (!media || controlsHoldCount > 0) return
-    revealControls()
-  }, [controlsHoldCount, media, revealControls])
+    const prev = prevHoldCountRef.current
+    prevHoldCountRef.current = controlsHoldCount
+    if (!media || prev === 0 || controlsHoldCount > 0) return
+    if (pointerInsideStageRef.current) {
+      revealControls()
+    } else {
+      clearHideTimer()
+      setControlsVisible(false)
+    }
+  }, [controlsHoldCount, media, revealControls, clearHideTimer])
 
   useEffect(() => {
     return () => {
-      if (hideTimer.current) window.clearTimeout(hideTimer.current)
+      clearHideTimer()
       if (clickTimerRef.current) window.clearTimeout(clickTimerRef.current)
     }
-  }, [])
+  }, [clearHideTimer])
 
   const onStageWheel = useCallback(
     (event: React.WheelEvent<HTMLDivElement>) => {
@@ -1483,7 +1502,6 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       ) {
         return
       }
-      event.preventDefault()
       const step = s.playbackSettings.volumeStep
       commands.changeVolume(event.deltaY < 0 ? step : -step)
     },
@@ -1552,10 +1570,18 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
           <div
             ref={setStageRef}
             data-player-stage
-            onMouseMove={revealControls}
+            onMouseEnter={() => {
+              pointerInsideStageRef.current = true
+            }}
+            onMouseMove={() => {
+              pointerInsideStageRef.current = true
+              revealControls()
+            }}
             onWheel={onStageWheel}
             onMouseLeave={() => {
+              pointerInsideStageRef.current = false
               if (usePlayerStore.getState().controlsHoldCount === 0) {
+                clearHideTimer()
                 setControlsVisible(false)
               }
             }}

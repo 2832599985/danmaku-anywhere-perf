@@ -1,5 +1,5 @@
 import { alpha, Box } from '@mui/material'
-import { type ReactNode, useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import type { Platform } from '@/platform'
 import { usePlayerCommands } from '@/player/commands'
 import { usePlayerStore } from '@/store/playerStore'
@@ -94,14 +94,6 @@ export const TopBar = ({ visible, platform }: TopBarProps) => {
   const danmakuDialogOpen = usePlayerStore((s) => s.danmakuDialogOpen)
   const settingsOpen = usePlayerStore((s) => s.settingsOpen)
   const settingsSection = usePlayerStore((s) => s.settingsSection)
-  const holdControls = usePlayerStore((s) => s.holdControls)
-  const [hovered, setHovered] = useState(false)
-
-  useEffect(() => {
-    if (!hovered) return
-    holdControls(1)
-    return () => holdControls(-1)
-  }, [hovered, holdControls])
 
   // A 3px vermilion rule under the button whose panel is currently open. The
   // inset shadow never changes the bar's height, so nothing reflows.
@@ -165,8 +157,6 @@ export const TopBar = ({ visible, platform }: TopBarProps) => {
   return (
     <Box
       {...dragRegion}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       sx={{
         position: 'absolute',
         top: 0,
