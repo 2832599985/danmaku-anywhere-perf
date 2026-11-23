@@ -3,7 +3,12 @@ pre-commit:
   commands:
     check:
       glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc}"
-      run: pnpx @biomejs/biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --colors=off {staged_files}
+      # `pnpm exec`, not `pnpx`: pnpx resolves @biomejs/biome from the registry
+      # and floats to the latest release, so the hook formatted with a different
+      # biome than the pinned one the `lint` scripts and CI use. The two
+      # disagreed on some formatting and silently reverted each other, leaving
+      # files that drifted on every lint run and every commit.
+      run: pnpm exec biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --colors=off {staged_files}
       stage_fixed: true
 
 skip_output:

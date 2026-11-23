@@ -50,7 +50,50 @@ export const danmakuSourcesSchema = z.object({
 
 export const playerOptionsSchema = z.object({
   showSkipButton: z.boolean(),
+  autoSkipOp: z.boolean(),
   showDanmakuTimeline: z.boolean(),
+  enableFixedSkip: z.boolean(),
+  fixedSkipSeconds: z.number().int().positive().default(90),
+  /**
+   * When enabled, automatically reduce danmaku in high-density segments
+   */
+  autoDensity: z.boolean(),
+  /**
+   * When enabled, automatically load danmaku for the next episode
+   * when the current episode reaches 80% playback
+   */
+  autoNextEpisode: z.boolean(),
+  enableFullscreenInteraction: z.boolean(),
+  enableTranslation: z.boolean(),
+  translationTargetLang: z.enum(['en', 'ja', 'zh', 'ko']).default('en'),
+  /** Anime4K/WebGPU enhancement settings. Disabled by default for compatibility. */
+  upscale: z.object({
+    enabled: z.boolean(),
+    modeId: z.enum([
+      'builtin-mode-a',
+      'builtin-mode-b',
+      'builtin-mode-c',
+      'builtin-mode-aa',
+      'builtin-mode-bb',
+      'builtin-mode-ca',
+    ]),
+    performanceTier: z.enum(['performance', 'balanced', 'quality', 'ultra']),
+    targetResolution: z.enum([
+      'x2',
+      'x4',
+      'x8',
+      '720p',
+      '1080p',
+      '2k',
+      '4k',
+      'native',
+    ]),
+    enableCrossOriginFix: z.boolean(),
+    frameInterpolation: z.object({
+      enabled: z.boolean(),
+      resolution: z.enum(['480p', '720p', '1080p']),
+    }),
+  }),
 })
 
 export const retentionPolicySchema = z.object({
@@ -69,6 +112,7 @@ export const retentionPolicySchema = z.object({
 
 const userThemeSchema = z.object({
   colorMode: z.enum(ColorMode),
+  themeId: z.string().default('neon-violet'),
 })
 
 const hotkeySchema = z.object({
@@ -78,6 +122,10 @@ const hotkeySchema = z.object({
 
 export type Hotkey = z.infer<typeof hotkeySchema>
 
+// Uses z.record instead of z.object for forward-compatibility:
+// new hotkey actions can be added in future versions, and the migration
+// logic merges them via ??= without needing schema changes.
+// A strict z.object would reject unknown keys from newer versions.
 const hotkeys = z.record(z.string(), hotkeySchema)
 
 export const extensionOptionsSchema = z.object({
@@ -146,6 +194,19 @@ export const extensionOptionsSchema = z.object({
    * Whether to limit the modifier header to requests initiated by the extension itself
    */
   restrictInitiatorDomain: z.boolean(),
+
+  /**
+   * Whether to enable multi-source danmaku merge.
+   * When enabled, after matching an episode from one provider,
+   * the extension will also search other enabled providers for the same episode
+   * and merge all danmaku together with deduplication.
+   */
+  enableMultiSourceMerge: z.boolean(),
+
+  /**
+   * Whether to show the floating action button on video pages
+   */
+  showFloatingButton: z.boolean(),
 })
 
 export type ExtensionOptions = z.infer<typeof extensionOptionsSchema>

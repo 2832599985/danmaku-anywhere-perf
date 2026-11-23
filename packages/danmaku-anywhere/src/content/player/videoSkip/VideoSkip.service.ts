@@ -2,14 +2,17 @@ import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
 import { inject, injectable } from 'inversify'
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import { uiContainer } from '@/common/ioc/uiIoc'
+import { type ILogger, LoggerSymbol } from '@/common/Logger'
+import { getKeySymbolMap } from '@/common/options/extensionOptions/hotkeys'
 import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
 import { getTrackingService } from '@/common/telemetry/getTrackingService'
 import { PerfTimer } from '@/common/utils/perf'
+import { properCase } from '@/common/utils/utils'
 import { SkipButton } from '@/content/player/components/SkipButton/SkipButton'
 import { DanmakuLayoutService } from '@/content/player/danmakuLayout/DanmakuLayout.service'
-import type { SkipTarget } from '@/content/player/videoSkip/SkipTarget'
+import { shouldAutoSkipOp } from '@/content/player/videoSkip/autoSkipOp'
+import { SkipTarget } from '@/content/player/videoSkip/SkipTarget'
 import { VideoEventService } from '../videoEvent/VideoEvent.service'
 import { parseCommentsForJumpTargets } from './videoSkipParser'
 
@@ -20,8 +23,12 @@ export class VideoSkipService {
   private logger: ILogger
 
   private enabled = false
+  private showSkipButtonEnabled = true
+  private autoSkipOpEnabled = false
+  private hasAutoSkippedOp = false
   private comments: CommentEntity[] = []
   private jumpTargets: SkipTarget[] = []
+  private onTargetsChangeCallbacks: Array<(targets: SkipTarget[]) => void> = []
   private activeButton: ActiveButtonEntry | null = null
   private currentVideo: HTMLVideoElement | null = null
 
@@ -29,9 +36,11 @@ export class VideoSkipService {
   private parseTimer: number | null = null
   private perfEnabled = false
   private perfTimer: PerfTimer
+  private skipOpHotkeyHint = ''
 
   private readonly boundHandleTimeUpdate: (event: Event) => void
   private readonly boundHandleSeek: () => void
+  private skipButtonContainer: HTMLElement | null = null
 
   constructor(
     @inject(VideoEventService)
@@ -51,12 +60,27 @@ export class VideoSkipService {
       .then((options) => {
         this.perfEnabled = options.debug
         this.perfTimer.setEnabled(options.debug)
+        this.skipOpHotkeyHint = this.formatHotkeyHint(
+          options.hotkeys?.skipOp?.key
+        )
       })
       .catch((e) => this.logger.error(e))
     extensionOptionsService.onChange((options) => {
       this.perfEnabled = options.debug
       this.perfTimer.setEnabled(options.debug)
+      this.skipOpHotkeyHint = this.formatHotkeyHint(
+        options.hotkeys?.skipOp?.key
+      )
     })
+  }
+
+  private formatHotkeyHint(key?: string): string {
+    if (!key) return ''
+    const symbolMap = getKeySymbolMap()
+    return key
+      .split('+')
+      .map((k) => (k in symbolMap ? symbolMap[k] : properCase(k)))
+      .join('+')
   }
 
   enable() {
@@ -85,8 +109,49 @@ export class VideoSkipService {
     }
   }
 
+  setPlayerOptions(opts: { showSkipButton: boolean; autoSkipOp: boolean }) {
+    this.showSkipButtonEnabled = opts.showSkipButton
+    this.autoSkipOpEnabled = opts.autoSkipOp
+
+    // If the user disables the button while it's shown, remove it immediately.
+    if (!this.showSkipButtonEnabled) {
+      this.removeSkipButton()
+    }
+
+    // Ensure settings changes take effect quickly.
+    this.lastChecked = 0
+  }
+
+  setSkipButtonContainer(container: HTMLElement) {
+    this.skipButtonContainer = container
+  }
+
+  /**
+   * Returns the currently parsed jump targets (OP/ED regions).
+   */
+  getJumpTargets(): readonly SkipTarget[] {
+    return this.jumpTargets
+  }
+
+  /**
+   * Register a callback that fires whenever jump targets are re-parsed.
+   */
+  onTargetsChange(callback: (targets: SkipTarget[]) => void) {
+    this.onTargetsChangeCallbacks.push(callback)
+  }
+
+  /**
+   * Remove a previously registered targets-change callback.
+   */
+  offTargetsChange(callback: (targets: SkipTarget[]) => void) {
+    this.onTargetsChangeCallbacks = this.onTargetsChangeCallbacks.filter(
+      (cb) => cb !== callback
+    )
+  }
+
   setComments(comments: CommentEntity[]) {
     this.comments = comments
+    this.hasAutoSkippedOp = false
     if (!this.enabled) {
       return
     }
@@ -96,15 +161,31 @@ export class VideoSkipService {
   clear() {
     this.comments = []
     this.jumpTargets = []
+    this.hasAutoSkippedOp = false
     if (this.parseTimer !== null) {
       window.clearTimeout(this.parseTimer)
       this.parseTimer = null
     }
     if (this.activeButton) {
       this.activeButton.root.unmount()
+      this.activeButton.node.remove()
       this.activeButton = null
     }
     this.currentVideo = null
+    for (const cb of this.onTargetsChangeCallbacks) {
+      cb(this.jumpTargets)
+    }
+  }
+
+  debugShowSkipButton() {
+    this.logger.debug('Showing debug skip button')
+    this.removeSkipButton()
+    const time = this.currentVideo?.currentTime ?? 120
+    const target = new SkipTarget({
+      startTime: time,
+      endTime: time + 90,
+    })
+    this.showSkipButton(target)
   }
 
   private setupEventListeners() {
@@ -139,6 +220,24 @@ export class VideoSkipService {
     const video = event.target as HTMLVideoElement
     this.currentVideo = video
     const currentTime = video.currentTime
+
+    if (this.autoSkipOpEnabled) {
+      for (const target of this.jumpTargets) {
+        if (!shouldAutoSkipOp(target, currentTime, this.hasAutoSkippedOp))
+          continue
+
+        this.logger.debug('Auto skipping OP', target)
+        this.jumpToTime(target.endTime)
+        target.close()
+        this.hasAutoSkippedOp = true
+        this.removeSkipButton()
+        return
+      }
+    }
+
+    if (!this.showSkipButtonEnabled) {
+      return
+    }
 
     for (const target of this.jumpTargets) {
       if (
@@ -186,21 +285,27 @@ export class VideoSkipService {
           targets: this.jumpTargets.length,
         })
       }
+      for (const cb of this.onTargetsChangeCallbacks) {
+        cb(this.jumpTargets)
+      }
     }, 0)
   }
 
   private showSkipButton(target: SkipTarget) {
-    if (!this.layoutManager.wrapper) return
+    // Use dedicated container if available, fallback to wrapper for backwards compatibility
+    const container = this.skipButtonContainer ?? this.layoutManager.wrapper
+    if (!container) return
 
     this.logger.debug('Creating skip buttons', target)
 
     const mountNode = document.createElement('div')
-    this.layoutManager.wrapper.appendChild(mountNode)
+    container.appendChild(mountNode)
 
     const root = createRoot(mountNode)
     root.render(
       createElement(SkipButton, {
         target,
+        hotkeyHint: this.skipOpHotkeyHint,
         onClick: () => {
           getTrackingService().track('clickSkipButton', { target })
           this.jumpToTime(target.endTime)
@@ -215,6 +320,45 @@ export class VideoSkipService {
 
     this.activeButton = { node: mountNode, root }
     target.show()
+  }
+
+  /**
+   * Programmatically skip the first available OP/ED target.
+   * Used by the skipOp hotkey action.
+   */
+  skipOpNow() {
+    if (!this.enabled || this.jumpTargets.length === 0) {
+      this.logger.debug('skipOpNow: no targets available')
+      return
+    }
+
+    const currentTime = this.currentVideo?.currentTime ?? 0
+
+    for (const target of this.jumpTargets) {
+      if (!target.isClosed() && target.isInRange(currentTime)) {
+        this.logger.debug('skipOpNow: skipping target', target)
+        this.jumpToTime(target.endTime)
+        target.close()
+        this.removeSkipButton()
+        return
+      }
+    }
+
+    // If not currently in range but targets exist, skip the first un-closed target
+    for (const target of this.jumpTargets) {
+      if (!target.isClosed()) {
+        this.logger.debug(
+          'skipOpNow: skipping to first available target',
+          target
+        )
+        this.jumpToTime(target.endTime)
+        target.close()
+        this.removeSkipButton()
+        return
+      }
+    }
+
+    this.logger.debug('skipOpNow: all targets already closed')
   }
 
   private jumpToTime(targetTime: number) {

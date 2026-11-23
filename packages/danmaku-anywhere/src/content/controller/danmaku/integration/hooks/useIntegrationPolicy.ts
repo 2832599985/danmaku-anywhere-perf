@@ -1,9 +1,14 @@
+import type {
+  EpisodeMeta,
+  WithSeason,
+} from '@danmaku-anywhere/danmaku-converter'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '@/common/components/Toast/toastStore'
-import { DanmakuSourceType } from '@/common/danmaku/enums'
 import { Logger } from '@/common/Logger'
+import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
 import { isConfigPermissive } from '@/common/options/mountConfig/isPermissive'
+import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { getTrackingService } from '@/common/telemetry/getTrackingService'
 import { useActiveConfig } from '@/content/controller/common/context/useActiveConfig'
 import { useActiveIntegration } from '@/content/controller/common/context/useActiveIntegration'
@@ -24,7 +29,13 @@ export const useIntegrationPolicy = () => {
 
   const [observer, setObserver] = useState<MediaObserver | null>(null)
 
-  const videoId = useStore.use.videoId?.()
+  const activeFrameVideoKey = useStore((s) => {
+    const af = s.frame.activeFrame
+    if (!af?.hasVideo) {
+      return undefined
+    }
+    return `${af.frameId}:${af.videoChangeCount}`
+  })
   const unmountDanmaku = useUnmountDanmaku()
   const {
     setMediaInfo,
@@ -36,10 +47,12 @@ export const useIntegrationPolicy = () => {
   } = useStore.use.integration()
 
   const matchEpisode = useMatchEpisode()
-  const { loadMutation, mountDanmaku } = useLoadDanmaku()
+  const { loadMutation, mergeDanmaku } = useLoadDanmaku()
 
   const integrationPolicy = useActiveIntegration()
   const activeConfig = useActiveConfig()
+
+  const { data: extensionOptions } = useExtensionOptions()
 
   const isManual = useSyncIntegrationManualMode()
   const isConfigIncomplete = useWarnIncompleteConfig()
@@ -108,6 +121,7 @@ export const useIntegrationPolicy = () => {
           title: state.title,
           episodeNumber: state.episode,
           originalTitle: state.originalTitle,
+          preferredProviders: activeConfig.preferredProviders,
         }
 
         toast.info(
@@ -121,38 +135,79 @@ export const useIntegrationPolicy = () => {
             if (result.data.status !== 'success') {
               return
             }
-            if (result.data.data.provider === DanmakuSourceType.MacCMS) {
-              toast.success(
-                t(
-                  'integration.alert.matchedLocalDanmaku',
-                  'Matched local danmaku'
-                )
-              )
-              void mountDanmaku([result.data.data])
-            } else {
-              loadMutation.mutate(
-                {
-                  type: 'by-meta',
-                  meta: result.data.data,
-                  options: {
-                    forceUpdate: false,
-                  },
+            const matchedMeta = result.data.data as WithSeason<EpisodeMeta>
+            loadMutation.mutate(
+              {
+                type: 'by-meta',
+                meta: matchedMeta,
+                options: {
+                  forceUpdate: false,
                 },
-                {
-                  onError: () => {
-                    toast.error(
-                      t(
-                        'danmaku.alert.fetchError',
-                        'Failed to fetch danmaku: {{message}}',
-                        {
-                          message: episodeMatchPayload.title,
+              },
+              {
+                onSuccess: () => {
+                  // After primary load, trigger multi-source merge if enabled
+                  if (extensionOptions?.enableMultiSourceMerge) {
+                    const providerConfigId = matchedMeta.season.providerConfigId
+                    chromeRpcClient
+                      .episodeFetchMultiSource({
+                        primaryMeta: matchedMeta,
+                        excludeProviderConfigId: providerConfigId,
+                      })
+                      .then((res) => {
+                        const fetchResult = res.data
+                        if (
+                          fetchResult.comments.length > 0 &&
+                          fetchResult.sources.length > 0
+                        ) {
+                          const sourceNames = fetchResult.sources
+                            .map((s) => `${s.provider}(${s.commentCount})`)
+                            .join(', ')
+                          // Create a synthetic episode to use with mergeDanmaku
+                          const syntheticEpisode = {
+                            ...matchedMeta,
+                            comments: fetchResult.comments,
+                            commentCount: fetchResult.comments.length,
+                            id: -1,
+                          }
+                          mergeDanmaku([
+                            syntheticEpisode as unknown as Parameters<
+                              typeof mergeDanmaku
+                            >[0][0],
+                          ])
+                          toast.info(
+                            t(
+                              'danmaku.alert.multiSourceMerged',
+                              'Merged danmaku from {{sources}}',
+                              { sources: sourceNames }
+                            )
+                          )
                         }
-                      )
+                        if (fetchResult.failures.length > 0) {
+                          Logger.debug(
+                            'Multi-source fetch failures:',
+                            fetchResult.failures
+                          )
+                        }
+                      })
+                      .catch((err: unknown) => {
+                        Logger.debug('Multi-source merge failed:', err)
+                      })
+                  }
+                },
+                onError: () => {
+                  toast.error(
+                    t(
+                      'danmaku.alert.fetchError',
+                      'Failed to fetch danmaku: {{message}}',
+                      {
+                        message: episodeMatchPayload.title,
+                      }
                     )
-                  },
-                }
-              )
-            }
+                  )
+                },
+              }
+            )
           },
         })
       },
@@ -179,11 +234,11 @@ export const useIntegrationPolicy = () => {
     if (!observer) {
       return
     }
-    if (videoId) {
+    if (activeFrameVideoKey !== undefined) {
       observer.run()
     } else {
       observer.reset()
       resetIntegration()
     }
-  }, [videoId, observer])
+  }, [activeFrameVideoKey, observer])
 }

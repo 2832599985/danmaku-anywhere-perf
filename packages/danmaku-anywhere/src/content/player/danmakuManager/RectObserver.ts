@@ -59,12 +59,8 @@ export class RectObserver {
     this.interval = setInterval(() => {
       const newRect = getRect(this.node)
 
-      if (!this.currentRect) {
-        return clearInterval(this.interval!)
-      }
-
       if (areRectsEqual(this.currentRect, newRect)) {
-        clearInterval(this.interval!)
+        clearInterval(this.interval as ReturnType<typeof setInterval>)
       } else {
         this.setCurrentRect(newRect)
       }

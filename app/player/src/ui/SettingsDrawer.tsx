@@ -1,0 +1,863 @@
+import { Box, Button, Modal, Stack, Typography } from '@mui/material'
+import { alpha } from '@mui/material/styles'
+import { getPlatform } from '@/platform'
+import { usePlayerStore } from '@/store/playerStore'
+import {
+  halftoneSx,
+  INK,
+  INK_FOCUS_SX,
+  INK_STAGE,
+  inkStampPressSx,
+  LINE_FRAME,
+  LINE_STRONG,
+  LINE_SUBTLE,
+  MONO,
+  MOTION_PANEL,
+  MOTION_SUBPAGE,
+  PAPER,
+  VERMILION,
+} from '@/theme/theme'
+import { DanmakuSettings } from './DanmakuSettings'
+import { ArrowRightIcon, MinusIcon, PlusIcon } from './icons'
+import { InkSwitch } from './ink'
+import { SubtitleSettings } from './SubtitleSettings'
+import { UpscaleSettings } from './UpscaleSettings'
+
+type SettingsPage =
+  | 'playback'
+  | 'danmaku'
+  | 'subtitle'
+  | 'upscale'
+  | 'shortcuts'
+  | 'about'
+
+const SHORTCUTS: Array<{
+  key: string
+  zh: string
+  en: string
+}> = [
+  { key: 'Space / K', zh: '播放暂停', en: 'PLAY' },
+  { key: '← →', zh: '快退快进', en: 'SEEK' },
+  { key: '→ 长按', zh: '临时倍速', en: 'HOLD SPEED' },
+  { key: '← 长按', zh: '倍速快退', en: 'HOLD REWIND' },
+  { key: '↑ ↓ / 滚轮', zh: '音量', en: 'VOLUME' },
+  { key: 'F', zh: '全屏', en: 'FULLSCREEN' },
+  { key: 'P / Esc', zh: '小窗 / 退出小窗', en: 'MINI' },
+  { key: 'M', zh: '静音', en: 'MUTE' },
+  { key: 'D', zh: '弹幕开关', en: 'DANMAKU' },
+  { key: '[ ]', zh: '上一集下一集', en: 'PREV/NEXT' },
+  { key: 'U', zh: '超分开关', en: 'UPSCALE' },
+  { key: 'C', zh: '增强对比', en: 'COMPARE' },
+  { key: 'S', zh: '字幕开关', en: 'SUBTITLE' },
+  { key: 'Shift+S / Ctrl+S', zh: '纯净截图', en: 'SCREENSHOT' },
+  { key: ', .', zh: '字幕时轴±100ms', en: 'SUB OFFSET' },
+  { key: 'T', zh: 'AI 字幕 双语/译文/原文', en: 'AI SUB MODE' },
+]
+
+interface StepperCardProps {
+  label: string
+  /** mono micro-label under the title (e.g. "SEEK STEP · ← / →"). */
+  sub?: string
+  unit?: string
+  value: number
+  min: number
+  max: number
+  /** increment per click (default 1; 0.5 for the hold-speed stepper). */
+  step?: number
+  onChange: (value: number) => void
+}
+
+const StepperCard = ({
+  label,
+  sub,
+  unit = '',
+  value,
+  min,
+  max,
+  step = 1,
+  onChange,
+}: StepperCardProps) => (
+  // Bordered card per design (the old version had no frame at all).
+  <Box
+    sx={{
+      flex: 1,
+      border: LINE_SUBTLE,
+      background: alpha(PAPER, 0.04),
+      padding: '14px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '10px',
+    }}
+  >
+    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+      <Typography sx={{ fontSize: 14, fontWeight: 900, color: PAPER }}>
+        {label}
+      </Typography>
+      {sub && (
+        <Typography
+          sx={{
+            fontFamily: MONO,
+            fontSize: 9,
+            letterSpacing: '0.16em',
+            color: alpha(PAPER, 0.45),
+            textTransform: 'uppercase',
+          }}
+        >
+          {sub}
+        </Typography>
+      )}
+    </Box>
+    <Stack
+      direction="row"
+      alignItems="center"
+      justifyContent="center"
+      spacing={1}
+    >
+      <Box
+        component="button"
+        type="button"
+        aria-label={`减少${label}`}
+        onClick={() =>
+          onChange(Math.max(min, Math.round((value - step) * 100) / 100))
+        }
+        sx={{
+          appearance: 'none',
+          width: 40,
+          height: 40,
+          padding: 0,
+          border: LINE_STRONG,
+          background: 'transparent',
+          color: PAPER,
+          cursor: 'pointer',
+          fontWeight: 700,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'background-color 0ms, color 0ms, border-color 0ms',
+          '&:hover': {
+            background: PAPER,
+            color: INK,
+          },
+          ...INK_FOCUS_SX,
+        }}
+      >
+        <MinusIcon size={16} />
+      </Box>
+      <Box sx={{ minWidth: 74, textAlign: 'center' }}>
+        <Typography
+          sx={{
+            fontFamily: MONO,
+            fontSize: 26,
+            fontWeight: 700,
+            color: PAPER,
+            lineHeight: 1.3,
+            overflow: 'hidden',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {value}
+          {unit && (
+            <Box
+              component="span"
+              sx={{ fontSize: 13, color: alpha(PAPER, 0.5) }}
+            >
+              {' '}
+              {unit}
+            </Box>
+          )}
+        </Typography>
+      </Box>
+      <Box
+        component="button"
+        type="button"
+        aria-label={`增加${label}`}
+        onClick={() =>
+          onChange(Math.min(max, Math.round((value + step) * 100) / 100))
+        }
+        sx={{
+          appearance: 'none',
+          width: 40,
+          height: 40,
+          padding: 0,
+          border: LINE_STRONG,
+          background: PAPER,
+          color: INK,
+          cursor: 'pointer',
+          fontWeight: 700,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          ...inkStampPressSx(3, VERMILION, {
+            background: VERMILION,
+            color: PAPER,
+            borderColor: VERMILION,
+          }),
+          ...INK_FOCUS_SX,
+        }}
+      >
+        <PlusIcon size={16} />
+      </Box>
+    </Stack>
+  </Box>
+)
+
+/** One bordered row: label (+ optional hint) and an ON/OFF pill. */
+const ToggleRow = ({
+  label,
+  hint,
+  on,
+  onToggle,
+}: {
+  label: string
+  hint?: string
+  on: boolean
+  onToggle: () => void
+}) => (
+  <Box sx={{ border: LINE_SUBTLE, padding: '16px 12px' }}>
+    <Stack
+      direction="row"
+      alignItems="center"
+      justifyContent="space-between"
+      spacing={2}
+    >
+      <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <Typography sx={{ fontSize: 12, fontWeight: 700, color: PAPER }}>
+          {label}
+        </Typography>
+        {hint && (
+          <Typography
+            sx={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: alpha(PAPER, 0.5),
+              mt: '3px',
+              lineHeight: 1.4,
+            }}
+          >
+            {hint}
+          </Typography>
+        )}
+      </Box>
+      <InkSwitch checked={on} onChange={onToggle} label={label} />
+    </Stack>
+  </Box>
+)
+
+/** 跳过 OP/ED mode picker (自动 / 询问 / 关) — lives on 播放, not 快捷键. */
+const SkipOpEdCard = () => {
+  const playback = usePlayerStore((s) => s.playbackSettings)
+  const updatePlaybackSettings = usePlayerStore((s) => s.updatePlaybackSettings)
+
+  return (
+    <Box
+      sx={{
+        flex: 1,
+        border: LINE_SUBTLE,
+        background: alpha(PAPER, 0.04),
+        padding: '14px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+      }}
+    >
+      <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+        <Typography sx={{ fontSize: 14, fontWeight: 900, color: PAPER }}>
+          跳过 OP / ED
+        </Typography>
+        <Typography
+          sx={{
+            fontFamily: MONO,
+            fontSize: 9,
+            letterSpacing: '0.16em',
+            color: alpha(PAPER, 0.45),
+            textTransform: 'uppercase',
+          }}
+        >
+          SKIP OPENING · 弹幕密度推断
+        </Typography>
+      </Box>
+      <Box
+        sx={{
+          display: 'flex',
+          border: LINE_STRONG,
+          cursor: 'pointer',
+          alignSelf: 'flex-start',
+        }}
+      >
+        {(['自动', '询问', '关'] as const).map((mode) => {
+          const active =
+            (mode === '自动' && playback.skipOpEd === 'auto') ||
+            (mode === '询问' && playback.skipOpEd === 'ask') ||
+            (mode === '关' && playback.skipOpEd === 'off')
+          return (
+            <Box
+              key={mode}
+              component="button"
+              type="button"
+              aria-pressed={active}
+              onClick={() =>
+                updatePlaybackSettings({
+                  skipOpEd:
+                    mode === '自动' ? 'auto' : mode === '询问' ? 'ask' : 'off',
+                })
+              }
+              sx={{
+                appearance: 'none',
+                border: 0,
+                padding: '5px 10px',
+                fontFamily: MONO,
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+                background: active ? VERMILION : 'transparent',
+                color: active ? PAPER : alpha(PAPER, 0.4),
+                transition: 'background-color 0ms, color 0ms',
+                '&:hover': {
+                  background: active ? VERMILION : alpha(PAPER, 0.12),
+                  color: PAPER,
+                },
+                ...INK_FOCUS_SX,
+              }}
+            >
+              {mode}
+            </Box>
+          )
+        })}
+      </Box>
+      <Typography
+        sx={{
+          fontFamily: MONO,
+          fontSize: 10,
+          fontWeight: 700,
+          color: alpha(PAPER, 0.5),
+          lineHeight: 1.5,
+        }}
+      >
+        自动 = 进入 OP 直接跳过；询问 = 右下角给按钮
+      </Typography>
+    </Box>
+  )
+}
+
+const PlaybackSettingsPage = () => {
+  const playback = usePlayerStore((s) => s.playbackSettings)
+  const updatePlaybackSettings = usePlayerStore((s) => s.updatePlaybackSettings)
+  const isTauri = getPlatform().isTauri
+
+  const pickScreenshotFolder = async () => {
+    const dir = await getPlatform().pickFolder()
+    if (dir) updatePlaybackSettings({ screenshotDir: dir })
+  }
+
+  return (
+    <Stack spacing={2}>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: 2,
+        }}
+      >
+        <StepperCard
+          label="快进步长"
+          sub="SEEK STEP · ← / →"
+          unit="秒"
+          value={playback.seekStepSec}
+          min={1}
+          max={120}
+          onChange={(v) => updatePlaybackSettings({ seekStepSec: v })}
+        />
+        <StepperCard
+          label="音量步长"
+          sub="VOLUME STEP · ↑ / ↓"
+          unit="%"
+          value={Math.round(playback.volumeStep * 100)}
+          min={1}
+          max={50}
+          onChange={(v) => updatePlaybackSettings({ volumeStep: v / 100 })}
+        />
+        <StepperCard
+          label="长按倍速"
+          sub="HOLD · ← →"
+          unit="×"
+          value={playback.holdSpeed}
+          min={1.5}
+          max={8}
+          step={0.5}
+          onChange={(v) => updatePlaybackSettings({ holdSpeed: v })}
+        />
+      </Box>
+
+      <ToggleRow
+        label="自动连播"
+        hint="一集放完自动打开播放列表里的下一个"
+        on={playback.autoAdvance}
+        onToggle={() =>
+          updatePlaybackSettings({ autoAdvance: !playback.autoAdvance })
+        }
+      />
+      <ToggleRow
+        label="自动加入同系列剧集"
+        hint="打开一集时，把同目录里同一批的其它集排到它前后（按文件名前缀判定；认不出集数的文件不动）"
+        on={playback.autoAddSiblings}
+        onToggle={() =>
+          updatePlaybackSettings({
+            autoAddSiblings: !playback.autoAddSiblings,
+          })
+        }
+      />
+      <Box sx={{ border: LINE_SUBTLE, padding: '16px 12px' }}>
+        <Stack spacing={1.25}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            spacing={2}
+          >
+            <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+              <Typography sx={{ fontSize: 12, fontWeight: 700, color: PAPER }}>
+                截图同时保存到本地
+              </Typography>
+              <Typography
+                sx={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: alpha(PAPER, 0.5),
+                  mt: '3px',
+                  lineHeight: 1.4,
+                }}
+              >
+                Shift+S / Ctrl+S
+                截图默认写入剪贴板；右键底栏相机按钮可自由勾选超分/原片、弹幕与字幕图层
+              </Typography>
+            </Box>
+            <InkSwitch
+              checked={playback.saveScreenshotToFile}
+              onChange={(checked) =>
+                updatePlaybackSettings({ saveScreenshotToFile: checked })
+              }
+              label="截图同时保存到本地"
+            />
+          </Stack>
+          {isTauri && playback.saveScreenshotToFile && (
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={1}
+              sx={{
+                pt: 1,
+                borderTop: `1px dashed ${alpha(PAPER, 0.16)}`,
+              }}
+            >
+              <Typography
+                noWrap
+                title={playback.screenshotDir || '默认：图片\\DanmakuPlayer'}
+                sx={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontFamily: MONO,
+                  fontSize: 11,
+                  color: alpha(PAPER, 0.65),
+                }}
+              >
+                {playback.screenshotDir || '默认：图片\\DanmakuPlayer'}
+              </Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => void pickScreenshotFolder()}
+                sx={{ textTransform: 'none', fontWeight: 700, flexShrink: 0 }}
+              >
+                选择目录
+              </Button>
+              {playback.screenshotDir && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => updatePlaybackSettings({ screenshotDir: '' })}
+                  sx={{ textTransform: 'none', fontWeight: 700, flexShrink: 0 }}
+                >
+                  恢复默认
+                </Button>
+              )}
+            </Stack>
+          )}
+        </Stack>
+      </Box>
+      <SkipOpEdCard />
+    </Stack>
+  )
+}
+
+const ShortcutsPage = () => (
+  <Stack spacing={3}>
+    <Box
+      sx={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: '10px 26px',
+      }}
+    >
+      {SHORTCUTS.map((sc) => (
+        <Box
+          key={sc.key}
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            borderBottom: `1px dashed ${alpha(PAPER, 0.18)}`,
+            paddingBottom: '9px',
+          }}
+        >
+          <Box
+            sx={{
+              minWidth: 74,
+              padding: '5px 9px',
+              border: LINE_STRONG,
+              background: alpha(PAPER, 0.08),
+              textAlign: 'center',
+              boxShadow: `3px 3px 0 ${alpha(PAPER, 0.25)}`,
+            }}
+          >
+            <Typography
+              sx={{
+                fontFamily: MONO,
+                fontSize: 13,
+                fontWeight: 700,
+                color: PAPER,
+              }}
+            >
+              {sc.key}
+            </Typography>
+          </Box>
+          <Typography
+            sx={{ flex: 1, fontSize: 13, fontWeight: 700, color: PAPER }}
+          >
+            {sc.zh}
+          </Typography>
+          <Typography
+            sx={{
+              fontFamily: MONO,
+              fontSize: 10,
+              color: alpha(PAPER, 0.4),
+              letterSpacing: '0.1em',
+            }}
+          >
+            {sc.en}
+          </Typography>
+        </Box>
+      ))}
+    </Box>
+  </Stack>
+)
+
+const AboutPage = () => (
+  <Stack spacing={2}>
+    <Box>
+      <Typography
+        sx={{
+          fontSize: 14,
+          fontWeight: 700,
+          marginBottom: '8px',
+          color: PAPER,
+        }}
+      >
+        弹幕播放器
+      </Typography>
+      <Typography
+        sx={{
+          fontFamily: MONO,
+          fontSize: 10,
+          fontWeight: 700,
+          color: alpha(PAPER, 0.6),
+          marginBottom: '2px',
+        }}
+      >
+        v0.9.2 · Tauri 2 · WebGPU
+      </Typography>
+      <Typography
+        sx={{
+          fontFamily: MONO,
+          fontSize: 10,
+          fontWeight: 700,
+          color: alpha(PAPER, 0.6),
+        }}
+      >
+        HEVC HW · HDR10 ✓
+      </Typography>
+    </Box>
+
+    <Box>
+      <Typography
+        sx={{
+          fontFamily: MONO,
+          fontSize: 9,
+          color: alpha(PAPER, 0.4),
+          lineHeight: 1.6,
+        }}
+      >
+        补帧模型（Framegen）权重文件仅限个人、非商业使用。
+        <br />
+        The Framegen weights are licensed for personal, non-commercial use only.
+      </Typography>
+    </Box>
+  </Stack>
+)
+
+export const SettingsDrawer = () => {
+  const settingsOpen = usePlayerStore((s) => s.settingsOpen)
+  const setSettingsOpen = usePlayerStore((s) => s.setSettingsOpen)
+  // Section lives in the store so the top bar / controls can deep-link here.
+  const page = usePlayerStore((s) => s.settingsSection) as SettingsPage
+  const setPage = usePlayerStore((s) => s.setSettingsSection)
+
+  const navItems: Array<{ id: SettingsPage; zh: string; en: string }> = [
+    { id: 'playback', zh: '播放', en: 'PLAYBACK' },
+    { id: 'danmaku', zh: '弹幕', en: 'DANMAKU' },
+    { id: 'subtitle', zh: '字幕', en: 'SUBTITLE' },
+    { id: 'upscale', zh: '画质增强', en: 'ENHANCE' },
+    { id: 'shortcuts', zh: '快捷键', en: 'SHORTCUTS' },
+    { id: 'about', zh: '关于', en: 'ABOUT' },
+  ]
+
+  const getTitle = (): string => {
+    const item = navItems.find((n) => n.id === page)
+    return item?.zh ?? ''
+  }
+
+  return (
+    <Modal
+      open={settingsOpen}
+      onClose={() => setSettingsOpen(false)}
+      slotProps={{
+        backdrop: { sx: { backgroundColor: alpha(INK, 0.8) } },
+      }}
+    >
+      <Box
+        data-settings-page
+        sx={{
+          position: 'absolute',
+          inset: 0,
+          background: INK_STAGE,
+          display: 'flex',
+          zIndex: 1300,
+          animation: `ink-panel-in ${MOTION_PANEL}`,
+          '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
+        }}
+      >
+        {/* Left navigation rail */}
+        <Box
+          sx={{
+            width: 210,
+            background: INK,
+            borderRight: LINE_FRAME,
+            display: 'flex',
+            flexDirection: 'column',
+            padding: '18px 12px',
+            gap: '16px',
+            overflowY: 'auto',
+          }}
+        >
+          {/* Header */}
+          <Box>
+            <Typography
+              sx={{
+                fontFamily: MONO,
+                fontSize: 9,
+                fontWeight: 700,
+                color: VERMILION,
+                textTransform: 'uppercase',
+                letterSpacing: '0.28em',
+                marginBottom: '4px',
+              }}
+            >
+              SETTINGS
+            </Typography>
+            <Typography
+              sx={{
+                fontSize: 18,
+                fontWeight: 900,
+                color: PAPER,
+                letterSpacing: '0.06em',
+              }}
+            >
+              「設置」
+            </Typography>
+          </Box>
+
+          {/* Navigation items */}
+          <Stack spacing={0.5} sx={{ flex: 1 }}>
+            {navItems.map((item) => {
+              const isSelected = item.id === page
+              return (
+                <Box
+                  component="button"
+                  key={item.id}
+                  type="button"
+                  aria-label={item.zh}
+                  aria-current={isSelected ? 'page' : undefined}
+                  onClick={() => setPage(item.id)}
+                  sx={{
+                    appearance: 'none',
+                    cursor: 'pointer',
+                    padding: '8px 12px',
+                    border: 0,
+                    borderLeft: isSelected
+                      ? `5px solid ${VERMILION}`
+                      : '5px solid transparent',
+                    background: isSelected ? PAPER : 'transparent',
+                    color: isSelected ? INK : alpha(PAPER, 0.5),
+                    textAlign: 'left',
+                    transition:
+                      'background-color 0ms, color 0ms, border-color 0ms',
+                    '&:focus-visible': {
+                      outline: `2px solid ${VERMILION}`,
+                      outlineOffset: '-2px',
+                    },
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1px',
+                    '&:hover': {
+                      background: isSelected ? PAPER : alpha(PAPER, 0.08),
+                      color: isSelected ? INK : PAPER,
+                    },
+                  }}
+                >
+                  <Box component="span" sx={{ fontSize: 12, fontWeight: 700 }}>
+                    {item.zh}
+                  </Box>
+                  <Box
+                    component="span"
+                    sx={{
+                      fontFamily: MONO,
+                      fontSize: 9,
+                      fontWeight: 700,
+                      letterSpacing: '0.16em',
+                      color: isSelected ? alpha(INK, 0.55) : alpha(PAPER, 0.3),
+                    }}
+                  >
+                    {item.en}
+                  </Box>
+                </Box>
+              )
+            })}
+          </Stack>
+
+          {/* Bottom info */}
+          <Stack spacing={0.5}>
+            <Typography
+              sx={{
+                fontFamily: MONO,
+                fontSize: 10,
+                fontWeight: 700,
+                color: alpha(PAPER, 0.4),
+                lineHeight: 1.4,
+              }}
+            >
+              v0.9.2 · Tauri 2
+              <br />
+              WebGPU
+            </Typography>
+            <Typography
+              sx={{
+                fontFamily: MONO,
+                fontSize: 10,
+                fontWeight: 700,
+                color: alpha(PAPER, 0.4),
+              }}
+            >
+              HEVC HW · HDR10 ✓
+            </Typography>
+          </Stack>
+        </Box>
+
+        {/* Right content area */}
+        <Box
+          sx={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            // The signature paper grain, barely there (3.5% dots on a 16px
+            // grid): enough to stop the page reading as flat black.
+            ...halftoneSx(0.035, 16),
+          }}
+        >
+          {/* Header row */}
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            sx={{
+              padding: '16px 24px',
+              borderBottom: LINE_STRONG,
+              flexShrink: 0,
+            }}
+          >
+            <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+              <Typography
+                sx={{
+                  fontFamily: MONO,
+                  fontSize: 9,
+                  fontWeight: 700,
+                  color: alpha(PAPER, 0.5),
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  marginBottom: '2px',
+                }}
+              >
+                {page.toUpperCase()}
+              </Typography>
+              <Typography
+                sx={{
+                  fontSize: 24,
+                  fontWeight: 900,
+                  color: PAPER,
+                  letterSpacing: '0.06em',
+                }}
+              >
+                {getTitle()}
+              </Typography>
+            </Box>
+            <Button
+              variant="outlined"
+              size="small"
+              endIcon={<ArrowRightIcon size={16} />}
+              onClick={() => setSettingsOpen(false)}
+              sx={{
+                textTransform: 'none',
+                fontWeight: 700,
+              }}
+            >
+              返回播放
+            </Button>
+          </Stack>
+
+          {/* Content area */}
+          <Box
+            key={page}
+            data-settings-content
+            sx={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '24px 28px',
+              minWidth: 0,
+              maxWidth: 860,
+              margin: '0 auto',
+              width: '100%',
+              animation: `ink-settings-page-in ${MOTION_SUBPAGE}`,
+              '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
+            }}
+          >
+            {page === 'playback' && <PlaybackSettingsPage />}
+            {page === 'danmaku' && <DanmakuSettings />}
+            {page === 'subtitle' && <SubtitleSettings />}
+            {page === 'upscale' && <UpscaleSettings />}
+            {page === 'shortcuts' && <ShortcutsPage />}
+            {page === 'about' && <AboutPage />}
+          </Box>
+        </Box>
+      </Box>
+    </Modal>
+  )
+}

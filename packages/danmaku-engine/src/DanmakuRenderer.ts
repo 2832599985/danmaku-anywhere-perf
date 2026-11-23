@@ -5,7 +5,9 @@ import {
 import { create, type Manager } from '@mr-quin/danmu'
 import { type DanmakuOptions, DEFAULT_DANMAKU_OPTIONS } from './options'
 import {
+  applyColorFilter,
   applyFilter,
+  applyModeFilter,
   type ParsedComment,
   type TimedComment,
   transformComment,
@@ -20,10 +22,14 @@ import type {
 } from './worker/types'
 
 const WORKER_THRESHOLD = 5000
-const WORKER_CHUNK_SIZE = 1000
+// Smaller chunks reduce "time to first parsed batch", which helps keep playback
+// timeline aligned (avoids main-thread on-demand parsing early in playback).
+const WORKER_CHUNK_SIZE = 300
 const IDLE_CHUNK_SIZE = 300
 const IDLE_MIN_TIME_REMAINING = 4
 const IDLE_POLYFILL_BUDGET_MS = 12
+const WARMUP_BUDGET_MS = 6
+const WARMUP_MAX_COMMENTS = 400
 
 const requestIdle = (cb: IdleRequestCallback): number => {
   if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
@@ -52,6 +58,7 @@ export type DanmakuRenderProps = {
   styles: Record<string, string>
   mode: ParsedComment['mode']
   color: string
+  gradient?: ParsedComment['gradient']
 }
 
 export type PerfReporter = (
@@ -64,6 +71,7 @@ export type RemotePreparseRequest = {
   taskId: number
   comments: CommentEntity[]
   chunkSize: number
+  startIndex: number
 }
 
 export type RemotePreparseChunk = {
@@ -173,6 +181,12 @@ export class DanmakuRenderer {
       count: timedComments.length,
     })
 
+    // Warm up parsing for the comments closest to the current playback cursor.
+    // This reduces the chance of the timeupdate loop needing to synchronously
+    // transform comments on the main thread (which makes some comments appear late).
+    const preparseStartIndex = this.getPreparseStartIndex(timedComments)
+    this.warmupPreparse(timedComments, preparseStartIndex)
+
     const managerStart = performance.now()
     const manager = create<ParsedComment>({
       trackHeight: this.config.trackHeight,
@@ -194,6 +208,9 @@ export class DanmakuRenderer {
           // Setting it using manager.setStyle applies the style AFTER size is calculated so it's too late
           node.style.fontSize = `${this.config.style.fontSize}px`
           node.style.fontFamily = this.config.style.fontFamily
+          if (this.config.style.lineHeight) {
+            node.style.lineHeight = String(this.config.style.lineHeight)
+          }
 
           // apply the parser-generated styles
           Object.entries(danmaku.data.style).forEach(([key, value]) => {
@@ -211,10 +228,16 @@ export class DanmakuRenderer {
             styles: { ...danmaku.data.style },
             mode: danmaku.data.mode,
             color: danmaku.data.color,
+            gradient: danmaku.data.gradient,
           })
         },
         willRender: (ref) => {
-          if (applyFilter(ref.danmaku.data.text, this.config.filters)) {
+          const data = ref.danmaku.data
+          if (
+            applyFilter(data.text, this.config.filters) ||
+            applyModeFilter(data.mode, this.config.modeFilter) ||
+            applyColorFilter(data.color, this.config.colorFilter)
+          ) {
             ref.prevent = true
           }
           return ref
@@ -282,6 +305,25 @@ export class DanmakuRenderer {
     this.manager.setStyle('pointerEvents', 'none')
     this.manager.setStyle('fontSize', `${this.config.style.fontSize}px`)
     this.manager.setStyle('fontFamily', this.config.style.fontFamily)
+    if (this.config.style.lineHeight) {
+      this.manager.setStyle('lineHeight', String(this.config.style.lineHeight))
+    }
+
+    const { textStroke, textShadow } = this.config.style
+    const node = this.manager.container.node
+    if (textStroke) {
+      node.style.setProperty(
+        '--da-text-stroke',
+        `${textStroke.width}px ${textStroke.color}`
+      )
+    } else {
+      node.style.removeProperty('--da-text-stroke')
+    }
+    if (textShadow) {
+      node.style.setProperty('--da-text-shadow', textShadow)
+    } else {
+      node.style.removeProperty('--da-text-shadow')
+    }
   }
 
   private setArea = () => {
@@ -302,9 +344,24 @@ export class DanmakuRenderer {
   private mergeConfig = (config?: Partial<DanmakuOptions>): DanmakuOptions => {
     if (!config) return this.config
 
-    // manually merge styles
+    // manually merge nested objects
     const style = { ...this.config.style, ...config.style }
-    return { ...this.config, ...config, style }
+    const area = { ...this.config.area, ...config.area }
+    const specialComments = {
+      ...this.config.specialComments,
+      ...config.specialComments,
+    }
+    const modeFilter = { ...this.config.modeFilter, ...config.modeFilter }
+    const colorFilter = { ...this.config.colorFilter, ...config.colorFilter }
+    return {
+      ...this.config,
+      ...config,
+      style,
+      area,
+      specialComments,
+      modeFilter,
+      colorFilter,
+    }
   }
 
   destroy(): void {
@@ -341,24 +398,111 @@ export class DanmakuRenderer {
     }
   }
 
+  private getPreparseStartIndex(timedComments: TimedComment[]): number {
+    // Match the bindVideo cursor logic: include a small "catch-up" window so we
+    // prioritize parsing comments that may be emitted immediately.
+    const CATCH_UP_WINDOW_S = 5
+
+    const media = this.media
+    if (!media) return 0
+    const total = timedComments.length
+    if (total === 0) return 0
+
+    const offsetS = this.config.offset / 1000
+    const base = media.currentTime - offsetS - CATCH_UP_WINDOW_S
+    const targetTime = Math.max(0, Number.isFinite(base) ? base : 0)
+
+    // Lower bound: first index with time >= targetTime.
+    let low = 0
+    let high = total - 1
+    let ans = total
+
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2)
+      const t = timedComments[mid].time
+      if (t >= targetTime) {
+        ans = mid
+        high = mid - 1
+      } else {
+        low = mid + 1
+      }
+    }
+
+    // If we're beyond the last comment time, just start from 0.
+    return ans >= total ? 0 : ans
+  }
+
+  private warmupPreparse(timedComments: TimedComment[], startIndex: number) {
+    const total = timedComments.length
+    if (total === 0) return
+
+    const safeStart = Number.isFinite(startIndex)
+      ? Math.min(Math.max(Math.trunc(startIndex), 0), total)
+      : 0
+
+    const start = performance.now()
+    let processed = 0
+    let parsedOk = 0
+    let parsedFail = 0
+
+    for (let i = 0; i < total && processed < WARMUP_MAX_COMMENTS; i += 1) {
+      const idx = (safeStart + i) % total
+      const entry = timedComments[idx]
+      if (entry.parsed || entry.parseError) continue
+
+      try {
+        entry.parsed = transformComment(entry.raw, 0)
+        parsedOk += 1
+      } catch {
+        entry.parseError = true
+        parsedFail += 1
+      }
+
+      processed += 1
+      if (performance.now() - start >= WARMUP_BUDGET_MS) {
+        break
+      }
+    }
+
+    const totalMs = performance.now() - start
+    if (processed > 0) {
+      this.perfReporter?.('warmup_preparse_ms', totalMs, {
+        processed,
+        ok: parsedOk,
+        fail: parsedFail,
+      })
+    }
+  }
+
   private startPreparse(timedComments: TimedComment[]) {
     if (timedComments.length === 0) return
 
     this.preparseTaskId += 1
     const taskId = this.preparseTaskId
 
-    const workerStarted = this.startWorkerParse(timedComments, taskId)
+    const startIndex = this.getPreparseStartIndex(timedComments)
+
+    const workerStarted = this.startWorkerParse(
+      timedComments,
+      taskId,
+      startIndex
+    )
     if (!workerStarted) {
-      const remoteStarted = this.startRemoteParse(timedComments, taskId)
+      const remoteStarted = this.startRemoteParse(
+        timedComments,
+        taskId,
+        startIndex
+      )
       if (!remoteStarted) {
-        this.scheduleIdlePreparse(timedComments, taskId)
+        this.scheduleIdlePreparse(timedComments, taskId, startIndex)
       }
     }
   }
 
   private startWorkerParse(
     timedComments: TimedComment[],
-    taskId: number
+    taskId: number,
+    startIndex: number
   ): boolean {
     if (timedComments.length < WORKER_THRESHOLD) {
       return false
@@ -388,6 +532,7 @@ export class DanmakuRenderer {
     }
 
     this.worker = worker
+    // rawComments indices must match timedComments indices 1:1 since both are derived from the same filtered source.
     const rawComments = timedComments.map((item) => item.raw)
     this.perfReporter?.('worker_start', 0, { count: rawComments.length })
 
@@ -410,9 +555,13 @@ export class DanmakuRenderer {
       // Avoid retrying on subsequent mounts for sites that consistently block workers via CSP.
       this.workerDisabledReason = 'worker error event'
       this.terminateWorker()
-      const remoteStarted = this.startRemoteParse(timedComments, taskId)
+      const remoteStarted = this.startRemoteParse(
+        timedComments,
+        taskId,
+        startIndex
+      )
       if (!remoteStarted) {
-        this.scheduleIdlePreparse(timedComments, taskId)
+        this.scheduleIdlePreparse(timedComments, taskId, startIndex)
       }
     }
 
@@ -421,6 +570,7 @@ export class DanmakuRenderer {
       taskId,
       comments: rawComments,
       chunkSize: WORKER_CHUNK_SIZE,
+      startIndex,
     }
     worker.postMessage(request)
     return true
@@ -428,7 +578,8 @@ export class DanmakuRenderer {
 
   private startRemoteParse(
     timedComments: TimedComment[],
-    taskId: number
+    taskId: number,
+    startIndex: number
   ): boolean {
     if (!this.remotePreparseTransport) {
       return false
@@ -439,6 +590,7 @@ export class DanmakuRenderer {
 
     this.terminateRemote()
 
+    // rawComments indices must match timedComments indices 1:1 since both are derived from the same filtered source.
     const rawComments = timedComments.map((item) => item.raw)
     this.perfReporter?.('remote_parse_start', 0, { count: rawComments.length })
 
@@ -449,6 +601,7 @@ export class DanmakuRenderer {
           taskId,
           comments: rawComments,
           chunkSize: WORKER_CHUNK_SIZE,
+          startIndex,
         },
         {
           onChunk: (msg) => {
@@ -470,7 +623,7 @@ export class DanmakuRenderer {
               error instanceof Error ? error.message : String(error)
             this.perfReporter?.('remote_parse_error', 0, { reason: message })
             this.terminateRemote()
-            this.scheduleIdlePreparse(timedComments, taskId)
+            this.scheduleIdlePreparse(timedComments, taskId, startIndex)
           },
         }
       )
@@ -484,9 +637,17 @@ export class DanmakuRenderer {
     return true
   }
 
-  private scheduleIdlePreparse(timedComments: TimedComment[], taskId: number) {
+  private scheduleIdlePreparse(
+    timedComments: TimedComment[],
+    taskId: number,
+    startIndex: number
+  ) {
     const total = timedComments.length
-    let index = 0
+    let index = Number.isFinite(startIndex)
+      ? Math.min(Math.max(Math.trunc(startIndex), 0), total)
+      : 0
+    if (index >= total) index = 0
+    let visited = 0
     let totalMs = 0
 
     const step = (deadline: IdleDeadline) => {
@@ -508,13 +669,20 @@ export class DanmakuRenderer {
       const start = performance.now()
       let processed = 0
 
-      while (index < total) {
+      while (visited < total) {
         const entry = timedComments[index]
-        if (!entry.parsed) {
-          entry.parsed = transformComment(entry.raw, 0)
+        if (!entry.parsed && !entry.parseError) {
+          try {
+            entry.parsed = transformComment(entry.raw, 0)
+          } catch {
+            entry.parseError = true
+          }
           processed += 1
         }
+
         index += 1
+        if (index >= total) index = 0
+        visited += 1
 
         if (processed >= IDLE_CHUNK_SIZE) {
           break
@@ -526,7 +694,7 @@ export class DanmakuRenderer {
 
       totalMs += performance.now() - start
 
-      if (index < total) {
+      if (visited < total) {
         this.idleHandle = requestIdle(step)
       } else {
         this.perfReporter?.('idle_preparse_total_ms', totalMs, {

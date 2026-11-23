@@ -1,8 +1,17 @@
-import { Box, List, ListItem, ListItemText, Stack } from '@mui/material'
+import {
+  Box,
+  List,
+  ListItem,
+  ListItemText,
+  Stack,
+  Typography,
+} from '@mui/material'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-
+import type { Keymap } from '@/common/options/extensionOptions/hotkeys'
 import {
   ALL_HOTKEYS,
+  detectHotkeyConflicts,
   HOTKEY_LABELS,
 } from '@/common/options/extensionOptions/hotkeys'
 import { useHotkeyOptions } from '@/common/options/extensionOptions/useHotkeyOptions'
@@ -13,7 +22,12 @@ import { HotkeyInput } from '@/popup/pages/options/pages/hotkeyOptions/component
 export const HotkeyOptions = () => {
   const { t } = useTranslation()
 
-  const { updateHotkey, getKeyCombo } = useHotkeyOptions()
+  const { hotkeys, updateHotkey, getKeyCombo } = useHotkeyOptions()
+
+  const conflicts = useMemo(
+    () => detectHotkeyConflicts(hotkeys as Partial<Keymap>),
+    [hotkeys]
+  )
 
   return (
     <OptionsPageLayout>
@@ -21,6 +35,7 @@ export const HotkeyOptions = () => {
       <Box px={2}>
         <List>
           {ALL_HOTKEYS.map((label) => {
+            const conflictingActions = conflicts.get(label)
             return (
               <ListItem disablePadding key={label}>
                 <ListItemText
@@ -36,6 +51,17 @@ export const HotkeyOptions = () => {
                         onKeyChange={(key) => updateHotkey(label, key)}
                       />
                     </Stack>
+                  }
+                  secondary={
+                    conflictingActions && (
+                      <Typography variant="caption" color="warning.main">
+                        {t('optionsPage.hotkeys.conflict', {
+                          actions: conflictingActions
+                            .map((a) => HOTKEY_LABELS[a]())
+                            .join(', '),
+                        })}
+                      </Typography>
+                    )
                   }
                 />
               </ListItem>

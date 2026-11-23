@@ -14,18 +14,32 @@ export const useAllSeasonMap = () => {
 }
 
 export const useSeasonMapMutations = () => {
+  const meta = { invalidates: [seasonMapQueryKeys.all()] }
+
   return {
     add: useMutation({
-      mutationKey: seasonMapQueryKeys.all(),
       mutationFn: async (map: SeasonMap) => {
         return chromeRpcClient.seasonMapAdd(map.toSnapshot())
       },
+      meta,
+    }),
+    put: useMutation({
+      mutationFn: async (map: SeasonMap) => {
+        return chromeRpcClient.seasonMapPut(map.toSnapshot())
+      },
+      meta,
     }),
     delete: useMutation({
-      mutationKey: seasonMapQueryKeys.all(),
       mutationFn: async (key: string) => {
         return chromeRpcClient.seasonMapDelete({ key })
       },
+      meta,
+    }),
+    deleteMany: useMutation({
+      mutationFn: async (keys: string[]) => {
+        return chromeRpcClient.seasonMapDeleteMany({ keys })
+      },
+      meta,
     }),
   }
 }

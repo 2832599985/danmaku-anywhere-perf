@@ -25,12 +25,16 @@ export const zHex = z
     error: 'Invalid hex color format',
   })
   .transform((hex) => {
-    // pad hex to 6 chars and make upper case
-    if (hex.length > 6) {
-      return hex.toUpperCase()
+    // pad 3-char hex (#ABC) to 6-char (#AABBCC), accounting for # prefix in length
+    if (hex.length <= 4) {
+      const val = hex.split('#')
+      const expanded = val[1]
+        .split('')
+        .map((c) => c + c)
+        .join('')
+      return `#${expanded.toUpperCase()}`
     }
-    const val = hex.split('#')
-    return `#${val[1].toUpperCase()}`
+    return hex.toUpperCase()
   })
 
 export const zRgb888 = z.coerce

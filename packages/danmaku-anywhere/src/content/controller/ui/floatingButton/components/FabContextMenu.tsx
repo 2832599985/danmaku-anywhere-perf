@@ -18,6 +18,7 @@ import { useStore } from '@/content/controller/store/store'
 import type { ContextMenuItemProps } from '@/content/controller/ui/floatingButton/components/ContextMenuItem'
 import { ContextMenuItem } from '@/content/controller/ui/floatingButton/components/ContextMenuItem'
 import { ContextMenuShortcut } from '@/content/controller/ui/floatingButton/components/ContextMenuShortcut'
+import { GlobalHotkeyActions } from '@/content/controller/ui/floatingButton/components/GlobalHotkeyActions'
 
 type FabContextMenuProps = PopperProps
 
@@ -93,6 +94,7 @@ export const FabContextMenu = (props: FabContextMenuProps) => {
       {menuItems.map((item, i) => (
         <ContextMenuShortcut key={i} {...item} />
       ))}
+      <GlobalHotkeyActions />
       <Popper placement="top-end" {...props}>
         <Paper>
           <MenuList dense>

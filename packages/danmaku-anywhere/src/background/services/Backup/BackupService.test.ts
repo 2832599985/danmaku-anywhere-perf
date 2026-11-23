@@ -18,7 +18,9 @@ describe('BackupService', () => {
       restoreState: vi.fn(),
     } as unknown as ConfigStateService
 
-    service = new BackupService(mockConfigStateService)
+    service = new BackupService(mockConfigStateService, {
+      getTokenSync: vi.fn(),
+    } as any)
   })
 
   afterEach(() => {
@@ -36,7 +38,7 @@ describe('BackupService', () => {
   })
 
   it('should delegate importAll to ConfigStateService', async () => {
-    const mockData = { meta: { version: 1 } } as any
+    const mockData = { meta: { version: 1 }, services: {} } as any
     const mockResult = { success: true, details: {} }
     mockConfigStateService.restoreState.mockResolvedValue(mockResult)
 

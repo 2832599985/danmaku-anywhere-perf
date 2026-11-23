@@ -52,6 +52,13 @@ export const manifest = defineManifest({
       js: ['src/content/app/index.ts'],
       run_at: 'document_start',
     },
+    {
+      matches: ['<all_urls>'],
+      js: ['src/content/player/index.ts'],
+      run_at: 'document_start',
+      all_frames: true,
+      // isolated world by default
+    },
   ],
   permissions,
   host_permissions: ['https://*/*', 'http://*/*', 'file:///*'],
@@ -82,7 +89,7 @@ export const manifest = defineManifest({
   web_accessible_resources: [
     {
       matches: ['<all_urls>', 'file:///*'],
-      resources: ['**/*', '*'],
+      resources: ['pages/*.html', 'assets/*', '*.png', 'rules/*.json'],
       use_dynamic_url: false,
     },
   ],

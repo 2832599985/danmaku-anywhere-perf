@@ -4,6 +4,8 @@ import { settingConfigs } from '@/common/settings/settingConfigs'
 import { OptionsPageToolBar } from '@/popup/component/OptionsPageToolbar'
 import { OptionsPageLayout } from '@/popup/layout/OptionsPageLayout'
 import { DeclarativeToggleSetting } from '@/popup/pages/options/components/DeclarativeToggleSetting'
+import { FixedSkipSecondsInput } from '@/popup/pages/options/pages/player/components/FixedSkipSecondsInput'
+import { UpscaleSettings } from '@/popup/pages/options/pages/player/components/UpscaleSettings'
 
 export const PlayerOptions = () => {
   const { t } = useTranslation()
@@ -14,6 +16,7 @@ export const PlayerOptions = () => {
       <OptionsPageToolBar
         title={t('optionsPage.pages.player', 'Player Settings')}
       />
+      <UpscaleSettings />
       {settingConfigs.player.map((config) => (
         <DeclarativeToggleSetting
           key={config.id}
@@ -23,6 +26,7 @@ export const PlayerOptions = () => {
           isLoading={isLoading}
         />
       ))}
+      {data.playerOptions.enableFixedSkip && <FixedSkipSecondsInput />}
     </OptionsPageLayout>
   )
 }

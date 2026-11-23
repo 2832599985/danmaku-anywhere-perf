@@ -8,12 +8,12 @@ import type {
 } from '@danmaku-anywhere/danmaku-converter'
 import type { BiliBiliSearchParams } from '@danmaku-anywhere/danmaku-provider/bilibili'
 import * as bilibili from '@danmaku-anywhere/danmaku-provider/bilibili'
-import type { DanmakuFetchRequest } from '@/common/danmaku/dto'
+import { findEpisodeByNumber } from '@danmaku-anywhere/media-parser'
+import type { DanmakuFetchByMeta } from '@/common/danmaku/dto'
 import { DanmakuSourceType } from '@/common/danmaku/enums'
 import { assertProviderType } from '@/common/danmaku/utils'
 import type { ILogger } from '@/common/Logger'
 import type { BuiltInBilibiliProvider } from '@/common/options/providerConfig/schema'
-import { findEpisodeByNumber } from '../common/findEpisodeByNumber'
 import type {
   IDanmakuProvider,
   OmitSeasonId,
@@ -162,11 +162,34 @@ export class BilibiliService implements IDanmakuProvider {
     })
   }
 
-  async getDanmaku(request: DanmakuFetchRequest): Promise<CommentEntity[]> {
+  async getDanmaku(request: DanmakuFetchByMeta): Promise<CommentEntity[]> {
     const { meta } = request
     assertProviderType(meta, DanmakuSourceType.Bilibili)
 
     return this.getDanmakuInternal(meta)
+  }
+
+  async preloadNextEpisode(request: DanmakuFetchByMeta): Promise<void> {
+    const { meta } = request
+    assertProviderType(meta, DanmakuSourceType.Bilibili)
+
+    const episodes = await this.getEpisodes(meta.season.providerIds)
+    const currentIndex = episodes.findIndex(
+      (e) => e.indexedId === meta.indexedId
+    )
+
+    if (currentIndex === -1 || currentIndex >= episodes.length - 1) {
+      this.logger.debug('Next episode not found for preload')
+      return
+    }
+
+    const nextEpisode = episodes[currentIndex + 1]
+
+    // Pre-fetch the danmaku so it gets cached
+    await this.fetchDanmaku({
+      cid: nextEpisode.providerIds.cid,
+      aid: nextEpisode.providerIds.aid,
+    })
   }
 
   async getSeason(

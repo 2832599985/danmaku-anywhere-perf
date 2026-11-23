@@ -72,6 +72,7 @@ export class ExtensionOptionsService implements IStoreService {
             // Add theme options
             draft.theme = {
               colorMode: ColorMode.System,
+              themeId: 'neon-violet',
             }
           }),
       })
@@ -83,8 +84,9 @@ export class ExtensionOptionsService implements IStoreService {
               draft.danmakuSources.dandanplay.enabled = true
               draft.danmakuSources.bilibili = {
                 enabled: false,
-                // biome-ignore lint/suspicious/noExplicitAny: deprecated field
-              } as any
+                danmakuTypePreference: 'xml',
+                protobufLimitPerMin: 200,
+              }
             }
           }),
       })
@@ -164,7 +166,26 @@ export class ExtensionOptionsService implements IStoreService {
             // Add playerOptions field
             draft.playerOptions = {
               showSkipButton: true,
+              autoSkipOp: false,
               showDanmakuTimeline: true,
+              enableFixedSkip: false,
+              fixedSkipSeconds: 90,
+              autoDensity: false,
+              autoNextEpisode: false,
+              enableFullscreenInteraction: true,
+              enableTranslation: false,
+              translationTargetLang: 'en',
+              upscale: {
+                enabled: false,
+                modeId: 'builtin-mode-a',
+                performanceTier: 'balanced',
+                targetResolution: 'x2',
+                enableCrossOriginFix: false,
+                frameInterpolation: {
+                  enabled: false,
+                  resolution: '720p',
+                },
+              },
             }
           }),
       })
@@ -234,7 +255,6 @@ export class ExtensionOptionsService implements IStoreService {
               Logger.error(error)
             }
 
-            // biome-ignore lint/correctness/noUnusedVariables: drop deprecated fields
             const { danmakuSources, ...rest } = data
             return rest
           }
@@ -247,6 +267,163 @@ export class ExtensionOptionsService implements IStoreService {
             draft.restrictInitiatorDomain = true
           })
         },
+      })
+      .version(23, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions) {
+              draft.playerOptions = {
+                showSkipButton: true,
+                autoSkipOp: false,
+                showDanmakuTimeline: true,
+                enableFixedSkip: false,
+                fixedSkipSeconds: 90,
+                autoDensity: false,
+                autoNextEpisode: true,
+                enableFullscreenInteraction: true,
+                enableTranslation: false,
+                translationTargetLang: 'en',
+                upscale: {
+                  enabled: false,
+                  modeId: 'builtin-mode-a',
+                  performanceTier: 'balanced',
+                  targetResolution: 'x2',
+                  enableCrossOriginFix: false,
+                  frameInterpolation: {
+                    enabled: false,
+                    resolution: '720p',
+                  },
+                },
+              }
+              return
+            }
+            draft.playerOptions.autoSkipOp = false
+          })
+        },
+      })
+      .version(24, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            if (draft.playerOptions) {
+              draft.playerOptions.enableFixedSkip ??= false
+              draft.playerOptions.fixedSkipSeconds ??= 90
+            }
+          })
+        },
+      })
+      .version(25, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            if (draft.playerOptions) {
+              draft.playerOptions.autoDensity ??= false
+            }
+          })
+        },
+      })
+      .version(26, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            // Add new hotkey actions with empty defaults
+            draft.hotkeys.increaseOpacity ??= { key: '', enabled: true }
+            draft.hotkeys.decreaseOpacity ??= { key: '', enabled: true }
+            draft.hotkeys.increaseFontSize ??= { key: '', enabled: true }
+            draft.hotkeys.decreaseFontSize ??= { key: '', enabled: true }
+            draft.hotkeys.skipOp ??= { key: '', enabled: true }
+            draft.hotkeys.toggleStylePanel ??= { key: '', enabled: true }
+          })
+        },
+      })
+      .version(27, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions) return
+            draft.playerOptions.autoNextEpisode ??= true
+          })
+        },
+      })
+      .version(28, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            draft.theme ??= {
+              colorMode: ColorMode.System,
+              themeId: 'neon-violet',
+            }
+            draft.theme.themeId ??= 'neon-violet'
+          })
+        },
+      })
+      .version(29, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            draft.hotkeys.increaseSpeed ??= { key: '', enabled: true }
+            draft.hotkeys.decreaseSpeed ??= { key: '', enabled: true }
+            draft.hotkeys.increaseOffset ??= { key: '', enabled: true }
+            draft.hotkeys.decreaseOffset ??= { key: '', enabled: true }
+            draft.hotkeys.toggleDensityPlot ??= { key: '', enabled: true }
+          })
+        },
+      })
+      .version(30, {
+        upgrade: (data) => {
+          return produce<ExtensionOptions>(data, (draft) => {
+            draft.enableMultiSourceMerge ??= false
+          })
+        },
+      })
+      .version(31, {
+        upgrade: (data) =>
+          produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions) return
+            draft.playerOptions.enableFullscreenInteraction = true
+          }),
+      })
+      .version(32, {
+        upgrade: (data) =>
+          produce<ExtensionOptions>(data, (draft) => {
+            draft.showFloatingButton = true
+          }),
+      })
+      .version(33, {
+        upgrade: (data) =>
+          produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions) return
+            draft.playerOptions.enableTranslation = false
+            draft.playerOptions.translationTargetLang = 'en'
+          }),
+      })
+      .version(34, {
+        upgrade: (data) =>
+          produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions) return
+            draft.playerOptions.upscale ??= {
+              enabled: false,
+              modeId: 'builtin-mode-a',
+              performanceTier: 'balanced',
+              targetResolution: 'x2',
+              enableCrossOriginFix: false,
+              frameInterpolation: {
+                enabled: false,
+                resolution: '720p',
+              },
+            }
+          }),
+      })
+      .version(35, {
+        upgrade: (data) =>
+          produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions?.upscale) return
+            draft.playerOptions.upscale.performanceTier ??= 'balanced'
+          }),
+      })
+      .version(36, {
+        upgrade: (data) =>
+          produce<ExtensionOptions>(data, (draft) => {
+            if (!draft.playerOptions?.upscale) return
+            draft.playerOptions.upscale.frameInterpolation ??= {
+              enabled: false,
+              resolution: '720p',
+            }
+          }),
       })
   }
 

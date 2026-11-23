@@ -1,5 +1,4 @@
 import { Tab, Tabs } from '@mui/material'
-import { useTranslation } from 'react-i18next'
 import { localizedDanmakuSourceType } from '@/common/danmaku/enums'
 import type { ProviderConfig } from '@/common/options/providerConfig/schema'
 
@@ -14,8 +13,6 @@ export const SeasonSearchTabs = ({
   selectedProvider,
   onTabChange,
 }: SeasonSearchTabsProps) => {
-  const { t } = useTranslation()
-
   return (
     <Tabs
       value={selectedProvider.id}
@@ -44,7 +41,7 @@ export const SeasonSearchTabs = ({
             value={provider.id}
             label={
               provider.isBuiltIn
-                ? t(localizedDanmakuSourceType(provider.impl))
+                ? localizedDanmakuSourceType(provider.impl)
                 : provider.name
             }
             key={provider.id}

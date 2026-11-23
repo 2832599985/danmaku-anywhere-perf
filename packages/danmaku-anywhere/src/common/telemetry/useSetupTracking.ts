@@ -13,18 +13,20 @@ export const useSetupTracking = () => {
   const trackingServiceRef = useRef<TrackingService>(
     createTrackingService(environment, type)
   )
+  const analyticsEnabled = !!data?.enableAnalytics
+  const extId = data?.id
 
   useEffect(() => {
-    if (data.enableAnalytics) {
+    if (analyticsEnabled) {
       getTrackingService().init()
     }
-  }, [data.enableAnalytics])
+  }, [analyticsEnabled])
 
   useEffect(() => {
-    if (data.id) {
-      getTrackingService().identify(data.id)
+    if (extId) {
+      getTrackingService().identify(extId)
     }
-  }, [data.id])
+  }, [extId])
 
   return trackingServiceRef.current
 }

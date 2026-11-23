@@ -6,9 +6,7 @@ import {
   type ExtMessage,
   type ExtRequest,
   type ExtResponse,
-  setExtensionAttr,
 } from '@danmaku-anywhere/web-scraper'
-import { EXTENSION_VERSION } from '@/common/constants'
 import { isProvider } from '@/common/danmaku/utils'
 import { uiContainer } from '@/common/ioc/uiIoc'
 import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
@@ -17,15 +15,11 @@ import type { RPCClientResponse } from '@/common/rpc/client'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
 
 import { tryCatch } from '@/common/utils/tryCatch'
+import { setupExtensionAttr } from './setupExtensionAttr'
 
 const extensionOptionsService = uiContainer.get(ExtensionOptionsService)
 
-extensionOptionsService.get().then((options) => {
-  setExtensionAttr({
-    version: EXTENSION_VERSION,
-    id: options.id,
-  })
-})
+void setupExtensionAttr(() => extensionOptionsService.get())
 
 const sendResponse = (message: ExtResponse) => {
   window.postMessage(message, window.origin)

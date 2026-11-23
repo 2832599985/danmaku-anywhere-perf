@@ -2,9 +2,11 @@ import { createHashRouter, Navigate } from 'react-router'
 import { ImportConfigPage } from '@/popup/pages/config/pages/import/ImportConfigPage'
 import { FilterPage } from '@/popup/pages/filterPage/FilterPage'
 import { AdvancedOptions } from '@/popup/pages/options/pages/advanced/AdvancedOptions'
+import { AuthPage } from '@/popup/pages/options/pages/auth/AuthPage'
 import { BackupPage } from '@/popup/pages/options/pages/backup/BackupPage'
 import { About } from '@/popup/pages/options/pages/help/About'
 import { PlayerOptions } from '@/popup/pages/options/pages/player/PlayerOptions'
+import { StoragePage } from '@/popup/pages/options/pages/storage/StoragePage'
 import { SeasonDetailsPage } from '@/popup/pages/search/seasonDetails/SeasonDetailsPage'
 import { TitleMappingPage } from '@/popup/pages/titleMapping/TitleMappingPage'
 import { AiProvidersPage } from '../pages/ai/AiProvidersPage'
@@ -22,6 +24,7 @@ import { HotkeyOptions } from '../pages/options/pages/hotkeyOptions/HotkeyOption
 import { RetentionPolicyPage } from '../pages/options/pages/retentionPolicy/RetentionPolicyPage'
 import { ProvidersPage } from '../pages/providers/pages/ProvidersPage'
 import { SearchPage } from '../pages/search/SearchPage'
+import { StatsPage } from '../pages/stats/StatsPage'
 import { StylesPage } from '../pages/styles/StylesPage'
 
 export const router: ReturnType<typeof createHashRouter> = createHashRouter([
@@ -111,6 +114,10 @@ export const router: ReturnType<typeof createHashRouter> = createHashRouter([
           },
         ],
       },
+      {
+        path: 'stats',
+        Component: StatsPage,
+      },
     ],
   },
   {
@@ -118,11 +125,15 @@ export const router: ReturnType<typeof createHashRouter> = createHashRouter([
     Component: Options,
     children: [
       {
+        path: 'auth',
+        Component: AuthPage,
+      },
+      {
         path: 'hotkeys',
         Component: HotkeyOptions,
       },
       {
-        path: 'retention-policy',
+        path: 'data-management',
         Component: RetentionPolicyPage,
       },
       {
@@ -140,6 +151,10 @@ export const router: ReturnType<typeof createHashRouter> = createHashRouter([
       {
         path: 'backup',
         Component: BackupPage,
+      },
+      {
+        path: 'storage',
+        Component: StoragePage,
       },
     ],
   },

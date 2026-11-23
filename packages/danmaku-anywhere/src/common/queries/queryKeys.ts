@@ -121,6 +121,16 @@ export const controlQueryKeys = {
     ] as const,
 }
 
+export const extensionQueryKeys = {
+  manifest: () =>
+    [
+      {
+        scope: 'extension',
+        kind: 'manifest',
+      },
+    ] as const,
+}
+
 export const alarmQueryKeys = {
   danmakuPurge: () =>
     [
@@ -174,4 +184,14 @@ export const configQueryKeys = {
         kind: 'danmuicu',
       },
     ] as const,
+}
+
+export const bookmarkQueryKeys = {
+  all: () => [{ scope: 'bookmark' }] as const,
+}
+
+export const authQueryKeys = {
+  all: () => [{ scope: 'auth' }] as const,
+  session: () => [{ scope: 'auth', kind: 'session' }] as const,
+  details: () => [{ scope: 'auth', kind: 'details' }] as const,
 }

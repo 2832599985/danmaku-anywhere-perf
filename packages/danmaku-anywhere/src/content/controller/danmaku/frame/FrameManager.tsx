@@ -1,124 +1,265 @@
 import { useEventCallback } from '@mui/material'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '@/common/components/Toast/toastStore'
+import { IS_STANDALONE_RUNTIME } from '@/common/environment/isStandalone'
 import { uiContainer } from '@/common/ioc/uiIoc'
 import { Logger } from '@/common/Logger'
+import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
 import { createRpcServer } from '@/common/rpc/server'
 import { playerRpcClient } from '@/common/rpcClient/background/client'
-import type { PlayerRelayEvents } from '@/common/rpcClient/background/types'
+import type {
+  PlayerRelayEvents,
+  VideoInfo,
+} from '@/common/rpcClient/background/types'
+import { reparentPopover } from '@/content/common/reparentPopover'
 import { CONTROLLER_ROOT_ID } from '@/content/controller/common/constants/rootId'
 import { useActiveConfig } from '@/content/controller/common/context/useActiveConfig'
 import { useUnmountDanmaku } from '@/content/controller/common/hooks/useUnmountDanmaku'
-import { FrameInjector } from '@/content/controller/danmaku/frame/FrameInjector.service'
+import { FrameRegistry } from '@/content/controller/danmaku/frame/FrameRegistry.service'
+import { selectBestFrame } from '@/content/controller/danmaku/frame/selectBestFrame'
 import { useMigrateDanmaku } from '@/content/controller/danmaku/frame/useMigrateDanmaku'
 import { usePreloadNextEpisode } from '@/content/controller/danmaku/frame/usePreloadNextEpisode'
 import { useStore } from '@/content/controller/store/store'
 
 const logger = Logger.sub('[FrameManager]')
-
-const frameInjector = uiContainer.get(FrameInjector)
+const frameRegistry = uiContainer.get(FrameRegistry)
 
 export const FrameManager = () => {
   const { t } = useTranslation()
   const { toast } = useToast()
 
   const config = useActiveConfig()
+  const { data: extensionOptions } = useExtensionOptions()
 
-  const setVideoId = useStore.use.setVideoId()
-  const { activeFrame, setActiveFrame, updateFrame } = useStore.use.frame()
+  const enableFullscreenInteraction =
+    extensionOptions.playerOptions.enableFullscreenInteraction
+
+  const { updateFrame } = useStore.use.frame()
 
   const unmountDanmaku = useUnmountDanmaku()
   const { preloadNext, canLoadNext } = usePreloadNextEpisode()
 
-  useEffect(() => {
-    frameInjector.start()
-    return () => {
-      frameInjector.stop()
-    }
-  }, [])
+  // Track whether next episode danmaku has been preloaded
+  const nextEpisodePreloadedRef = useRef(false)
 
   useMigrateDanmaku()
 
-  const videoChangeHandler = useEventCallback((frameId: number) => {
-    setVideoId(`${frameId}-${Date.now()}`)
-    /**
-     * If there is already an active frame, and it has video,
-     * it means there are multiple frames with video.
-     *
-     * TODO: need some heuristic to handle this case
-     */
-    if (activeFrame?.hasVideo && activeFrame.frameId !== frameId) {
-      toast.warn(
-        t('danmaku.alert.multipleFrames', 'Multiple frames with video detected')
-      )
-      return
+  const reEvaluateActiveFrame = useEventCallback(() => {
+    const frame = useStore.getState().frame
+    const bestFrameId = selectBestFrame(
+      frame.allFrames,
+      frame.activeFrame?.frameId
+    )
+    if (
+      bestFrameId !== undefined &&
+      bestFrameId !== frame.activeFrame?.frameId
+    ) {
+      frame.setActiveFrame(bestFrameId)
     }
-
-    updateFrame(frameId, { hasVideo: true })
-    setActiveFrame(frameId)
   })
 
+  // Events can arrive after the frame unregistered (a navigating iframe emits
+  // videoRemoved and playerUnload back to back, and the order is not
+  // guaranteed). `updateFrame` throws for unknown frames, so check first.
+  const isFrameRegistered = (frameId: number) => {
+    return useStore.getState().frame.allFrames.has(frameId)
+  }
+
+  const playerReadyHandler = useEventCallback(
+    async (frameId: number, data: { url: string; documentId: string }) => {
+      frameRegistry.registerFrame({
+        frameId,
+        url: data.url,
+        documentId: data.documentId,
+      })
+
+      await playerRpcClient.player['relay:command:start']({
+        data: config.mediaQuery,
+        frameId,
+      })
+
+      if (!isFrameRegistered(frameId)) return
+      updateFrame(frameId, { started: true })
+    }
+  )
+
+  const videoChangeHandler = useEventCallback(
+    (frameId: number, data: VideoInfo) => {
+      if (!isFrameRegistered(frameId)) return
+      const frame = useStore.getState().frame.allFrames.get(frameId)
+      updateFrame(frameId, {
+        hasVideo: true,
+        videoInfo: data,
+        videoChangeCount: (frame?.videoChangeCount ?? 0) + 1,
+        lastPlayTimestamp: data.playing
+          ? Date.now()
+          : (frame?.lastPlayTimestamp ?? 0),
+      })
+      // Reset preload state when a new video is detected
+      nextEpisodePreloadedRef.current = false
+      reEvaluateActiveFrame()
+    }
+  )
+
+  const videoStateChangeHandler = useEventCallback(
+    (frameId: number, data: { playing: boolean; muted: boolean }) => {
+      const frame = useStore.getState().frame.allFrames.get(frameId)
+      if (!frame?.videoInfo) return
+      updateFrame(frameId, {
+        videoInfo: { ...frame.videoInfo, ...data },
+        lastPlayTimestamp: data.playing ? Date.now() : frame.lastPlayTimestamp,
+      })
+      reEvaluateActiveFrame()
+    }
+  )
+
   const videoRemovedHandler = useEventCallback((frameId: number) => {
-    // Reset state if video is removed from the active frame,
-    // but keep the current active frame even when the video is removed
+    const activeFrame = useStore.getState().frame.activeFrame
     if (activeFrame?.frameId === frameId) {
-      setVideoId(undefined)
       if (activeFrame.mounted) {
         unmountDanmaku.mutate(frameId)
       }
     }
-    updateFrame(frameId, { hasVideo: false, mounted: false })
+    if (!isFrameRegistered(frameId)) {
+      reEvaluateActiveFrame()
+      return
+    }
+    updateFrame(frameId, {
+      hasVideo: false,
+      mounted: false,
+      videoInfo: undefined,
+    })
+    reEvaluateActiveFrame()
   })
 
   const handlePreloadNext = useEventCallback((frameId: number) => {
+    const activeFrame = useStore.getState().frame.activeFrame
     if (frameId !== activeFrame?.frameId || !canLoadNext()) {
       return
     }
-    preloadNext.mutate(undefined, {
-      onError: (err) => {
-        toast.error('Failed to preload next episode: ' + err.message)
-      },
-    })
+    if (nextEpisodePreloadedRef.current) {
+      return
+    }
+    // Set flag before calling to prevent rapid calls from triggering multiple mutations
+    nextEpisodePreloadedRef.current = true
+    preloadNext()
+      .then(() => {
+        toast.info(
+          t(
+            'danmaku.alert.nextEpisodePreloaded',
+            'Next episode danmaku preloaded'
+          )
+        )
+      })
+      .catch((err) => {
+        // Reset flag so preload can be retried
+        nextEpisodePreloadedRef.current = false
+        const message = err instanceof Error ? err.message : String(err)
+        logger.debug('Failed to preload next episode:', message)
+      })
+  })
+
+  const handleShowPopover = useEventCallback(() => {
+    const root: HTMLDivElement | null = document.querySelector(
+      `#${CONTROLLER_ROOT_ID}`
+    )
+    if (!root) return
+    reparentPopover(
+      root,
+      document,
+      enableFullscreenInteraction ? document.fullscreenElement : null
+    )
+  })
+
+  const handleVideoEnded = useEventCallback((frameId: number) => {
+    const currentActiveFrame = useStore.getState().frame.activeFrame
+    if (frameId !== currentActiveFrame?.frameId) {
+      return
+    }
+
+    if (nextEpisodePreloadedRef.current) {
+      toast.success(
+        t('danmaku.alert.nextEpisodeReady', 'Next episode danmaku is ready')
+      )
+    }
+
+    // Trigger the integration observer to re-run,
+    // which will detect new media info and re-match the next episode
+    logger.debug('Video ended or URL changed, triggering re-match')
   })
 
   useEffect(() => {
     const controllerRpcServer = createRpcServer<PlayerRelayEvents>(
       {
-        'relay:event:playerReady': async ({ frameId }) => {
-          await playerRpcClient.player['relay:command:start']({
-            data: config.mediaQuery,
-            frameId,
-          })
-          updateFrame(frameId, { started: true })
+        'relay:event:playerReady': async ({ frameId, data }) => {
+          await playerReadyHandler(frameId, data)
         },
-        'relay:event:videoChange': async ({ frameId }) => {
-          videoChangeHandler(frameId)
+        'relay:event:playerUnload': async ({ frameId }) => {
+          frameRegistry.unregisterFrame(frameId)
+          reEvaluateActiveFrame()
+        },
+        'relay:event:videoChange': async ({ frameId, data }) => {
+          videoChangeHandler(frameId, data)
         },
         'relay:event:videoRemoved': async ({ frameId }) => {
           videoRemovedHandler(frameId)
         },
+        'relay:event:videoStateChange': async ({ frameId, data }) => {
+          videoStateChangeHandler(frameId, data)
+        },
         'relay:event:preloadNextEpisode': async ({ frameId }) => {
           handlePreloadNext(frameId)
         },
-        'relay:event:showPopover': async () => {
-          const root: HTMLDivElement | null = document.querySelector(
-            `#${CONTROLLER_ROOT_ID}`
-          )
-          if (root) {
-            root.hidePopover()
-            root.showPopover()
+        'relay:event:videoEnded': async ({ frameId }) => {
+          handleVideoEnded(frameId)
+        },
+        'relay:event:showPopover': async () => handleShowPopover(),
+        'relay:event:userInteraction': async () => {
+          window.dispatchEvent(new Event('touchmove'))
+        },
+        'relay:event:upscaleError': async ({ data }) => {
+          if (data.kind === 'frame-interpolation') {
+            toast.info(
+              t(
+                'upscale.alert.frameInterpolationUnavailable',
+                'Frame interpolation is unavailable on this video or GPU; Anime4K remains enabled'
+              )
+            )
+            return
           }
+          toast.error(
+            data.kind === 'cross-origin'
+              ? t(
+                  'upscale.alert.crossOriginBlocked',
+                  'This video source blocks cross-origin access, upscaling is unavailable here'
+                )
+              : t(
+                  'upscale.alert.failed',
+                  'Upscaling hit an error and was turned off'
+                )
+          )
         },
       },
       { logger }
     )
 
-    controllerRpcServer.listen()
+    if (!IS_STANDALONE_RUNTIME) {
+      controllerRpcServer.listen(chrome.runtime.onMessage)
 
-    return () => {
-      controllerRpcServer.unlisten()
+      return () => {
+        controllerRpcServer.unlisten(chrome.runtime.onMessage)
+      }
     }
+  }, [])
+
+  useEffect(() => {
+    // Notify all player scripts that the controller is ready.
+    // Players that loaded before the controller will re-send playerReady.
+    void playerRpcClient.player['relay:command:controllerReady'](
+      { frameId: 0 },
+      { optional: true }
+    )
   }, [])
 
   return null

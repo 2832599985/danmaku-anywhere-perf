@@ -9,6 +9,7 @@ export const ContextMenuShortcut = ({
 }: ContextMenuItemProps) => {
   useHotkeys(hotkey ?? '', action, {
     enabled: !!hotkey && !disabled?.(),
+    preventDefault: true,
   })
 
   return null

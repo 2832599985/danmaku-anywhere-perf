@@ -9,7 +9,7 @@ const zVodItemBase = z.object({
   vod_area: z.string().optional().nullable(),
   vod_class: z.string().optional().nullable(),
   vod_play_from: z.string().optional().nullable().prefault(''),
-  vod_play_url: z.string(),
+  vod_play_url: z.string().optional().nullable().prefault(''),
 })
 
 export const zVodItem = zVodItemBase.transform((item) => {

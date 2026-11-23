@@ -7,21 +7,31 @@ import ReactDOM from 'react-dom/client'
 import { Logger } from '@/common/Logger'
 import { queryClient } from '@/common/queries/queryClient'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
+import { ensureStandaloneReady } from '@/common/standalone/ensureStandaloneReady'
 import { Theme } from '@/common/theme/Theme'
 import { App } from './App'
 import '@/common/localization/i18n'
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
+import { createPortal } from 'react-dom'
 import { EnvironmentContext } from '@/common/environment/context'
 import { tryCatchSync } from '@/common/utils/tryCatch'
 import { createPopoverRoot } from '@/content/common/host/createPopoverRoot'
 import { CONTROLLER_ROOT_ID } from '@/content/controller/common/constants/rootId'
 
+await ensureStandaloneReady()
+
 const { data: frameId } = await chromeRpcClient.getFrameId()
 
 Logger.debug(`Controller script loaded in frame ${frameId}`)
 
-const { shadowRoot, shadowStyle } = createPopoverRoot({
+const { shadowRoot, shadowStyle, shadowContainer } = await createPopoverRoot({
   id: CONTROLLER_ROOT_ID,
 })
+
+// Create a dedicated style element for theme CSS variables
+const themeStyleEl = document.createElement('style')
+shadowContainer.appendChild(themeStyleEl)
+
 // try to get the html font size for rem unit
 // if it fails, use 16 as default
 const htmlFontSize =
@@ -37,6 +47,7 @@ const cache = createCache({
   key: 'danmaku-anywhere',
   container: shadowStyle,
   prepend: true,
+  speedy: false,
 })
 
 const themeOptions: ThemeOptions = {
@@ -79,10 +90,15 @@ ReactDOM.createRoot(shadowRoot).render(
             type: 'controller',
           }}
         >
-          <Theme options={themeOptions}>
+          <Theme options={themeOptions} themeStyleEl={themeStyleEl}>
             <App />
           </Theme>
         </EnvironmentContext>
+        {import.meta.env.MODE === 'development' &&
+          createPortal(
+            <ReactQueryDevtools initialIsOpen={false} />,
+            document.body
+          )}
       </QueryClientProvider>
     </CacheProvider>
   </React.StrictMode>

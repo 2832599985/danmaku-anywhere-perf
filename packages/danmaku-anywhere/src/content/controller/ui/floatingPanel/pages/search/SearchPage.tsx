@@ -1,10 +1,9 @@
-import type { CustomSeason, Season } from '@danmaku-anywhere/danmaku-converter'
+import type { Season } from '@danmaku-anywhere/danmaku-converter'
 import { Box, Typography } from '@mui/material'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Center } from '@/common/components/Center'
 import { SearchPageCore } from '@/common/components/SearchPageCore/SearchPageCore'
-import { isNotCustom } from '@/common/danmaku/utils'
 import type { ProviderConfig } from '@/common/options/providerConfig/schema'
 import { useProviderConfig } from '@/common/options/providerConfig/useProviderConfig'
 import { useAllSeasonMap } from '@/common/seasonMap/queries/useAllSeasonMap'
@@ -23,9 +22,7 @@ export const SearchPage = (): React.ReactElement | null => {
   const { mountDanmaku } = useLoadDanmaku()
   const { data: seasonMaps } = useAllSeasonMap()
 
-  const [selectedSeason, setSelectedSeason] = useState<
-    Season | CustomSeason | undefined
-  >()
+  const [selectedSeason, setSelectedSeason] = useState<Season | undefined>()
   const [selectedProvider, setSelectedProvider] = useState<
     ProviderConfig | undefined
   >()
@@ -39,12 +36,8 @@ export const SearchPage = (): React.ReactElement | null => {
     setSearchTitle(mediaInfo.title)
   }, [mediaInfo])
 
-  const handleSeasonClick = (
-    season: Season | CustomSeason,
-    provider: ProviderConfig
-  ) => {
+  const handleSeasonClick = (season: Season, provider: ProviderConfig) => {
     if (
-      isNotCustom(season) &&
       mediaInfo &&
       !SeasonMap.hasMapping(
         seasonMaps,
@@ -86,7 +79,6 @@ export const SearchPage = (): React.ReactElement | null => {
     return (
       <SeasonDetailsPage
         season={selectedSeason}
-        provider={selectedProvider}
         onGoBack={() => {
           setSelectedSeason(undefined)
           setSelectedProvider(undefined)

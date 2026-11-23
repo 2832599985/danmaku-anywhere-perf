@@ -4,15 +4,18 @@ import type { MatchEpisodeInput } from '@/common/anime/dto'
 import { useToast } from '@/common/components/Toast/toastStore'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { PopupTab, usePopup } from '@/content/controller/store/popupStore'
+import { useStore } from '@/content/controller/store/store'
 
 export const useMatchEpisode = () => {
   const { t } = useTranslation()
 
   const toast = useToast.use.toast()
   const { open, setAnimes } = usePopup()
+  const { setMatchResult } = useStore.use.integration()
 
   const mutation = useMutation({
     mutationFn: (input: MatchEpisodeInput) => {
+      setMatchResult(undefined)
       return chromeRpcClient.episodeMatch(input)
     },
     onError: (e) => {
@@ -26,7 +29,9 @@ export const useMatchEpisode = () => {
         )
       )
     },
-    onSuccess: (result, v) => {
+    onSuccess: (result) => {
+      setMatchResult(result.data)
+
       switch (result.data.status) {
         case 'success': {
           break
@@ -38,20 +43,8 @@ export const useMatchEpisode = () => {
           break
         }
         case 'notFound':
-          toast.error(
-            t(
-              'integration.alert.noEpisodeMatched',
-              'No episode matched for {{title}}: {{cause}}',
-              { title: v.title, cause: result.data.cause }
-            ),
-            {
-              actionFn: () => open({ tab: PopupTab.Search }),
-              actionLabel: t(
-                'integration.alert.openSearch',
-                'Open search page'
-              ),
-            }
-          )
+          // Show the guidance panel in the integration tab instead of just a toast
+          open({ tab: PopupTab.Policy })
           break
       }
     },

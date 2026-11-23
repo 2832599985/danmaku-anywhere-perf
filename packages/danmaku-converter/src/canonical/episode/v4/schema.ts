@@ -11,6 +11,7 @@ import {
   type SeasonV1,
   zBilibiliSeasonV1,
   zDanDanPlaySeasonV1,
+  zMacCmsSeasonV1,
   zTencentSeasonV1,
 } from '../../season/index.js'
 
@@ -18,8 +19,11 @@ import {
  * Custom episode schema
  */
 export const zCustomEpisodeInsertV4 = z.object({
-  provider: z.literal(DanmakuSourceType.MacCMS),
-  title: z.string().refine(stripHtml),
+  provider: z.union([
+    z.literal(DanmakuSourceType.Custom),
+    z.literal(DanmakuSourceType.MacCMS),
+  ]),
+  title: z.string().transform(stripHtml),
   comments: z.array(zCommentEntity),
   commentCount: z.number(),
   schemaVersion: z.literal(4),
@@ -36,7 +40,7 @@ export type CustomEpisodeLiteV4 = Omit<CustomEpisodeV4, 'comments'>
  */
 const zBaseEpisodeV4 = z.object({
   // Episode title
-  title: z.string().refine(stripHtml),
+  title: z.string().transform(stripHtml),
   // Episode number
   episodeNumber: z.union([z.number(), z.string()]).optional(),
   // Cover image url
@@ -94,10 +98,20 @@ export const zTencentEpisodeV4 = zBaseEpisodeV4.extend({
   providerIds: zTencentProviderIds,
 })
 
+export const zMacCmsProviderIds = z.object({
+  url: z.string(),
+})
+
+export const zMacCmsEpisodeV4 = zBaseEpisodeV4.extend({
+  provider: z.literal(DanmakuSourceType.MacCMS),
+  providerIds: zMacCmsProviderIds,
+})
+
 export const zEpisodeInsertV4 = z.discriminatedUnion('provider', [
   zDanDanPlayEpisodeV4,
   zBilibiliEpisodeV4,
   zTencentEpisodeV4,
+  zMacCmsEpisodeV4,
 ])
 
 export type EpisodeInsertV4 = z.infer<typeof zEpisodeInsertV4>
@@ -136,10 +150,15 @@ const zTencentEpisodeV4WithSeasonV1 = zTencentEpisodeV4.extend({
   season: zTencentSeasonV1,
 })
 
+const zMacCmsEpisodeV4WithSeasonV1 = zMacCmsEpisodeV4.extend({
+  season: zMacCmsSeasonV1,
+})
+
 export const zEpisodeInsertV4WithSeasonV1 = z.discriminatedUnion('provider', [
   zBilibiliEpisodeV4WithSeasonV1,
   zDanDanPlayEpisodeV4WithSeasonV1,
   zTencentEpisodeV4WithSeasonV1,
+  zMacCmsEpisodeV4WithSeasonV1,
 ])
 
 type EpisodeV4SeasonMap = {
@@ -151,6 +170,9 @@ type EpisodeV4SeasonMap = {
   }
   [DanmakuSourceType.Tencent]: {
     season: ByProvider<SeasonV1, DanmakuSourceType.Tencent>
+  }
+  [DanmakuSourceType.MacCMS]: {
+    season: ByProvider<SeasonV1, DanmakuSourceType.MacCMS>
   }
 }
 

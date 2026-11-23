@@ -5,6 +5,6 @@
     "includes": ["**", "!**/dist", "!worker-configuration.d.ts", "!drizzle/**"]
   },
   "javascript": {
-    "globals": ["ExecutionContext", "Env", "Request"]
+    "globals": ["ExecutionContext", "Env", "Request", "WebSocketPair"]
   }
 }

@@ -6,23 +6,27 @@ import { useEventCallback } from '@mui/material'
 import { useMutation } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Logger } from '@/common/Logger'
 import { useToast } from '@/common/components/Toast/toastStore'
 import type { DanmakuFetchDto, MacCMSFetchData } from '@/common/danmaku/dto'
 import { DanmakuSourceType } from '@/common/danmaku/enums'
 import { useFetchDanmaku } from '@/common/danmaku/queries/useFetchDanmaku'
 import { useFetchGenericDanmaku } from '@/common/danmaku/queries/useFetchGenericDanmaku'
 import { episodeToString, isProvider } from '@/common/danmaku/utils'
+import { Logger } from '@/common/Logger'
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
 import { playerRpcClient } from '@/common/rpcClient/background/client'
 import { PerfTimer } from '@/common/utils/perf'
-import { concatArr } from '@/common/utils/utils'
+import {
+  concatArr,
+  dedupeComments,
+  fuzzyDedupeComments,
+} from '@/common/utils/utils'
 import { useStore } from '@/content/controller/store/store'
 
 const useMountDanmaku = () => {
   const { toast } = useToast()
   const { data: options } = useExtensionOptions()
-  const perfRef = useRef<PerfTimer>()
+  const perfRef = useRef<PerfTimer | null>(null)
 
   if (!perfRef.current) {
     perfRef.current = new PerfTimer(
@@ -36,13 +40,18 @@ const useMountDanmaku = () => {
     perfRef.current?.setEnabled(options?.debug ?? false)
   }, [options?.debug])
 
-  const { mustGetActiveFrame, updateFrame } = useStore.use.frame()
+  const { getActiveFrame, updateFrame } = useStore.use.frame()
   const { mount } = useStore.use.danmaku()
 
   return useMutation({
     mutationFn: async (episodes: GenericEpisode[]) => {
+      const activeFrame = getActiveFrame()
+      if (!activeFrame) {
+        throw new Error('No active frame to mount danmaku')
+      }
+
       perfRef.current?.mark('mount_start')
-      const comments: CommentEntity[] =
+      const rawComments: CommentEntity[] =
         episodes.length === 1
           ? episodes[0].comments
           : episodes.reduce<CommentEntity[]>((acc, episode) => {
@@ -50,8 +59,12 @@ const useMountDanmaku = () => {
               return acc
             }, [])
 
+      // 去重：优先使用 cid，fallback 到 content+time
+      const comments = dedupeComments(rawComments)
+
+      perfRef.current?.mark('mount_comments_ready')
       const res = await playerRpcClient.player['relay:command:mount']({
-        frameId: mustGetActiveFrame().frameId,
+        frameId: activeFrame.frameId,
         data: comments,
       })
       perfRef.current?.mark('mount_rpc_done')
@@ -60,10 +73,74 @@ const useMountDanmaku = () => {
       if (!res.data) {
         throw new Error('Failed to mount danmaku')
       }
+
+      return activeFrame.frameId
+    },
+    onSuccess: (mountedFrameId, danmaku) => {
+      mount(danmaku)
+      updateFrame(mountedFrameId, { mounted: true })
+    },
+    onError: (err) => {
+      toast.error(err.message)
+    },
+  })
+}
+
+const useMergeMountDanmaku = () => {
+  const { toast } = useToast()
+  const { data: options } = useExtensionOptions()
+  const perfRef = useRef<PerfTimer | null>(null)
+
+  if (!perfRef.current) {
+    perfRef.current = new PerfTimer(
+      Logger.sub('[useMergeDanmaku]'),
+      'merge',
+      options?.debug ?? false
+    )
+  }
+
+  useEffect(() => {
+    perfRef.current?.setEnabled(options?.debug ?? false)
+  }, [options?.debug])
+
+  const { mustGetActiveFrame } = useStore.use.frame()
+  const { mergeMount } = useStore.use.danmaku()
+
+  return useMutation({
+    mutationFn: async (episodes: GenericEpisode[]) => {
+      perfRef.current?.mark('merge_start')
+      const rawComments: CommentEntity[] =
+        episodes.length === 1
+          ? episodes[0].comments
+          : episodes.reduce<CommentEntity[]>((acc, episode) => {
+              concatArr(acc, episode.comments)
+              return acc
+            }, [])
+
+      const incoming = dedupeComments(rawComments)
+
+      // Merge with existing comments, deduplicating across sources
+      // Uses fuzzy dedup to catch near-duplicate comments from different providers
+      // (same text within 1 second tolerance)
+      const merged = fuzzyDedupeComments(
+        useStore.getState().danmaku.comments,
+        incoming
+      )
+
+      perfRef.current?.mark('merge_comments_ready')
+      const res = await playerRpcClient.player['relay:command:mount']({
+        frameId: mustGetActiveFrame().frameId,
+        data: merged,
+      })
+      perfRef.current?.mark('merge_rpc_done')
+      perfRef.current?.summary('merge')
+
+      if (!res.data) {
+        throw new Error('Failed to merge danmaku')
+      }
     },
     onSuccess: (_, danmaku) => {
-      mount(danmaku)
-      updateFrame(mustGetActiveFrame().frameId, { mounted: true })
+      mergeMount(danmaku)
     },
     onError: (err) => {
       toast.error(err.message)
@@ -82,6 +159,9 @@ export const useLoadDanmaku = () => {
   const fetchMutation = useFetchDanmaku()
   const fetchGenericMutation = useFetchGenericDanmaku()
   const mountMutation = useMountDanmaku()
+  const mergeMountMutation = useMergeMountDanmaku()
+
+  const { isMounted } = useStore.use.danmaku()
 
   const canRefresh =
     !!episodes &&
@@ -127,27 +207,59 @@ export const useLoadDanmaku = () => {
 
   const loadMutation = useMutation({
     mutationFn: async (data: DanmakuFetchDto) => {
-      return fetchMutation.mutateAsync(data, {
-        onSuccess: (cache) => {
-          mountDanmaku([cache])
-        },
-        onError: (err) => {
-          toast.error(err.message)
-        },
-      })
+      const cache = await fetchMutation.mutateAsync(data)
+      // IMPORTANT: await mount so the UI stays disabled until the heavy mount RPC finishes.
+      // This avoids users accidentally triggering multiple concurrent downloads/mounts, which can cause jank.
+      await mountDanmaku([cache])
+      return cache
     },
   })
 
   const loadGenericMutation = useMutation({
     mutationFn: async (data: MacCMSFetchData) => {
-      return fetchGenericMutation.mutateAsync(data, {
-        onSuccess: (cache) => {
-          mountDanmaku([cache])
-        },
-        onError: (err) => {
-          toast.error(err.message)
-        },
-      })
+      const cache = await fetchGenericMutation.mutateAsync(data)
+      await mountDanmaku([cache])
+      return cache
+    },
+  })
+
+  const mergeDanmaku = useEventCallback((episodes: GenericEpisode[]) => {
+    return mergeMountMutation.mutateAsync(episodes, {
+      onSuccess: () => {
+        const totalComments = useStore.getState().danmaku.comments.length
+        if (episodes.length === 1) {
+          const episode = episodes[0]
+          toast.success(
+            t(
+              'danmaku.alert.merged',
+              'Danmaku Merged: {{name}} (total: {{count}})',
+              {
+                name: episodeToString(episode),
+                count: totalComments,
+              }
+            )
+          )
+        } else {
+          toast.success(
+            t(
+              'danmaku.alert.mergedMultiple',
+              'Merged {{count}} sources (total: {{total}})',
+              {
+                count: episodes.length,
+                total: totalComments,
+              }
+            )
+          )
+        }
+      },
+    })
+  })
+
+  const mergeLoadMutation = useMutation({
+    mutationFn: async (data: DanmakuFetchDto) => {
+      const cache = await fetchMutation.mutateAsync(data)
+      await mergeDanmaku([cache])
+      return cache
     },
   })
 
@@ -180,8 +292,11 @@ export const useLoadDanmaku = () => {
   return {
     loadMutation,
     loadGenericMutation,
+    mergeLoadMutation,
     refreshComments,
     canRefresh,
+    canMerge: isMounted,
     mountDanmaku,
+    mergeDanmaku,
   }
 }

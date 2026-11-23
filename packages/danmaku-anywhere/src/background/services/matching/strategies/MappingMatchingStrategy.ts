@@ -7,7 +7,6 @@ import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import type { ProviderConfig } from '@/common/options/providerConfig/schema'
 import { ProviderConfigService } from '@/common/options/providerConfig/service'
 import { SeasonMap } from '@/common/seasonMap/SeasonMap'
-import { serializeError } from '@/common/utils/serializeError'
 import { EpisodeResolutionService } from '../EpisodeResolutionService'
 import type { IMatchingStrategy } from './IMatchingStrategy'
 
@@ -45,11 +44,9 @@ export class MappingMatchingStrategy implements IMatchingStrategy {
     }
 
     if (episodeNumber === undefined) {
-      return {
-        status: 'notFound',
-        data: null,
-        cause: 'Episode number is undefined',
-      }
+      // Cannot resolve episode without a number, pass to next strategy
+      this.logger.debug('Episode number is undefined, passing to next strategy')
+      return null
     }
 
     try {
@@ -63,11 +60,12 @@ export class MappingMatchingStrategy implements IMatchingStrategy {
         metadata: { strategy: 'mapping', providerConfig },
       }
     } catch (e) {
-      return {
-        status: 'notFound',
-        data: null,
-        cause: serializeError(e).message,
-      }
+      // Episode resolution failed — pass to next strategy rather than terminating
+      this.logger.debug(
+        'Episode resolution failed, passing to next strategy',
+        e
+      )
+      return null
     }
   }
 

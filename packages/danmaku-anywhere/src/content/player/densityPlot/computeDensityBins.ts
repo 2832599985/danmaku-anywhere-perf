@@ -30,6 +30,6 @@ export function computeDensityBins(
   return counts.map((cnt, i) => {
     const time = Math.min(duration, i * binSize + binSize / 2)
     const value = cnt / maxCount
-    return { time, value }
+    return { time, value, count: cnt }
   })
 }

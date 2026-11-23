@@ -38,6 +38,7 @@ describe('applyParsedChunk', () => {
 
     expect(target[1].parsed?.text).toBe('a')
     expect(target[2].parsed).toBeUndefined()
+    expect(target[2].parseError).toBe(true)
     expect(target[3].parsed?.text).toBe('c')
   })
 })

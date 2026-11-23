@@ -1,5 +1,5 @@
 import type { ILogger } from '@/common/Logger'
-import type { ExtStorageType } from '../../storage/ExtStorageService'
+import type { ExtStorageType } from '@/common/storage/getStorageArea'
 import { ExtStorageService } from '../../storage/ExtStorageService'
 import type { ReadinessService } from '../ReadinessService/ReadinessService'
 import { migrateOptions } from './migrationOptions'
@@ -80,10 +80,25 @@ export class OptionsService<T extends OptionsSchema> {
         this.logger,
         context
       )
-      await this.storageService.set(upgradedOptions)
+
+      // migrateOptions returns the input untouched when the stored version is
+      // already at or beyond the latest; don't rewrite storage in that case
+      if (upgradedOptions !== options) {
+        await this.storageService.set(upgradedOptions)
+      }
     } catch (error) {
-      this.logger.error('Failed to upgrade options, reset to default', error)
-      await this.reset()
+      /**
+       * Deliberately do NOT reset here. A resetting catch turned any single
+       * throwing migration into silent, total data loss — providers, hotkeys,
+       * mount configs and theme all replaced by defaults. Leaving the stored
+       * data untouched keeps it recoverable once the migration is fixed, and
+       * rethrowing lets the caller surface the failed init.
+       */
+      this.logger.error(
+        'Failed to upgrade options, leaving stored data untouched',
+        error
+      )
+      throw error
     }
   }
 
@@ -150,6 +165,12 @@ export class OptionsService<T extends OptionsSchema> {
   async readUnblocked() {
     const options = await this.storageService.read()
     if (!options) {
+      return this.defaultOptions
+    }
+    if (options.data === undefined || options.data === null) {
+      this.logger.warn(
+        'Stored options payload is missing "data"; falling back to default options'
+      )
       return this.defaultOptions
     }
     return options.data

@@ -1,0 +1,390 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+A separate `AGENTS.md` at the repo root covers Windows shell setup (force the console to UTF-8 with `[Console]::InputEncoding/OutputEncoding` + `chcp 65001` before anything else) and an optional local proxy. Its install/build/package commands duplicate the ones below — when you change a command here, change it there too.
+
+## Working Preferences
+
+- **Prefer agent teams and subagents**: For non-trivial tasks (multi-file changes, code review, refactoring, feature implementation), use `TeamCreate` + `Task` tool to spawn multiple agents working in parallel. Split work by file scope or responsibility (e.g., one agent per file group, or separate agents for implementation vs testing). Use the `Explore` subagent for codebase exploration and the `Plan` subagent for architecture planning.
+- **Architectural Integrity (Plan-First)**: For 0-to-1 features or new modules, the `Plan` subagent must define the architecture and output a `CONTRACT.md` or API specs before any implementation begins. No code should be written until the "contract" is established and confirmed.
+- **Strict File Scope & Responsibility**: When spawning teams, assign **exclusive** file paths or directories to each agent to prevent merge conflicts. Agents are strictly forbidden from modifying files outside their assigned scope (e.g., `Agent-A` for `src/`, `Agent-B` for `tests/`).
+- **Dependency & Mocking**: Only the Leader agent or user can modify root-level configs (e.g., `package.json`, `pom.xml`). Parallel agents must use **Mocks** if a dependency from a teammate is not yet ready to maintain parallel speed.
+- **Synchronization**: After team tasks are complete, invoke the `Explore` subagent to perform a cross-check, ensuring no duplicate logic exists and all code adheres to the initial `Plan`.
+- **Single agent for simple tasks**: Only work inline for single-file edits, trivial fixes, or quick lookups.
+
+## Project Overview
+
+Danmaku Anywhere is a monorepo for a browser extension and web app that displays danmaku (bullet comments) on video platforms. Uses pnpm workspaces.
+
+**Repo root:** `danmaku-anywhere/` (relative to this file)
+
+### Fork Info
+
+This is a performance/UX fork (`2832599985/danmaku-anywhere-perf`) of `Mr-Quin/danmaku-anywhere`. Active feature branch: `feat/anime4k-upscale`.
+
+**Fork-specific features** (preserve during upstream merges):
+- Glass/neon UI theme (violet/fuchsia palette, `backdropFilter: blur(12px)`, dark mode only) — **extension only**; the desktop player (`app/player`) uses a manga ink theme (vermilion/paper, zero radius, halftone dots, hard shadows; see `app/player/src/theme/theme.ts`)
+- Fixed time skip button (default 90s, `FixedSkip.service.ts`)
+- Auto skip OP via danmaku timestamp analysis (`VideoSkip.service.ts`)
+- Batch download in season details page (`SeasonDetailsPage.tsx`)
+- Comment dedup (`common/utils/utils.ts` + `DanmakuMergeService`): within one source keys prefer a provider-scoped `cid`; the cross-provider multi-source merge dedupes on the `p+m` composite ONLY — a bare `cid` is never a cross-provider identity (they collide between providers)
+- CID preservation as optional field in `CommentEntity`
+- MacCMS title mapping support (season/episode persistence for automatic matching)
+- Anime4K WebGPU super-resolution (`packages/upscale-engine`, `src/content/player/upscaler/`); integration points are extension options v34-v35, player RPC commands, floating-panel controls, and the optional `anime4k-cors` DNR ruleset
+- Optional Framegen frame interpolation before Anime4K (variable factor; the extension leaves multiplier/targetFps unset → 2×); extension options v36 stores the processing-resolution preference (480p/720p/1080p), model assets live in `public/assets/framegen/`, and unsupported GPUs / OOM fall back to Anime4K without disabling super-resolution
+- Local Tauri v2 desktop player (`app/player/`) reusing the danmaku/upscale engines for local video files: persistent playlist with auto-advance + resume-history (per-file position), sibling-danmaku autoload, fullscreen-safe overlays (portal into the stage), embedded subtitle tracks (streams inside mkv/mp4/webm probed with ffprobe → ffmpeg converts the picked one to SRT → cues; picker in 设置 › 字幕), Anime4K + variable Framegen interpolation (2×/3×/4× or target-fps, processed at 480p/720p/1080p), HDR10 detection, `stream://` range protocol, AI danmaku auto-match with a manual-pick fallback and learned file-name rules (settings › 命名格式); spec and verification log in `app/player/CONTRACT.md`
+
+## Common Commands
+
+All commands run from repo root (`danmaku-anywhere/`).
+
+```bash
+# Install & build (extension and its dependencies)
+corepack enable
+corepack prepare pnpm@10.11.0 --activate
+corepack pnpm -r --filter @mr-quin/danmaku-anywhere... install
+corepack pnpm -r --filter @mr-quin/danmaku-anywhere... build
+
+# Test extension. The `run` arg is REQUIRED — the package's `test` script is bare
+# `vitest`, so omitting it starts watch mode and hangs a non-interactive session.
+corepack pnpm -C packages/danmaku-anywhere test run
+
+# Run single test file
+corepack pnpm -C packages/danmaku-anywhere test run src/path/to/file.test.ts
+
+# Test and type-check the WebGPU upscale engine
+corepack pnpm --filter @danmaku-anywhere/upscale-engine test
+corepack pnpm --filter @danmaku-anywhere/upscale-engine type-check
+
+# Run the real-browser upscale and package-asset checks
+corepack pnpm -C packages/danmaku-anywhere exec playwright test e2e/upscale.spec.ts e2e/package-assets.spec.ts --workers=1
+
+# Desktop player (app/player): gates, browser e2e, package the exe
+corepack pnpm -C app/player type-check
+corepack pnpm -C app/player build                       # vite build (`pnpm dev` is broken, see player notes)
+corepack pnpm -C app/player exec playwright test --workers=1   # runs against the prebuilt dist
+export PATH="$HOME/.cargo/bin:$PATH" && corepack pnpm -C app/player tauri build   # cargo is NOT on PATH
+
+# Verify the packaged exe itself (25 checks incl. WebGPU + playlist + resume):
+# launch it with WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222, then
+node app/player/e2e/verify-exe.mjs
+
+# Package extension (Chrome/Edge) — output: packages/danmaku-anywhere/package/
+corepack pnpm -C packages/danmaku-anywhere package
+
+# Lint & format (all packages)
+corepack pnpm -r -F "./packages/**" lint
+corepack pnpm -r -F "./packages/**" format
+
+# Type check. Workspace packages must be BUILT FIRST or consumers report phantom
+# errors against missing dist output — this is the order CI (pr-quality.yml) uses.
+corepack pnpm build:packages && corepack pnpm type-check
+
+# Upstream merge workflow
+git fetch upstream
+git merge upstream/main
+```
+
+## Project Structure
+
+```
+danmaku-anywhere/
+├── packages/
+│   ├── danmaku-anywhere/   # Browser extension (React + Vite)
+│   ├── danmaku-converter/  # Danmaku format conversion + canonical types
+│   ├── danmaku-engine/     # Canvas rendering engine + plugins
+│   ├── danmaku-provider/   # API wrappers (Bilibili, DanDanPlay, MacCMS)
+│   ├── upscale-engine/     # Anime4K WebGPU super-resolution engine (fork)
+│   ├── bangumi-api/        # Bangumi API client with auto-generated schemas
+│   ├── integration-policy/ # XPath/AI integration policy types
+│   ├── media-parser/       # Shared season/episode parsing + matching (extension + player)
+│   ├── result/             # Result<T, E> type (@danmaku-anywhere/result)
+│   └── web-scraper/        # Web scraping utilities
+├── app/player/             # Local Tauri v2 desktop danmaku player (fork)
+├── app/web/                # Angular web application
+├── backend/
+│   ├── proxy/              # Cloudflare Workers + D1 + drizzle + better-auth
+│   └── deploy/             # Node/Docker community server (Dockerfile, compose)
+├── patches/                # pnpm patch for @mui/system — account for it on MUI upgrades
+└── docs/                   # Astro documentation (NOT a pnpm workspace, see below)
+```
+
+Workspace globs (`pnpm-workspace.yaml`) are `packages/**`, `backend/**`, `app/**` — `docs/` is deliberately outside, so `pnpm -r <script>` never touches it.
+
+Type-checking is not uniform: most packages run `tsgo` (`@typescript/native-preview`), while `packages/danmaku-anywhere`, `app/player`, and `upscale-engine` run plain `tsc`. `backend/proxy` names its script `type-check:local`, not `type-check`.
+
+## Extension Architecture
+
+The extension uses a three-layer content script architecture with RPC communication:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Background Service Worker                   │
+│  src/background/index.ts                                        │
+│  - RpcManager: handles ~90 RPC methods                          │
+│  - ScriptingManager: dynamic script injection                   │
+│  - PortsManager: streaming data (danmaku parse)                 │
+│  - IoC container (Inversify) for all services                   │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ chrome.runtime.sendMessage
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     Controller Script (React)                    │
+│  src/content/controller/index.tsx                               │
+│  - UI for danmaku management (floating button, panels)          │
+│  - FrameManager: tracks video frames, injects player scripts    │
+│  - Integration observers (XPath/AI) for media matching          │
+│  - Renders in Shadow DOM + Popover API                          │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ playerRpcClient (frameId-filtered)
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     Player Script (per-frame)                    │
+│  src/content/player/index.ts                                    │
+│  - DanmakuManagerService: mount/unmount/seek                    │
+│  - VideoNodeObserverService: detects video elements             │
+│  - VideoSkipService: skip OP/ED detection                       │
+│  - FixedSkipService: timed skip button                          │
+│  - Renders danmaku via danmaku-engine                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Entry Points
+
+The extension has four distinct entry points (paths relative to `packages/danmaku-anywhere/`):
+
+| Entry | HTML / Script | Purpose |
+|-------|--------------|---------|
+| **Popup** | `pages/popup.html` → `src/popup/index.tsx` | Toolbar popup UI (hash router, all settings/search/danmaku pages) |
+| **Dashboard** | `pages/dashboard.html` → reuses popup script | Full-page version of popup |
+| **Controller** | `src/content/controller/index.tsx` | Injected into matching pages; Shadow DOM + Popover React app |
+| **Player** | `src/content/player/index.ts` | Injected per-frame on video detection; danmaku rendering + skip services |
+| **App bridge** | `src/content/app/index.ts` | Runs on web app URLs; relays RPC via `window.postMessage` |
+
+Each entry point wraps in `EnvironmentContext` (`popup`, `controller`, etc.) to differentiate behavior.
+
+### Key Files
+
+| Area | Path | Purpose |
+|------|------|---------|
+| Background IoC | `src/background/ioc.ts` | Inversify container, singleton services |
+| Background RPC | `src/background/rpc/RpcManager.ts` | ~90 RPC method handlers |
+| Episode Matching | `src/background/services/matching/EpisodeMatchingService.ts` | Three-strategy matching pipeline |
+| Provider Factory | `src/background/services/providers/ProviderFactory.ts` | Creates provider instances per config |
+| Controller Entry | `src/content/controller/index.tsx` | React app in Shadow DOM |
+| Frame Manager | `src/content/controller/danmaku/frame/FrameManager.tsx` | Multi-frame orchestration |
+| Player Entry | `src/content/player/index.ts` | RPC server + service initialization |
+| RPC Types | `src/common/rpcClient/background/types.ts` | All RPC method definitions |
+| Popover Host | `src/content/common/host/createPopoverRoot.ts` | Shadow DOM + Popover setup |
+| Database | `src/common/db/db.ts` | Dexie DB (`DanmakuAnywhereDb`) with 13 migration versions |
+| Theme | `src/common/theme/Theme.tsx` | Glass/neon theme (fork feature) |
+| Fixed Skip | `src/content/player/fixedSkip/FixedSkip.service.ts` | Timed skip button (fork feature) |
+| Video Skip | `src/content/player/videoSkip/VideoSkip.service.ts` | Auto OP skip (fork feature) |
+| Upscale Service | `src/content/player/upscaler/Upscale.service.ts` | Connects extension options, video lifecycle, Anime4K, and Framegen fallback reporting |
+| WebGPU Renderer | `packages/upscale-engine/src/core/renderer.ts` | Anime4K pipeline, presentation loop, resource rebuild serialization |
+| Frame Interpolator | `packages/upscale-engine/src/core/frame-interpolator.ts` | Framegen capture, timeline/seek handling, overload bypass, and generated-frame queue |
+| DDP API | `packages/danmaku-provider/src/providers/ddp/api.ts` | DanDanPlay API wrapper (Result-boundary validation) |
+| Comment Dedup | `src/common/utils/utils.ts` | `commentKey`/`dedupeComments`/`fuzzyDedupeComments` |
+| Batch Download | `src/popup/pages/search/seasonDetails/SeasonDetailsPage.tsx` | Multi-episode download |
+
+### RPC Communication
+
+- **Background ↔ Content**: `chromeRpcClient` using `chrome.runtime.sendMessage`
+- **Controller → Player**: `playerRpcClient.player['relay:command:*']({ frameId, data })`
+- **Player → Controller**: `playerRpcClient.controller['relay:event:*']({ frameId })`
+- **Streaming**: `chrome.runtime.connect()` ports for large data (danmaku parsing)
+
+### Shadow DOM & Popover
+
+All UI renders in Shadow DOM with `popover="manual"` for top-layer positioning. On fullscreen change, call `hidePopover()` then `showPopover()` to stay on top. Use `textContent` (never `innerHTML`) for injecting styles into shadow style elements.
+
+### Episode Matching Pipeline
+
+When a video is detected, `EpisodeMatchingService` runs three strategies in order. The first to return a non-null result wins; returning `null` passes to the next strategy.
+
+```
+LocalMatchingStrategy → MappingMatchingStrategy → SearchMatchingStrategy
+```
+
+1. **LocalMatchingStrategy**: Checks for locally-imported custom danmaku matching the title. Skipped if `matchLocalDanmaku` is disabled.
+2. **MappingMatchingStrategy**: Looks up existing title-to-season mappings. Uses `EpisodeResolutionService` to resolve the specific episode number via the provider's `findEpisode()`.
+3. **SearchMatchingStrategy**: Performs an online search via all enabled automatic providers. If exactly one season is found, auto-maps it. If multiple results, returns `disambiguation` status for user selection.
+
+Result type: `MatchEpisodeResult` — discriminated union with statuses `success`, `disambiguation`, `notFound`.
+
+### Provider Factory
+
+`DanmakuProviderFactory` (Inversify factory) creates provider instances from `ProviderConfig`. Each call creates a **new instance** — providers are stateless between calls. Four provider types: `DanDanPlay`, `Bilibili`, `Tencent`, `MacCMS`.
+
+MacCMS keeps a module-level `episodeCache` (bounded Map keyed by `indexedId`, ~100 entries, shared across factory instances; tests reset it via `clearMacCmsEpisodeCache()`). On cache miss, `getEpisodesByIndexedId()` re-searches by title to recover — this handles service worker restarts. `getEpisodes()` intentionally throws: MacCMS season identity lives only in `indexedId`, so callers must use `getEpisodesByIndexedId()`.
+
+### Data Storage
+
+**Dexie.js** (IndexedDB wrapper) with three databases:
+- `danmaku-anywhere`: Main DB — tables: `episode`, `season`, `customEpisode`, `seasonMap` (13 migration versions)
+- `danmaku-anywhere-logs`: Logging DB — table: `logs`
+- `danmaku-anywhere-image`: Image cache DB — table: `image`
+
+**chrome.storage** (via `ExtStorageService`): Options/config stored in `chrome.storage.local/sync/session`.
+
+Dexie upgrade rules (each was a shipped data-loss bug): never pass an `async` callback to `each()` — the returned promise is discarded, so the upgrade reports done while writes are in flight; use `toArray()` + an awaited loop. Wrap per-row writes in try/catch — one unhandled rejection aborts the whole upgrade transaction, and Dexie retries it on every open, bricking the DB. Options migrations must guard missing fields and must never `reset()` on failure (that wipes all user settings); adding a value to an existing enum needs no new version.
+
+### Internationalization
+
+Two-layer i18n:
+- **chrome.i18n**: `_locales/{en,zh_CN}/messages.json` for manifest strings (`extName`, `extDescription`)
+- **i18next + react-i18next**: `src/common/localization/locales/{en,zh}/translation.json` for UI strings with type-safe `t()` keys
+
+The type augmentation in `src/common/localization/resources.ts` MUST keep the `{ translation: typeof enTranslation }` shape — flattening it silently disables `t()` key checking (~120 phantom tsc errors once buried real runtime crashes for months). `i18n:check` / `i18next-cli extract` MUTATES the locale files when run. Table-driven keys (assembled dynamically, invisible to static extraction) must be listed in `preservePatterns` in `i18next.config.ts` or the extractor deletes their translations.
+
+## Tech Stack
+
+| Area | Stack |
+|------|-------|
+| Extension | React 19+, MUI, TanStack Query, Zustand, Vite, Inversify |
+| Web App | Angular 20+, PrimeNG, Tailwind, TanStack Query, Signals |
+| Backend | Cloudflare Workers, TypeScript |
+| Core | TypeScript (strict), Biome, pnpm workspaces |
+| Validation | Zod for runtime schema validation (provider APIs, config) |
+| Error Handling | `Result<T, E>` pattern (`@danmaku-anywhere/result`) for provider APIs |
+
+## Code Style
+
+**Biome** enforces: 2-space indent, 80-column width, single quotes (JSX uses double), `semicolons: "asNeeded"` (not "none" — semicolons still appear where syntactically required), trailing commas (ES5), LF endings. Config: `biome.json`, which sets `linter.rules.recommended: false` and hand-picks rules; `noExplicitAny` and `noNonNullAssertion` are warnings, not errors. Test files (`**/*.test.ts`) relax `noExplicitAny` and `noEmptyBlockStatements`.
+
+`lefthook.yml` installs a pre-commit hook (via `pnpm prepare`) that runs `biome check --write` on staged files with `stage_fixed: true` — **commits rewrite and re-stage your files**. `packages/danmaku-anywhere`'s `lint` is `tsc && biome check --fix`, so type errors fail lint there but not in other packages. The extension is currently at **zero** `tsc --noEmit` errors — keep it there; when the count was left red the noise hid genuine runtime crashes.
+
+**TypeScript**: Strict mode, `import type` for type-only imports, no `any` (use `unknown`). Extension tsconfig enables `experimentalDecorators` + `emitDecoratorMetadata` for Inversify. Path alias: `@/*` → `./src/*`.
+
+## Key Patterns
+
+### React Hooks Rules
+- All hooks (`useState`, `useMemo`, `useEffect`, etc.) MUST be called before any early returns
+- Use `useEventCallback` (from MUI) for event handlers that need fresh closure values without re-triggering effects
+- Read Zustand store state with `useStore.getState()` inside callbacks (not from render closure) for freshness
+
+### Inversify Services
+- Services use `@injectable('Singleton')` + `@inject()` decorators
+- Background services registered in `src/background/ioc.ts` — `Container({ autobind: true, defaultScope: 'Singleton' })`
+- Content services use separate IoC containers (`uiContainer` in `src/common/ioc/uiIoc.ts`)
+- `DanmakuProviderFactory` bound as Inversify factory (creates new instances per call)
+
+### Provider API Pattern
+- All provider APIs return `Result<T, DanmakuProviderError>` (never throw)
+- Check `result.success` before accessing `result.data`
+- DanDanPlay API uses `fetchDanDanPlay` wrapper with context-based routing (custom URL vs proxy)
+- Zod schemas validate all API responses
+
+### Zustand + Immer
+- Store updates via `set()` callback — always read state inside the callback for draft safety
+- `frameId === 0` is valid — use `frameId !== undefined` checks, not falsy checks
+
+## Framework Guidelines
+
+### React (packages/danmaku-anywhere/)
+- Functional components with hooks
+- TanStack Query for server state, Zustand for global client state
+- Services use `@injectable('Singleton')` + `@inject()` decorators
+- Use `React.memo` for expensive components, `useMemo`/`useCallback` appropriately
+- Error boundaries for component error handling
+- Test with Vitest — tests colocated with source (`.test.ts` suffix), setup mocks in `src/tests/`
+- Vite builds via `@crxjs/vite-plugin` with `manifest.ts` (Manifest V3)
+- Standalone mode available via `vite.standalone.config.ts` + `VITE_STANDALONE` env var
+- Env vars: `VITE_PROXY_URL` and `VITE_PROXY_ORIGIN` (see `.env.example`), plus `VITE_STANDALONE` and `VITE_TARGET_BROWSER`
+- CI (`.github/workflows/pr-quality.yml`, Node 24) runs `pnpm install` → `build:packages` → `type-check` → `lint` → tests for **changed packages only** (`pnpm --filter '...[<base-sha>]' test run`), so a green PR does not mean the whole suite ran. A separate workflow enforces PR title format, and `i18n-check.yml` enforces translation keys (`pnpm -C packages/danmaku-anywhere i18n:check`).
+
+### Angular (app/web/)
+- Standalone components (no `standalone: true` needed)
+- `input()` / `output()` functions, not decorators
+- Signals + `computed()` for state
+- `@if` / `@for` / `@switch` control flow (not structural directives)
+- `injectQuery` / `injectMutation` from TanStack Query
+- `ChangeDetectionStrategy.OnPush` always
+- No `ngClass` / `ngStyle` — use class/style bindings
+- Reactive Forms only
+- Test with Jasmine
+
+## Extension Development Notes
+
+- Content scripts inject via `ScriptingManager` based on `MountConfig`. It must register from stored configs on **every** worker start: `chrome.runtime.onStartup` fires only on browser launch, not on an extension reload/update or an event-revived worker. Registration once rode along on the unconditional storage write in `OptionsService.upgrade()`; when that write became conditional, a reloaded extension registered nothing — no controller, so no floating button and no video detection anywhere. Never let script registration depend on an options-write side effect (`ScriptingManager.test.ts` guards this).
+- Player script injected per-frame on video detection
+- Use `pointer-events: none` on containers, `pointer-events: auto` on interactive elements
+- Validate all user inputs; no `eval()` or `innerHTML`
+- External RPC whitelist: only expose safe read-only methods via `onMessageExternal`
+- Always add cleanup in `ResizeObserver`/event listener teardown (disconnect observers, remove listeners, clear intervals)
+- Treat Framegen as optional. Initialization or GPU-capacity failures must keep Anime4K active, reset the interpolation preference, and notify the user.
+- Keep resize, configuration, and interpolation resource rebuilds serialized. Rendering must skip frames while shared GPU resources are being replaced.
+- Frame interpolation timing must use rVFC `mediaTime` and `expectedDisplayTime`; clear queued frames on seeks and discard stale frame-pair work before GPU readback.
+- Pipeline rebuilds publish on success and roll back on failure — never destroy the live pipeline set before its replacement is ready (a mid-rebuild throw must leave the old chain rendering), and device-loss recovery must run inside the rebuild lock and end with exactly ONE rVFC loop.
+- Interpolation overload detection counts pairs that produced no displayable sub-frame. Never time the GPU queue via `onSubmittedWorkDone` — it measures the entire queue including the Anime4K passes and misattributes saturation to Framegen. Source-pool saturation must briefly bypass interpolation, never freeze the presented frame behind a success return. The response to sustained lateness is to **drop the interpolation factor one step at a time** (floor 2×) and give it back after a healthy stretch — never a long full bypass, which on a merely busy GPU left most pairs uninterpolated (measured 86/204 at 45% utilization).
+- Keep `public/assets/framegen/LICENSE` and `WEIGHTS_LICENSE.md` beside the bundled model. The weights are restricted to personal, non-commercial use.
+
+## Desktop Player (app/player)
+
+Tauri v2 + React 19 desktop player (fork feature) that reuses the workspace engines for local video. Architecture, frozen module contracts, and the full verification log live in `app/player/CONTRACT.md` — read it before changing the player.
+
+**Architecture in one line:** platform adapter (`src/platform/`) lets the identical React tree run in a plain browser (blob URLs, for Playwright) and in WebView2 (`http://stream.localhost/<encoded path>` served by the range-capable, CORS-clean Rust protocol in `src-tauri/src/stream.rs`); Zustand store + imperative `UpscaleController`/`DanmakuController` glue the engines to one `<video>`.
+
+**Hard rules (each one was a real shipped bug — violations mean black screen or silently broken features):**
+- NEVER put inline `<style>` or `style=` attributes in `index.html`. Tauri gives inline content a CSP nonce, and a nonce makes `'unsafe-inline'` ignored, which blocks every Emotion/MUI runtime style → app renders 0×0 on black. Base CSS belongs in `public/app.css`; keep `security.dangerousDisableAssetCspModification: ["style-src"]` in `tauri.conf.json`.
+- NEVER swap `window.fetch` wholesale to `@tauri-apps/plugin-http`. The plugin rejects URLs outside the capability scope, which breaks Tauri's own IPC probe and same-origin asset fetches (Framegen weights). Keep the selective bridge in `src/platform/tauri.ts` (only DanDanPlay/proxy hosts).
+- When adding a field to persisted settings, it only survives existing users' localStorage because of the deep `merge` in `playerStore.ts` persist options (zustand's default merge is shallow and wipes new defaults). Extend that merge for any new nested settings object.
+- WebView2 blocks autoplay without a user gesture. The window config sets `additionalBrowserArgs` with `--autoplay-policy=no-user-gesture-required`; if you edit that string, preserve Tauri's default `--disable-features=...` args.
+- Framegen weights ship as `rt_v7s.dat` (a local web filter returns empty 204 for `.bin` fetches) using the canonical manifest from `node_modules/framegen/weights/rt_v7s.json`. (The extension's `public/assets/framegen/` copy was once size-mismatched but is now verified self-consistent — re-check manifest offsets against .bin byte size before "fixing" either copy from the other.)
+- `pnpm dev` / `tauri dev` do not work (Vite dep-optimizer chokes on the aliased workspace TS sources). Always verify against `vite build` output; the browser e2e serves `dist/` via `e2e/serve-dist.mjs` (Vite preview 204s `.bin`-like assets and orphans zombie servers on port 3060).
+- Playlist semantics: every "open" goes through the playlist store actions (single file = playlist of 1); switching items clears danmaku, then on Tauri a sibling `<name>.xml`/`<name>.json` next to the video is auto-mounted unless danmaku was explicitly loaded.
+- Browser-green ≠ exe-green: CSP, IPC, capability scopes, and autoplay only fail in the real WebView2. After meaningful changes run `e2e/verify-exe.mjs` (CDP attach to the exe launched with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`; also handy interactively via `e2e/cdp-inspect.mjs`).
+- Verifying the exe must NOT touch the user's real profile: localStorage lives in the shared WebView2 profile (`%LOCALAPPDATA%/app.danmaku.player`), so a harness that clears `danmaku-player-settings` for a clean boot wipes the user's playlist, resume history and settings (it did). Launch with `WEBVIEW2_USER_DATA_FOLDER=<temp dir>` for test runs, or snapshot/restore the key around the run.
+- On this machine cargo lives at `~/.cargo/bin` but is NOT on PATH; prefix builds with `export PATH="$HOME/.cargo/bin:$PATH"`. Never regex-edit files containing non-ASCII text via PowerShell 5.1 (`Get-Content`/`Set-Content` read BOM-less UTF-8 as ANSI and mojibake it) — use proper editing tools.
+- MUI `Drawer`/`Dialog` portal to `document.body`, which is HIDDEN behind the fullscreen element (only the fullscreen subtree renders in the top layer). Overlays that must work in fullscreen pass `slotProps={{ root: { container } }}` pointing at the stage element (`data-player-stage`, carried via `FullscreenPortalContext`). The `@mr-quin/danmu` engine caches container width, so call `DanmakuController.resize()` from a `ResizeObserver` on fullscreen/window resize or danmaku spawns from a stale x-position.
+- Anime4K chains are pruned to the target (`effect-chain-prune.ts`): the templates are fixed 4x/8x, but a 1080p file on a 2560x1440 display only needs 1.33x. Running every upscaler made the intermediate `Downscale` land *below the source resolution* (3840x2160 -> 1280x720), so source detail was discarded and re-guessed. The presentation pass finishes the resize with its own bilinear sampler, so overshoot costs nothing — never add a pass to "fix" a size mismatch. fp16 was measured on this GPU and rejected (0.98x on a real layer; Tint does not pack `mat4x4 * vec4` into f16x2, so scalar f16 runs on the same pipe as f32).
+- WebView2 cannot demux FLV/TS/AVI at all (`FFmpegDemuxer: open context failed`) even when the streams are H.264/AAC, so `src-tauri/src/remux.rs` rewrites the container with `ffmpeg -c copy` (lossless, ~0.35 s for a 22-minute episode) into `<app cache>/media`, keyed on source size+mtime. The playlist keeps the ORIGINAL `path`; only the `<video>` URL points at the copy, so resume/sibling-danmaku/subtitle/rules all keep working on the real file. Resolving a source is therefore async: `PlayerHost.sourceReady` gates HDR detection, danmaku/subtitle mounting, upscale and resume — without it the resume effect seeks the OUTGOING video and the new file never resumes.
+- Danmaku row spacing is derived, never tuned: the engine places a node at `track.middle - height/2` and sizes rows from `trackHeight` (library default 32px), so if the text box is taller than the track the rows overlap. `.da-danmaku` sets no `line-height`, and the CJK system font's line box is ~1.5em — a 26px font was 39px in a 32px track (48px was 72px). `src/player/danmaku/trackHeight.ts` pins the box (`TEXT_BOX_RATIO` 1.15, passed to the engine as `style.lineHeight`) and derives the pitch as `ceil(fontSize * lineHeight)`, so overlap is impossible at any font size. Never set a fixed `trackHeight` px value again.
+- Framegen interpolation is variable-factor: `FrameInterpolationOptions.multiplier`/`targetFps` (extension sets neither → 2×). The model's `runT(t)` takes any `t`; `frame-interpolator.ts` generates N-1 sub-frames per pair. Output is capped at the display refresh rate (rAF), so factors above 2× only help on high-refresh monitors. `resolution` is the model's *processing* size (`480p`/`720p`/`1080p` in both the player and the extension): with interpolation on, every frame — real ones included — is resampled to it before Anime4K runs, so it, not `targetResolution`, is the real detail ceiling. The engine caps the factor per resolution (`computeResolutionFactorCap`, 1080p tops out at 4×). Anime is drawn on twos and threes, so ~68% of captured frames repeat the drawing already on screen; the engine detects those with a **CPU** 160×90 thumbnail test (`createImageBitmap` + `getImageData`, threshold 8 of 765) rather than a GPU readback, because a readback on the Anime4K-saturated queue took 8-88 ms and the pair's output slot had always passed by the time the verdict arrived. Held drawings are **elided** (no Anime4K pass) and the pair between two drawings is what gets interpolated. The display delay scales with the factor — a flat `interval/2` left 3×/4× permanently late (slack -0.7 ms). Overload control **degrades one factor step** (3 late pairs → −1, 60 healthy → +1, floor 2×) instead of arming a 2 s full bypass, which used to leave 86 of 204 pairs uninterpolated at 45% GPU.
+- MUI `sx` 里 `width: 1` / `height: 1` = 100%（MUI 把 0..1 裸数字当百分比）。1px 分隔线必须写 `width: '1px'`。
+- MUI Modal/Drawer/Dialog portal 到 stage 内部时继承 stage 的 `cursor: none`（播放时隐藏光标）。theme.ts 的 `MuiModal: { root: { cursor: 'default' } }` 打断继承链——删掉它光标会在 overlay 里消失。
+- `vite.config.ts` 的 alias 数组里 `@danmaku-anywhere/danmaku-provider/genAi`、`/bilibili`、`/tencent` 必须在 bare `@danmaku-anywhere/danmaku-provider` 之前（子路径先匹配），否则 vite 把子路径追加到 `src/index.ts` 路径上导致 ENOENT。
+- `public/assets/fonts/fonts.css` 必须在 `index.html` 用 `<link>` 引入（不能 inline style，CSP 硬规则）。删掉它 manga 主题的 JetBrains Mono / Zen Antique / Noto Sans SC 全部回退到系统字体。
+- `UpscaleController` 的 renderer 回调（`onDiagnostics`/`onFirstFrameRendered`/`onError` 等）必须用**渲染器身份** `this.renderer === renderer` 守卫，**不能**用操作 `epoch`：`update()` 会 `++epoch` 丢弃过期异步结果但不换渲染器，epoch 守卫会在第一次设置更新后让闭包捕获的旧 epoch 永远失配，静默丢弃所有诊断 → HUD 冻住/消失直到换视频重建闭包。
+- `UpscaleController.apply()` 必须串行化（挂在 promise 链后），`disable()` 同步不进链。否则持久化 `upscale.enabled=true` 时打开视频，open effect 与异步 HDR-detect effect 会在 `this.renderer` 仍为 null 时并发跑两个 `Renderer.create()`；canvas 的 WebGPU context 是单例，输家的 `destroy()`→`context.unconfigure()` 会废掉赢家活着的 context → 呈现循环 `getCurrentTexture` 抛 `context is not configured` → onError → HUD 归 null。串行后第二个 apply 总能看到第一个的渲染器已装好而走 in-place update。
+- 长按 → 临时倍速（`playbackSettings.holdSpeed`）：用浏览器 key auto-repeat 区分长短按（首次非 repeat keydown 不动作，keyup 时没 repeat 过=短按 seek、repeat 过=恢复倍速），**不用**固定毫秒阈值（慢短按不会被吞）。进倍速前**快照**全局倍速——`setPlaybackRate` 触发 ratechange 把 `store.playbackRate` 也改成 held 值，松手读 store 就拿不到原全局倍速（全局 1.5 长按 3 松手会错回 3 而非 1.5）。失焦（blur）与卸载也要恢复，防倍速卡住。
+- 弹幕匹配**不许猜集数**：解析不出集数时**绝不**退回"第一集"或"第一个搜索结果"（旧的"取标题里最后一个数字 + `episodes[0]` 兜底"就是"11 集挂成第 1 集"的根因；注意 `第11话 [1080p]` 的最后一个数字是 1080）。**AI 不是闸门**：`aiExtractTitle` 返回 null（代理 500、离线、安全过滤）时必须继续走确定性文件名解析 + 搜索，失败也要打开 `DanmakuSourceDialog`，不许静默 return。送 AI 前先过 `parseReleaseName` 清洗（去掉 `[LoliHouse]` 这类组名——实测它会触发 Gemini 安全过滤让代理 500；代理还忽略 `inputType: 'filename'`）。允许且必须做的确定性推断只有三种：① **累计集数偏移**——精确匹配失败时按该季第一个数字集 `first + localEpisode - 1` 再查一次（咒术回战 S2 = 25–47，`第11话` → 35；史莱姆 S3 = 49–72 → 53），偏移后该集必须真实存在；② **未标季基准季**——文件名没写季、多个季都含该集时，只有"强关键词（AI/清洗标题）搜索第一位、且标题本身不带季标记"的候选可作为基准季，OSD 标 `未标季`，且这种 `default-season` **绝不写进命名规则**（是推断，不是用户确认）；③ **集标题匹配**——文件名带集标题（`第12话 華瑞月`）时与候选集标题做 bigram 比较，唯一命中可直接采用（这是唯一能区分"两季都有第 12 集"的信号）。其余情况一律打开选择框。季/集/集标题的解析在 `packages/media-parser`（与插件共享）——要改就改那里，不要在播放器里再抄一份；`- 11` / `[11]` 这类 fansub 集数标记也在那里。匹配顺序是 **兄弟文件 → 学到的命名格式规则 → AI + 搜索**：规则（`src/danmaku/filenameRules.ts`）是用户手动选过一次后学到的文件名骨架，优先级高于 AI，但学不出骨架时**必须** `learnRule` 返回 null（数字不在文件名里、字面量不足 3 字符、数字紧贴英文字母）；**同一个数字重复出现是允许的**（爬虫站名如 `第 10 集：第10集 · 稀饭动漫 Next` 会写两遍，两份必然同进同退，取第一个当捕获、其余做通配）——但**季数位置**（`第2季`/`Season 2`/`Part 2`）要排除，它是唯一不随集数变化的那种重复。学到的正则**尾巴只能由标记/分隔符构成**（`集话話回章編编期部巻卷` + 标点/空白），碰到数字/字母/非标记汉字（也就是**集标题**）必须停——第一版盲目截 6 个字符，把标题吃进字面量（`… 第 (\d{1,4}) 集：欢迎加`），结果规则**只能匹配当初学到的那一个文件**（用户的 `魔法光源股份有限公司 第 1 集：欢迎加入…` 能学、`第 2 集：骑扫帚…` 就完全匹配不上，静默掉回 AI）。匹配现在是**两级**：先把严格正则在全表过一遍，再退到"只保留到捕获组"的前缀级（`prefixOnly()`——能把旧版本已存进用户机器里的坏规则救回来，**不需要迁移**）；宽松命中时 OSD 标 `（宽松）`。选择框因匹配失败而弹出时，同目录若存在规则要附上 `unmatchedRuleHint()` 说明，否则用户只能得出"它根本没学会"的结论。规则命中而该集不存在时也要弹选择框而不是退回落空；解析出集但 DDP 该集 0 条弹幕时要提示 `第N集暂无弹幕`（新番常见），别静默。集数的唯一权威是 `/v2/bangumi/{id}` 的集列表——**不要**用搜索接口的 `episodeCount` 做范围校验（死神 搜索报 366、详情 460；幼女战记Ⅱ 搜索报 12、详情 22）。
+- 打开一集要自动补全同批剧集：`src/player/siblingEpisodes.ts` 用"文件名里集数之前的字面量头部"当批次身份（`魔法光源股份有限公司 第 `），同目录+同头部才收、按集数排序、**认不出集数就跳过（不猜）**；片库整个 `Videos` 装一堆番也不会串。`Platform.listVideoFiles()` 在 Tauri 走 fs 插件的 `readDir`（能力里有 `fs:allow-read-dir`），浏览器返回空——扫描是 exe 的便利，不是正确性依赖。**`readDir` 给的是裸文件名，拼路径必须走 `platform/types.ts` 的 `joinPath(dir, name)`**：内联写 `` `${dir}\${name}` `` 时 `\$` 是**转义**（不是分隔符+插值），目录里每个条目都塌成同一个字面量字符串，`selectBatch` 一个数字都读不到、永远返回空——第一版就是这么把这个功能变成全程空转的，而 tsc/biome/68 个单测全绿（没人覆盖"列表→路径"这一环）。视频扩展名只在 `platform/types.ts` 定义一次（选择器/拖拽/扫描共用）。**同批剧集要排在当前集的"两边"，不是全塞到后面**：`selectBatch` 以打开的那一集为界分成 `before`/`after`（同集号的 v2 算 `before`），store 的 `placeAroundCurrent(before, after)` 把前面的插到当前项前面、后面的插到后面——第一版全插在后面，打开第 7 集得到 `7,1,2,…,6,8,9`，第 7 集放完**跳回第 1 集**；老测试只试过打开第 1 集（前面没有集数）所以没抓到。它**移动**已存在的项而不是复制，且永不动/永不重复正在播的那一项；开关在 设置 → 播放 →「自动加入同系列剧集」（默认开）。
+- **AI 双语字幕（§34）走两个 sidecar 进程**：whisper.cpp `whisper-server`（turbo q5 + `--vad`，**不要 `-dtw`**：强关 flash-attn、慢 2–5×、不准）识别，llama.cpp Vulkan `llama-server` + Murasaki-4B 翻译（CPU 模式同一个二进制 `-ngl 0 -dev none`）。杀进程=释放显存，GPU 同时只放一个引擎。模型/运行时/缓存都在数据目录（默认非 C 盘 `<X>:\DanmakuPlayerData`，env `DANMAKU_PLAYER_DATA_DIR` 可覆盖），**绝不往 C 盘下载**。sherpa-onnx/SenseVoice 已移除（不再需要 `SHERPA_ONNX_LIB_DIR`）。调度在 `src/subtitle/generate.ts`：自动暂停→GPU 突发→自动续播，播放中 CPU 跟随；`cargo test` 必须 `--target-dir D:/tmp/cargo-test-target`，否则覆盖 release exe。
+- **构建速度（2026-11-11 实测）**：`tauri build --no-bundle` 从 ~2.5 分钟降到 ~12 秒，靠两处，别改回去。① `src-tauri/Cargo.toml` 的 release profile 用 `lto = false` + `codegen-units = 16` + `incremental = true`：原来的 `lto = true` + `codegen-units = 1` 每次都把整个依赖图（tauri/wry/webview2）单线程重做全程序优化，只改一行也要 106s（thin LTO 41s，现在 5s）；exe 只大 1.3MB（18.6→19.9MB），Rust 这边只做 IO/进程/IPC，LTO 没有运行时收益。② `@mui/icons-material` **必须按路径单独引入**（`import X from '@mui/icons-material/X'`），从包根引入会让 vite 解析整个图标库：11975 个模块、46s，按路径引入后 1204 个、5s。`vite.config.ts` 关了 `reportCompressedSize`。
+- 播放器查 DanDanPlay 必须和插件一样走两步：先 `/v2/search/anime` 拿季，再 `/v2/bangumi/{id}` 拿集——搜索接口返回的集列表**没有 `episodeNumber`**（只有标题），而集匹配正是靠这个字段。
+- **内封字幕 webview 根本看不见**：`<video>` 只认以 `<track>` 挂上来的 WebVTT，容器里的字幕轨（mkv/mp4/webm）对 Chromium 系宿主完全不可见——必须用 ffmpeg 解出来。`src-tauri/src/subtitle/tracks.rs` 用 `ffprobe -select_streams s` 列轨道、`ffmpeg -map 0:<index> -f srt -` 转文本；`src/subtitle/embedded.ts` 选轨（文字轨 → 中文优先 → `default` → 第一条；`forced` 只在没有别的时用）并挂载。**优先级：视频同目录的 `.srt/.ass/.vtt` > 内封轨 > 手动生成的 ASR**；但容器**每次打开都探测**（哪怕兄弟文件赢了），否则"没有内封字幕"就变成"我们没看"。两个坑：① ffprobe 的 disposition 段名是 **`stream_disposition`**，写成 `stream=…,disposition` 会被**静默忽略**（不报错、字段直接没有 → `default/forced` 恒为 false）；② 图形字幕（PGS/VobSub/DVB）转不了文本，要**列出来并标明不支持**，不能假装文件没字幕。ffmpeg/ffprobe 的定位沿用 ASR 那条链（exe 旁边 → PATH；ffprobe 还会去已解析的 ffmpeg 同目录找），缺了就在 设置 → 字幕 里说清楚。
+- **字幕上屏不许走 React**：`SubtitleController`（计时）把当前屏上的 cue 数组**同一个 task 内**交给 `SubtitleRenderer`（写 DOM），不写 store、不触发 React 渲染、不碰持久化——store 里只存**挂载的轨道**（`subtitles`/`subtitleSource`），永不存"此刻屏幕上哪几句"。这是"开关字幕/快进快退要跟商业播放器一样快"的实现基础，退回 React 渲染就是退回卡顿。配套三条：① 隐藏用 `visibility` 而不是 `display`（隐藏的行保持排版，开字幕=重绘，0 帧）；② `requestVideoFrameCallback` 只要挂了 cue 就**永远保持注册**（暂停也是），并在 `play/playing/loadeddata/emptied` 每个边界重新挂——旧实现只在播放时注册，暂停时 seek 会消耗掉唯一一次回调、之后**再也不注册**，于是"按左右键有概率字幕没出来"；③ seek 立刻按**目标时间**求值（`seekTo`），不等解码器（实测解码要 6~20ms）；播放中用帧的 `mediaTime` 当权威，`timeupdate` 只在没有帧（窗口被遮挡/最小化）时兜底，且真帧后 350ms 内闭嘴（时钟比画面略超前，否则会提前一句又收回）。
+- **字幕"避开控制条"必须实测控制条高度**：控制条**高度恒定**（142px = `52px 24px 16px` padding + 内容）而舞台尺寸不恒定，所以 `--sub-lift` **不能**用百分比——7% 在 720p 是 50px、1080p 是 76px，实测 1280×720 时最低一行有 **48px 陷在控制条的渐变里**（渐变层 `zIndex` 30 高于字幕层 3，字被压暗）。正确姿势：`Controls.tsx` 量自己（`data-controls-bar` → `onHeightChange` → `SubtitleRenderer.setControlBarHeight`），CSS 抬 `height + 8px` 并与用户的 `bottom%` 取 `max()`（用户设得更大就不许被拉回来）。两个陷阱：① `ResizeObserver` 回调里的 `contentRect` 是**内容盒**——控制条高度几乎全是 padding，于是报 74px（真实 142px），而且**只有 padding 变化时它根本不再触发**，值会冻在首帧；要量边框盒（`offsetHeight`）。② 光有 `ResizeObserver` 也不够：它在控制条内容稳定前就建好了，之后只变内部排版的那一轮不一定再触发——所以再挂一个 `useLayoutEffect` **每次 commit 后重新量**（弹幕密度条就是靠 store 字段触发 `Controls` 重渲染出现的，天然覆盖）。`setControlBarHeight` 对重复值直接返回，所以每 commit 量一次没有开销。该功能在真实 Chromium 验过 1280×720/1920×1080/1024×768/2560×1440（间隙恒 8px）+ 密度条出现时 142→201px 跟随。
+
+- **B站/腾讯不能走 Tauri `http` 插件**：实测 reqwest 被 B站 412 `request was banned` / 403 风控、腾讯 `ret:20607`/`35013` 拒绝，且 deflate 响应不解压。必须走 `src-tauri/src/source_bridge.rs` 的隐藏 WebView2：每个源一个隐藏窗口停在 `https://www.bilibili.com/robots.txt` / `https://v.qq.com/robots.txt`，用 CDP `Runtime.evaluate`（`awaitPromise: true`）在页面里执行 `fetch`。B站先 `/x/frontend/finger/spi` 设 `buvid3/buvid4` cookie；腾讯弹幕 `credentials: 'omit'`（它的 `ACAO` 是 `*`，`include` 会被浏览器拒绝）；不要转发 `Cookie/Origin/Referer/User-Agent`（页面自己会带）。页面→host 的 `WebMessage` 在远程 robots.txt 上不可靠（host→page 正常），别用。CDP 返回值是**方法结果对象**（`/result/value`），不是 `{id,result}` 信封。`source_fetch` 只放行白名单 URL；`SourceSeason/Episode` 带 `source`，命名规则旧数据默认 `ddp`，`第1季` 与"未标季"是同一季（否则腾讯永远合不进来）。细节见 `app/player/CONTRACT.md` §30。
+
+**Manga ink theme + new features (post-redesign):**
+- Design tokens: `INK`/`PAPER`/`VERMILION`/`GOLD`/`GREEN`; atoms in `src/ui/ink.tsx` (InkToggleGroup/InkSwitch/InkSlider/InkStamp/InkSection/InkBlinkDot/InkPanelHeader/InkLabel); keyframes in `public/app.css`.
+- AI auto-match: `src/danmaku/ai.ts` (free built-in AI via `@danmaku-anywhere/danmaku-provider/genAi`, tagged `inputType: 'filename'`) + `src/danmaku/autoMatch.ts` + `src/danmaku/sources.ts`. Season/episode resolution runs through `@danmaku-anywhere/media-parser` — the SAME helpers the extension uses — and never guesses (see hard rules). Runs after sibling-file autoload; gated on `danmakuSettings.autoOnlineMatch`. It searches every enabled source (DDP / Bilibili / Tencent), scores them together, and — with `mergeSources` on — merges every confident source that resolved the same episode (`p+m` dedupe). When it cannot decide, it opens the danmaku dialog pre-searched (`danmakuSearchPrefill`) instead of mounting a wrong episode.
+- Learned file-name rules: `src/danmaku/filenameRules.ts` + settings page `命名格式` (`src/ui/FilenameRulesSettings.tsx`, nav id `patterns`). A manual season/episode pick stores the file name's skeleton plus the season it was bound to (`store.filenameRules`, persisted, capped at 100); later files of the same batch mount without asking (OSD `按命名格式匹配`). Runs BEFORE the AI (see hard rules). Toggle: `danmakuSettings.learnFilenamePatterns`.
+- Danmaku filter chain: `src/danmaku/filter.ts` (blocked words plain+regex + merge-duplicates, applied before render).
+- OP/ED inference: `src/player/useOpEdMarks.ts` (danmaku density heuristic, shared by ProgressBar gold ticks + skip-OP button). Skip mode `playbackSettings.skipOpEd` (auto/ask/off).
+- A/B compare: canvas `clip-path` via `compareRatio` store field; keyboard C. Upscale toggle keyboard U.
+- Real-time HUD: `upscaleStats` fed by engine `onDiagnostics`。**HUD 的帧率必须是"真实可见帧率"= 源帧率 + 插帧产出，不能用 `presentedFrames`**：那个计数器在呈现循环里每个 rAF turn 都自增（`presentLatestProcessedFrame()` 在生成代未变时会重复提交同一张纹理，只有暂停才被 gate），所以它等于**显示器刷新率**——本机 170Hz 上，补帧**完全关掉**也显示 175，用户会以为补帧在跑。算术抽在 `src/player/upscale/outputRate.ts`（纯函数 + 单测），`fps = min(源 + 插帧, presentedFrames)/秒`，并把 `sourceFps`/`generatedFps` 一起显示出来；插帧开着但产出为 0 时显示「补帧未产出」而不是让一个好看的总数盖过去。回调守卫与 apply 串行的坑见上方 hard rules。**另一个坑：引擎的 `...FrameInterpolationGenerated` 计数器是 per-interpolator 的，渲染器重建（改设置/换分辨率）会归零**——测速率时负增量是"重置"不是"没产出"，把它当 dead second 会得出"补帧坏了"的假结论（2026-09-27 真的这么误判过一次）。
+- Hold-to-speed: 长按 → 临时倍速 `playbackSettings.holdSpeed`（默认 3，设置页 1.5–8× / 0.5 步进）；短按 → 仍 seek。逻辑在 `useKeyboardControls.ts`，快照恢复见上方 hard rules。
+- Settings full-window page (not drawer): `settingsSection` store field + `openSettingsAt(section)` action.
+- Self-hosted fonts: `public/assets/fonts/` (~230 woff2 shards, Noto Sans SC + Zen Antique + JetBrains Mono); `mascot-manga.png` for idle screen.
+- E2E screenshot audit: `e2e/ui-audit.mjs` (CDP, 7 screens, overflow detection).
+
+## Release Workflow
+
+```bash
+# Build, package, and release (from repo root)
+corepack pnpm -r --filter @mr-quin/danmaku-anywhere... build
+corepack pnpm -C packages/danmaku-anywhere package
+
+# Create zip (Windows — PowerShell)
+Compress-Archive -Path "packages/danmaku-anywhere/package/*" -DestinationPath "danmaku-anywhere.zip"
+
+# Tag and publish
+git tag v1.x.x-perf.N
+git push origin v1.x.x-perf.N
+gh release create v1.x.x-perf.N danmaku-anywhere.zip --repo 2832599985/danmaku-anywhere-perf --title "vX.X.X" --notes "Release notes"
+```

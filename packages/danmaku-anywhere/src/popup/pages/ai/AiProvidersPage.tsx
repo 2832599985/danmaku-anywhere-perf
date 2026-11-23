@@ -26,9 +26,11 @@ export const AiProvidersPage = (): ReactElement => {
 
   const [editingProvider, setEditingProvider] =
     useState<AiProviderConfigInput | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const handleEditProvider = (provider: AiProviderConfig) => {
     setEditingProvider(provider)
+    setEditingId(provider.id)
     setMode('edit')
   }
 
@@ -48,19 +50,19 @@ export const AiProvidersPage = (): ReactElement => {
 
   const handleCloseEditor = () => {
     setEditingProvider(null)
+    setEditingId(null)
     setMode(null)
   }
 
   const handleSave = async (data: AiProviderConfig) => {
-    if (mode === 'edit' && editingProvider?.id) {
+    if (mode === 'edit' && editingId) {
       await update.mutateAsync(
-        { id: editingProvider.id, config: data },
+        { id: editingId, config: data },
         {
           onSuccess: () => {
             toast.success(t('common.updated', 'Updated'))
             handleCloseEditor()
           },
-          onError: (err) => toast.error(err.message),
         }
       )
     } else {
@@ -69,7 +71,6 @@ export const AiProvidersPage = (): ReactElement => {
           toast.success(t('common.created', 'Created'))
           handleCloseEditor()
         },
-        onError: (err) => toast.error(err.message),
       })
     }
   }
@@ -89,9 +90,6 @@ export const AiProvidersPage = (): ReactElement => {
         await remove.mutateAsync(provider.id, {
           onSuccess: () => {
             toast.success(t('common.deleted', 'Deleted'))
-          },
-          onError: (error) => {
-            toast.error(error.message)
           },
         })
       },

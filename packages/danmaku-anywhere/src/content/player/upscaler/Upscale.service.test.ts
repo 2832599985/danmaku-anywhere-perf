@@ -1,0 +1,646 @@
+// @vitest-environment jsdom
+import type { EnhancementEffect } from '@danmaku-anywhere/upscale-engine'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const mocks = vi.hoisted(() => ({
+  rendererCreate: vi.fn(),
+  resolveEffectChain: vi.fn(),
+  waitForVideoReady: vi.fn(),
+  upscaleApplyCorsRule: vi.fn(),
+  upscaleRemoveCorsRule: vi.fn(),
+  canvasInstances: [] as Array<{
+    element: HTMLCanvasElement
+    setBufferSize: ReturnType<typeof vi.fn>
+    cleanup: ReturnType<typeof vi.fn>
+    show: ReturnType<typeof vi.fn>
+  }>,
+}))
+
+vi.mock('@/common/rpcClient/background/client', () => ({
+  chromeRpcClient: {
+    upscaleApplyCorsRule: mocks.upscaleApplyCorsRule,
+    upscaleRemoveCorsRule: mocks.upscaleRemoveCorsRule,
+  },
+}))
+
+vi.mock('@danmaku-anywhere/upscale-engine', () => ({
+  Renderer: {
+    create: mocks.rendererCreate,
+  },
+  RendererInitializationError: class extends Error {},
+  resolveEffectChain: mocks.resolveEffectChain,
+  waitForVideoReady: mocks.waitForVideoReady,
+}))
+
+vi.mock('./UpscaleCanvas', () => ({
+  UpscaleCanvas: class {
+    element = document.createElement('canvas')
+    setBufferSize = vi.fn()
+    cleanup = vi.fn()
+    show = vi.fn()
+
+    constructor() {
+      mocks.canvasInstances.push(this)
+    }
+  },
+}))
+
+import { UpscaleService } from './Upscale.service'
+
+const createDeferred = <T>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+const createVideo = () => {
+  const video = document.createElement('video')
+  Object.defineProperties(video, {
+    videoWidth: { configurable: true, value: 640 },
+    videoHeight: { configurable: true, value: 360 },
+  })
+  return video
+}
+
+const createStoredOptions = (
+  overrides: Partial<Parameters<UpscaleService['applyOptions']>[0]> = {}
+) => ({
+  enabled: true,
+  modeId: 'builtin-mode-a' as const,
+  performanceTier: 'balanced' as const,
+  targetResolution: 'x2' as const,
+  enableCrossOriginFix: false,
+  frameInterpolation: {
+    enabled: false,
+    resolution: '720p' as const,
+  },
+  ...overrides,
+})
+
+const createServiceHarness = (video: HTMLVideoElement) => {
+  const listeners = new Map<string, ((video: HTMLVideoElement) => void)[]>()
+  const videoObserver = {
+    activeVideo: video as HTMLVideoElement | null,
+    addEventListener: vi.fn(
+      (event: string, listener: (video: HTMLVideoElement) => void) => {
+        const existing = listeners.get(event) ?? []
+        existing.push(listener)
+        listeners.set(event, existing)
+      }
+    ),
+  }
+  const emit = (event: string, target: HTMLVideoElement) => {
+    for (const listener of listeners.get(event) ?? []) {
+      listener(target)
+    }
+  }
+  const extensionOptions = {
+    get: vi.fn().mockResolvedValue({
+      playerOptions: { upscale: { enabled: true } },
+    }),
+    update: vi.fn().mockResolvedValue(undefined),
+  }
+  const logger = {
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    sub: vi.fn(),
+  }
+  logger.sub.mockReturnValue(logger)
+
+  const service = new UpscaleService(
+    videoObserver as never,
+    extensionOptions as never,
+    logger as never
+  )
+  return { service, extensionOptions, videoObserver, emit }
+}
+
+const createService = (video: HTMLVideoElement) =>
+  createServiceHarness(video).service
+
+describe('UpscaleService operation coordination', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/')
+    mocks.canvasInstances.length = 0
+    mocks.rendererCreate.mockReset()
+    mocks.resolveEffectChain.mockReset()
+    mocks.waitForVideoReady.mockReset()
+    mocks.upscaleApplyCorsRule.mockReset()
+    mocks.upscaleRemoveCorsRule.mockReset()
+    mocks.waitForVideoReady.mockResolvedValue(undefined)
+    mocks.upscaleApplyCorsRule.mockResolvedValue(undefined)
+    mocks.upscaleRemoveCorsRule.mockResolvedValue(undefined)
+    mocks.resolveEffectChain.mockImplementation(
+      (mode: string, tier: string): EnhancementEffect[] => [
+        {
+          id: `${mode}-${tier}`,
+          name: `${mode}-${tier}`,
+          className: `${mode}-${tier}`,
+        },
+      ]
+    )
+    vi.mocked(chrome.runtime.getURL).mockImplementation(
+      (path) => `chrome-extension://test/${path}`
+    )
+    Object.defineProperty(navigator, 'gpu', {
+      configurable: true,
+      value: {},
+    })
+  })
+
+  afterEach(() => {
+    window.history.replaceState({}, '', '/')
+    vi.restoreAllMocks()
+  })
+
+  it('uses animation-frame presentation by default', async () => {
+    const video = createVideo()
+    const renderer = {
+      destroy: vi.fn(),
+      handleSourceResize: vi.fn(),
+      updateConfiguration: vi.fn(),
+    }
+    mocks.rendererCreate.mockResolvedValue(renderer)
+    const service = createService(video)
+
+    await service.applyOptions(createStoredOptions())
+
+    expect(mocks.rendererCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ presentationMode: 'raf' })
+    )
+  })
+
+  it('allows the legacy rVFC presentation path from the diagnostic query', async () => {
+    window.history.replaceState({}, '', '/?daUpscalePresentation=rvfc')
+    const video = createVideo()
+    const renderer = {
+      destroy: vi.fn(),
+      handleSourceResize: vi.fn(),
+      updateConfiguration: vi.fn(),
+    }
+    mocks.rendererCreate.mockResolvedValue(renderer)
+    const service = createService(video)
+
+    await service.applyOptions(createStoredOptions())
+
+    expect(mocks.rendererCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        presentationMode: 'rvfc',
+      })
+    )
+  })
+
+  it('serializes configuration rebuilds and leaves the newest options last', async () => {
+    const video = createVideo()
+    const firstUpdate = createDeferred<void>()
+    const renderer = {
+      destroy: vi.fn(),
+      handleSourceResize: vi.fn(),
+      updateConfiguration: vi
+        .fn()
+        .mockImplementationOnce(() => firstUpdate.promise)
+        .mockResolvedValue(undefined),
+    }
+    mocks.rendererCreate.mockResolvedValue(renderer)
+    const service = createService(video)
+
+    await service.applyOptions(createStoredOptions())
+
+    const older = service.applyOptions(
+      createStoredOptions({ modeId: 'builtin-mode-b', targetResolution: 'x4' })
+    )
+    await vi.waitFor(() => {
+      expect(renderer.updateConfiguration).toHaveBeenCalledTimes(1)
+    })
+
+    const newer = service.applyOptions(
+      createStoredOptions({ modeId: 'builtin-mode-c', targetResolution: 'x8' })
+    )
+    await Promise.resolve()
+    expect(renderer.updateConfiguration).toHaveBeenCalledTimes(1)
+
+    firstUpdate.resolve()
+    await older
+    await newer
+
+    expect(renderer.updateConfiguration).toHaveBeenCalledTimes(2)
+    expect(renderer.updateConfiguration).toHaveBeenLastCalledWith({
+      effects: [
+        {
+          id: 'C-balanced',
+          name: 'C-balanced',
+          className: 'C-balanced',
+        },
+      ],
+      targetDimensions: { width: 5120, height: 2880 },
+      frameInterpolation: {
+        enabled: false,
+        resolution: '720p',
+        weightsBinUrl: 'chrome-extension://test/assets/framegen/rt_v7s.bin',
+        weightsManifestUrl:
+          'chrome-extension://test/assets/framegen/rt_v7s.json',
+      },
+    })
+  })
+
+  it('ignores a stale renderer update failure after disable', async () => {
+    const video = createVideo()
+    const update = createDeferred<void>()
+    const renderer = {
+      destroy: vi.fn(),
+      handleSourceResize: vi.fn(),
+      updateConfiguration: vi.fn(() => update.promise),
+    }
+    mocks.rendererCreate.mockResolvedValue(renderer)
+    const service = createService(video)
+
+    await service.applyOptions(createStoredOptions())
+    const applying = service.applyOptions(
+      createStoredOptions({ modeId: 'builtin-mode-b' })
+    )
+    await vi.waitFor(() => {
+      expect(renderer.updateConfiguration).toHaveBeenCalledTimes(1)
+    })
+
+    service.disable()
+    update.reject(new Error('renderer was destroyed'))
+
+    await expect(applying).resolves.toBeUndefined()
+    expect(renderer.destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-enables for the video that replaces a removed one', async () => {
+    const video = createVideo()
+    const renderer = {
+      destroy: vi.fn(),
+      handleSourceResize: vi.fn(),
+      updateConfiguration: vi.fn(),
+    }
+    mocks.rendererCreate.mockResolvedValue(renderer)
+    const { service, videoObserver, emit } = createServiceHarness(video)
+
+    await service.applyOptions(createStoredOptions())
+    expect(mocks.rendererCreate).toHaveBeenCalledTimes(1)
+
+    // The site tears its player down: the observer reports the removal with no
+    // replacement yet, which shuts the renderer off.
+    videoObserver.activeVideo = null
+    emit('videoNodeRemove', video)
+    expect(service.isEnabled).toBe(false)
+
+    // ...and then mounts a fresh element. The user never turned upscaling off,
+    // so it has to come back on its own.
+    const nextVideo = createVideo()
+    videoObserver.activeVideo = nextVideo
+    emit('videoNodeChange', nextVideo)
+
+    await vi.waitFor(() => {
+      expect(mocks.rendererCreate).toHaveBeenCalledTimes(2)
+    })
+    expect(service.isEnabled).toBe(true)
+  })
+
+  it('stays off after a video swap when the user disabled upscaling', async () => {
+    const video = createVideo()
+    const renderer = {
+      destroy: vi.fn(),
+      handleSourceResize: vi.fn(),
+      updateConfiguration: vi.fn(),
+    }
+    mocks.rendererCreate.mockResolvedValue(renderer)
+    const { service, videoObserver, emit } = createServiceHarness(video)
+
+    await service.applyOptions(createStoredOptions())
+    await service.applyOptions(createStoredOptions({ enabled: false }))
+    expect(service.isEnabled).toBe(false)
+
+    const nextVideo = createVideo()
+    videoObserver.activeVideo = nextVideo
+    emit('videoNodeChange', nextVideo)
+
+    await Promise.resolve()
+    expect(mocks.rendererCreate).toHaveBeenCalledTimes(1)
+    expect(service.isEnabled).toBe(false)
+  })
+
+  it('ignores a stale enable failure instead of killing the newer session', async () => {
+    const video = createVideo()
+    const renderer = {
+      destroy: vi.fn(),
+      handleSourceResize: vi.fn(),
+      updateConfiguration: vi.fn(),
+    }
+    mocks.rendererCreate.mockResolvedValue(renderer)
+    const stale = createDeferred<void>()
+    mocks.waitForVideoReady
+      .mockImplementationOnce(() => stale.promise)
+      .mockResolvedValue(undefined)
+    const service = createService(video)
+
+    const older = service.applyOptions(createStoredOptions())
+    await service.applyOptions(
+      createStoredOptions({ modeId: 'builtin-mode-b' })
+    )
+    expect(service.isEnabled).toBe(true)
+
+    stale.reject(new Error('metadata never arrived'))
+
+    await expect(older).resolves.toBeUndefined()
+    expect(service.isEnabled).toBe(true)
+    expect(renderer.destroy).not.toHaveBeenCalled()
+  })
+
+  it('records option changes while suspended and initializes only on resume', async () => {
+    const video = createVideo()
+    const renderer = {
+      destroy: vi.fn(),
+      handleSourceResize: vi.fn(),
+      updateConfiguration: vi.fn(),
+    }
+    mocks.rendererCreate.mockResolvedValue(renderer)
+    const service = createService(video)
+
+    service.suspend()
+    await service.applyOptions(
+      createStoredOptions({ modeId: 'builtin-mode-c', targetResolution: 'x4' })
+    )
+
+    expect(mocks.rendererCreate).not.toHaveBeenCalled()
+
+    await service.resume()
+
+    expect(mocks.rendererCreate).toHaveBeenCalledTimes(1)
+    expect(mocks.rendererCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        effects: [
+          {
+            id: 'C-balanced',
+            name: 'C-balanced',
+            className: 'C-balanced',
+          },
+        ],
+        targetDimensions: { width: 2560, height: 1440 },
+      })
+    )
+  })
+
+  describe('cross-origin fix lifecycle', () => {
+    const enableWithCorsFix = async (
+      service: UpscaleService,
+      video: HTMLVideoElement
+    ) => {
+      const applying = service.applyOptions(
+        createStoredOptions({ enableCrossOriginFix: true })
+      )
+      await vi.waitFor(() => expect(video.crossOrigin).toBe('anonymous'))
+      video.dispatchEvent(new Event('loadedmetadata'))
+      await applying
+    }
+
+    it('restores crossOrigin and removes the CORS rule on disable', async () => {
+      const video = createVideo()
+      video.src = 'https://cdn.example.com/video.mp4'
+      const renderer = {
+        destroy: vi.fn(),
+        handleSourceResize: vi.fn(),
+        updateConfiguration: vi.fn(),
+      }
+      mocks.rendererCreate.mockResolvedValue(renderer)
+      const service = createService(video)
+
+      await enableWithCorsFix(service, video)
+      expect(mocks.upscaleApplyCorsRule).toHaveBeenCalledWith({
+        videoUrl: 'https://cdn.example.com/video.mp4',
+      })
+
+      service.disable()
+
+      expect(video.crossOrigin).toBe(null)
+      expect(mocks.upscaleRemoveCorsRule).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps the CORS fix while suspended so playback continues', async () => {
+      const video = createVideo()
+      video.src = 'https://cdn.example.com/video.mp4'
+      const renderer = {
+        destroy: vi.fn(),
+        handleSourceResize: vi.fn(),
+        updateConfiguration: vi.fn(),
+      }
+      mocks.rendererCreate.mockResolvedValue(renderer)
+      const service = createService(video)
+
+      await enableWithCorsFix(service, video)
+
+      service.suspend()
+
+      expect(video.crossOrigin).toBe('anonymous')
+      expect(mocks.upscaleRemoveCorsRule).not.toHaveBeenCalled()
+    })
+
+    it('keeps the CORS fix when options change while suspended', async () => {
+      const video = createVideo()
+      video.src = 'https://cdn.example.com/video.mp4'
+      const renderer = {
+        destroy: vi.fn(),
+        handleSourceResize: vi.fn(),
+        updateConfiguration: vi.fn(),
+      }
+      mocks.rendererCreate.mockResolvedValue(renderer)
+      const service = createService(video)
+
+      await enableWithCorsFix(service, video)
+      service.suspend()
+
+      // The video keeps streaming in the PiP window, so an option write here
+      // must not pull the crossOrigin attribute or the DNR rule out from it.
+      await service.applyOptions(
+        createStoredOptions({
+          enableCrossOriginFix: true,
+          modeId: 'builtin-mode-b',
+        })
+      )
+
+      expect(video.crossOrigin).toBe('anonymous')
+      expect(mocks.upscaleRemoveCorsRule).not.toHaveBeenCalled()
+    })
+
+    it('restores crossOrigin when the anonymous reload fails', async () => {
+      const video = createVideo()
+      video.src = 'https://cdn.example.com/video.mp4'
+      const service = createService(video)
+
+      const applying = service.applyOptions(
+        createStoredOptions({ enableCrossOriginFix: true })
+      )
+      await vi.waitFor(() => expect(video.crossOrigin).toBe('anonymous'))
+      video.dispatchEvent(new Event('error'))
+
+      await expect(applying).rejects.toThrow(
+        'Failed to reload cross-origin video'
+      )
+      expect(video.crossOrigin).toBe(null)
+    })
+  })
+
+  describe('enable failure reporting', () => {
+    it('notifies cross-origin failures and turns the stored option off', async () => {
+      const video = createVideo()
+      video.src = 'https://cdn.example.com/video.mp4'
+      const { service, extensionOptions } = createServiceHarness(video)
+      const onFailure = vi.fn()
+      service.setFailureNotifier(onFailure)
+
+      const applying = service.applyOptions(
+        createStoredOptions({ enableCrossOriginFix: true })
+      )
+      await vi.waitFor(() => expect(video.crossOrigin).toBe('anonymous'))
+      video.dispatchEvent(new Event('error'))
+
+      await expect(applying).rejects.toThrow(
+        'Failed to reload cross-origin video'
+      )
+      expect(onFailure).toHaveBeenCalledWith('cross-origin')
+      expect(extensionOptions.update).toHaveBeenCalledWith({
+        playerOptions: { upscale: { enabled: false } },
+      })
+      // The failed attempt must also release the CORS session rule.
+      expect(mocks.upscaleRemoveCorsRule).toHaveBeenCalledTimes(1)
+    })
+
+    it('notifies generic failures when renderer creation fails', async () => {
+      const video = createVideo()
+      const { service, extensionOptions } = createServiceHarness(video)
+      const onFailure = vi.fn()
+      service.setFailureNotifier(onFailure)
+      mocks.rendererCreate.mockRejectedValue(new Error('boom'))
+
+      await expect(service.applyOptions(createStoredOptions())).rejects.toThrow(
+        'boom'
+      )
+      expect(onFailure).toHaveBeenCalledWith('error')
+      expect(extensionOptions.update).toHaveBeenCalledWith({
+        playerOptions: { upscale: { enabled: false } },
+      })
+      // The half-built canvas from the failed enable must be cleaned up.
+      expect(mocks.canvasInstances.at(-1)?.cleanup).toHaveBeenCalled()
+    })
+
+    it('turns off only frame interpolation when the renderer falls back', async () => {
+      const video = createVideo()
+      const renderer = {
+        destroy: vi.fn(),
+        handleSourceResize: vi.fn(),
+        updateConfiguration: vi.fn(),
+      }
+      mocks.rendererCreate.mockImplementation(async (options) => {
+        options.onFrameInterpolationFallback?.(
+          new Error('shader-f16 is unavailable')
+        )
+        return renderer
+      })
+      const { service, extensionOptions } = createServiceHarness(video)
+      const storedUpscale = createStoredOptions({
+        frameInterpolation: { enabled: true, resolution: '720p' },
+      })
+      extensionOptions.get.mockResolvedValue({
+        playerOptions: { upscale: storedUpscale },
+      })
+      const onFailure = vi.fn()
+      service.setFailureNotifier(onFailure)
+
+      await service.applyOptions(storedUpscale)
+
+      await vi.waitFor(() => {
+        expect(onFailure).toHaveBeenCalledWith('frame-interpolation')
+        expect(extensionOptions.update).toHaveBeenCalledWith({
+          playerOptions: {
+            upscale: {
+              ...storedUpscale,
+              frameInterpolation: { enabled: false, resolution: '720p' },
+            },
+          },
+        })
+      })
+      expect(renderer.destroy).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('display bounds clamping', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    const setupRenderer = () => {
+      const renderer = {
+        destroy: vi.fn(),
+        handleSourceResize: vi.fn(),
+        updateConfiguration: vi.fn(),
+      }
+      mocks.rendererCreate.mockResolvedValue(renderer)
+      return renderer
+    }
+
+    it('caps the render target at the physical screen size', async () => {
+      vi.stubGlobal('screen', { width: 1920, height: 1080 })
+      vi.stubGlobal('devicePixelRatio', 1)
+      setupRenderer()
+      const video = createVideo()
+      const service = createService(video)
+
+      // x8 of 640×360 requests 5120×2880 — far beyond a 1080p display
+      await service.applyOptions(
+        createStoredOptions({ targetResolution: 'x8' })
+      )
+
+      expect(mocks.rendererCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          targetDimensions: { width: 1920, height: 1080 },
+        })
+      )
+    })
+
+    it('multiplies the screen bound by devicePixelRatio', async () => {
+      vi.stubGlobal('screen', { width: 1280, height: 720 })
+      vi.stubGlobal('devicePixelRatio', 2)
+      setupRenderer()
+      const video = createVideo()
+      const service = createService(video)
+
+      // bound = 1280×2 by 720×2 = 2560×1440; x8 (5120×2880) halves to fit
+      await service.applyOptions(
+        createStoredOptions({ targetResolution: 'x8' })
+      )
+
+      expect(mocks.rendererCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          targetDimensions: { width: 2560, height: 1440 },
+        })
+      )
+    })
+
+    it('leaves the target untouched when it already fits the display', async () => {
+      vi.stubGlobal('screen', { width: 3840, height: 2160 })
+      vi.stubGlobal('devicePixelRatio', 1)
+      setupRenderer()
+      const video = createVideo()
+      const service = createService(video)
+
+      // x2 of 640×360 = 1280×720, well within a 4K display
+      await service.applyOptions(
+        createStoredOptions({ targetResolution: 'x2' })
+      )
+
+      expect(mocks.rendererCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          targetDimensions: { width: 1280, height: 720 },
+        })
+      )
+    })
+  })
+})

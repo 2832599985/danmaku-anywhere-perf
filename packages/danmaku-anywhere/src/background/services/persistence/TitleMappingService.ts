@@ -20,21 +20,55 @@ export class TitleMappingService {
   }
 
   async add(map: SeasonMap) {
-    const existingSnapshot = await this.db.seasonMap.get({ key: map.key })
-    if (existingSnapshot) {
-      const existing = SeasonMap.fromSnapshot(existingSnapshot)
-      this.logger.debug('Updating title mapping:', map.toSnapshot())
-      const merged = existing.merge(map)
-      await this.db.seasonMap.put(merged.toSnapshot(), existing.key)
-    } else {
-      this.logger.debug('Adding title mapping:', map.toSnapshot())
-      await this.db.seasonMap.add(map.toSnapshot())
-    }
+    await this.db.transaction('rw', this.db.seasonMap, async () => {
+      const existingSnapshot = await this.db.seasonMap.get({ key: map.key })
+      if (existingSnapshot) {
+        const existing = SeasonMap.fromSnapshot(existingSnapshot)
+        this.logger.debug('Updating title mapping:', map.toSnapshot())
+        const merged = existing.merge(map)
+        await this.db.seasonMap.put(merged.toSnapshot(), existing.key)
+      } else {
+        this.logger.debug('Adding title mapping:', map.toSnapshot())
+        await this.db.seasonMap.add(map.toSnapshot())
+      }
+    })
+  }
+
+  async put(map: SeasonMap) {
+    this.logger.debug('Replacing title mapping:', map.toSnapshot())
+    await this.db.seasonMap.put(map.toSnapshot())
   }
 
   async remove(key: string) {
     this.logger.debug('Removing title mapping:', key)
     await this.db.seasonMap.where({ key }).delete()
+  }
+
+  async removeProvider(key: string, providerConfigId: string) {
+    const snapshot = await this.db.seasonMap.get({ key })
+    if (!snapshot) {
+      return
+    }
+
+    const existing = SeasonMap.fromSnapshot(snapshot)
+    const updated = existing.withoutProvider(providerConfigId)
+
+    this.logger.debug('Removing title mapping provider:', {
+      key,
+      providerConfigId,
+    })
+
+    if (updated.isEmpty()) {
+      await this.remove(key)
+      return
+    }
+
+    await this.db.seasonMap.put(updated.toSnapshot(), key)
+  }
+
+  async removeMany(keys: string[]) {
+    this.logger.debug('Removing title mappings:', keys)
+    await this.db.seasonMap.where('key').anyOf(keys).delete()
   }
 
   async get(key: string) {

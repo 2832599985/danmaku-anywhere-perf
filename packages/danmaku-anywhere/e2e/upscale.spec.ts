@@ -1,0 +1,279 @@
+import { expect, test } from './fixtures'
+
+test('player settings exposes a single inline Anime4K control surface', async ({
+  extensionId,
+  page,
+}) => {
+  await page.goto(
+    `chrome-extension://${extensionId}/pages/dashboard.html#/options/player`
+  )
+  await expect(
+    page.getByText('Video super resolution (Anime4K)', { exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'A', exact: true })
+  ).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: '2×', exact: true })
+  ).toBeVisible()
+  await expect(page.getByText('2× frame interpolation')).toBeVisible()
+  await expect(
+    page.getByTestId('upscale-settings').getByRole('combobox')
+  ).toHaveCount(0)
+})
+
+test('upscale defaults are persisted and the CORS ruleset is disabled', async ({
+  context,
+}) => {
+  const worker =
+    context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'))
+
+  await expect
+    .poll(async () => {
+      return worker.evaluate(async () => {
+        const stored = await chrome.storage.sync.get('extensionOptions')
+        return stored.extensionOptions?.data?.playerOptions?.upscale
+      })
+    })
+    .toEqual({
+      enabled: false,
+      modeId: 'builtin-mode-a',
+      performanceTier: 'balanced',
+      targetResolution: 'x2',
+      enableCrossOriginFix: false,
+      frameInterpolation: {
+        enabled: false,
+        resolution: '720p',
+      },
+    })
+
+  const enabledRulesets = await worker.evaluate(() =>
+    chrome.declarativeNetRequest.getEnabledRulesets()
+  )
+  expect(enabledRulesets).not.toContain('anime4k-cors')
+})
+
+test('changing the CORS option updates the static ruleset', async ({
+  context,
+}) => {
+  const worker =
+    context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'))
+
+  await expect
+    .poll(() =>
+      worker.evaluate(async () => {
+        const stored = await chrome.storage.sync.get('extensionOptions')
+        return Boolean(stored.extensionOptions?.data)
+      })
+    )
+    .toBe(true)
+
+  await worker.evaluate(async () => {
+    const stored = await chrome.storage.sync.get('extensionOptions')
+    const extensionOptions = stored.extensionOptions
+    await chrome.storage.sync.set({
+      extensionOptions: {
+        ...extensionOptions,
+        data: {
+          ...extensionOptions.data,
+          playerOptions: {
+            ...extensionOptions.data.playerOptions,
+            upscale: {
+              ...extensionOptions.data.playerOptions.upscale,
+              enableCrossOriginFix: true,
+            },
+          },
+        },
+      },
+    })
+  })
+
+  await expect
+    .poll(() =>
+      worker.evaluate(() => chrome.declarativeNetRequest.getEnabledRulesets())
+    )
+    .toContain('anime4k-cors')
+})
+
+test('renders an Anime4K canvas while keeping the player popover above it', async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(120_000)
+  const worker =
+    context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'))
+
+  // Wait for the background to persist default options before touching storage
+  await expect
+    .poll(() =>
+      worker.evaluate(async () => {
+        const stored = await chrome.storage.sync.get('extensionOptions')
+        return Boolean(stored.extensionOptions?.data)
+      })
+    )
+    .toBe(true)
+
+  // Content scripts are only registered for sites with an enabled mount
+  // config, so seed one for the test page
+  await worker.evaluate(async () => {
+    const stored = await chrome.storage.sync.get('mountConfig')
+    const wrapper = stored.mountConfig ?? { version: 6, data: [] }
+    wrapper.data = [
+      {
+        id: crypto.randomUUID(),
+        name: 'e2e-upscale',
+        patterns: ['https://example.com/*'],
+        mediaQuery: 'video',
+        enabled: true,
+        mode: 'manual',
+        preferredProviders: [],
+      },
+    ]
+    await chrome.storage.sync.set({ mountConfig: wrapper })
+  })
+  await expect
+    .poll(() =>
+      worker.evaluate(async () => {
+        const scripts = await chrome.scripting.getRegisteredContentScripts()
+        return scripts.flatMap((script) => script.matches ?? [])
+      })
+    )
+    .toContain('https://example.com/*')
+
+  await page.goto('https://example.com')
+  const gpuSupport = await page.evaluate(async () => {
+    if (!('gpu' in navigator) || !navigator.gpu) return false
+    try {
+      const adapter = await navigator.gpu.requestAdapter()
+      return {
+        adapter: Boolean(adapter),
+        shaderF16: Boolean(adapter?.features.has('shader-f16')),
+      }
+    } catch {
+      return false
+    }
+  })
+  test.skip(
+    !gpuSupport || !gpuSupport.adapter,
+    'WebGPU adapter is unavailable in this environment'
+  )
+
+  await page.evaluate(async () => {
+    const sourceCanvas = document.createElement('canvas')
+    sourceCanvas.width = 320
+    sourceCanvas.height = 180
+    sourceCanvas.style.position = 'fixed'
+    sourceCanvas.style.left = '-10000px'
+    document.body.appendChild(sourceCanvas)
+    const sourceContext = sourceCanvas.getContext('2d')
+    if (!sourceContext) throw new Error('2D canvas is unavailable')
+    let frame = 0
+    window.setInterval(() => {
+      const level = 128 + Math.round(Math.sin(frame / 12) * 60)
+      sourceContext.fillStyle = `rgb(${level}, 90, 140)`
+      sourceContext.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height)
+      frame++
+    }, 1000 / 30)
+
+    const video = document.createElement('video')
+    video.muted = true
+    video.autoplay = true
+    video.controls = true
+    video.srcObject = sourceCanvas.captureStream(30)
+    document.body.appendChild(video)
+    await video.play()
+  })
+  await page.locator('video').waitFor({ state: 'attached' })
+  await page.locator('#danmaku-anywhere-player').waitFor({
+    state: 'attached',
+    timeout: 30_000,
+  })
+
+  await worker.evaluate(async () => {
+    const stored = await chrome.storage.sync.get('extensionOptions')
+    const extensionOptions = stored.extensionOptions
+    await chrome.storage.sync.set({
+      extensionOptions: {
+        ...extensionOptions,
+        data: {
+          ...extensionOptions.data,
+          playerOptions: {
+            ...extensionOptions.data.playerOptions,
+            upscale: {
+              ...extensionOptions.data.playerOptions.upscale,
+              enabled: true,
+              modeId: 'builtin-mode-a',
+              targetResolution: 'x2',
+              enableCrossOriginFix: false,
+              frameInterpolation: {
+                enabled: true,
+                resolution: '480p',
+              },
+            },
+          },
+        },
+      },
+    })
+  })
+
+  const canvas = page.locator('canvas[data-danmaku-anywhere-upscale="true"]')
+  await expect(canvas).toBeVisible({ timeout: 60_000 })
+  const state = await page.evaluate(() => {
+    const video = document.querySelector('video')
+    const upscaleCanvas = document.querySelector<HTMLCanvasElement>(
+      'canvas[data-danmaku-anywhere-upscale="true"]'
+    )
+    const playerRoot = document.querySelector('#danmaku-anywhere-player')
+    return {
+      videoOpacity: video?.style.opacity,
+      videoWidth: video?.videoWidth,
+      videoHeight: video?.videoHeight,
+      canvasWidth: upscaleCanvas?.width,
+      canvasHeight: upscaleCanvas?.height,
+      screenWidth: window.screen.width,
+      screenHeight: window.screen.height,
+      devicePixelRatio: window.devicePixelRatio,
+      playerPopoverOpen: playerRoot?.matches(':popover-open'),
+      canvasPopoverOpen: upscaleCanvas?.matches(':popover-open'),
+    }
+  })
+  expect(state.videoOpacity).toBe('0')
+  const requestedWidth = (state.videoWidth ?? 0) * 2
+  const requestedHeight = (state.videoHeight ?? 0) * 2
+  const maxWidth = state.screenWidth * state.devicePixelRatio
+  const maxHeight = state.screenHeight * state.devicePixelRatio
+  const scale = Math.min(
+    1,
+    maxWidth / requestedWidth,
+    maxHeight / requestedHeight
+  )
+  expect(state.canvasWidth).toBe(Math.round(requestedWidth * scale))
+  expect(state.canvasHeight).toBe(Math.round(requestedHeight * scale))
+  expect(state.playerPopoverOpen).toBe(true)
+  expect(state.canvasPopoverOpen).toBe(false)
+  if (gpuSupport && gpuSupport.shaderF16) {
+    await expect(canvas).toHaveAttribute(
+      'data-danmaku-anywhere-frame-interpolation',
+      'active',
+      { timeout: 60_000 }
+    )
+    await expect
+      .poll(
+        async () => {
+          return (
+            (await canvas.getAttribute(
+              'data-danmaku-anywhere-frame-interpolation-generated'
+            )) ?? ''
+          )
+        },
+        { timeout: 60_000 }
+      )
+      .toMatch(/^[1-9]\d*$/)
+  } else {
+    await expect(canvas).toHaveAttribute(
+      'data-danmaku-anywhere-frame-interpolation',
+      'fallback',
+      { timeout: 60_000 }
+    )
+  }
+})

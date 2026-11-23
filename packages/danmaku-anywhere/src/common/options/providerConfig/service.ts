@@ -99,6 +99,14 @@ export class ProviderConfigService implements IStoreService {
   async getAutomaticProviders(): Promise<ProviderConfig[]> {
     const configs = await this.options.get()
 
+    if (!Array.isArray(configs)) {
+      this.logger.warn(
+        'Provider configs is not an array, returning empty list',
+        typeof configs
+      )
+      return []
+    }
+
     return configs.filter(
       (item) => item.enabled && this.supportsAutomaticMode(item)
     )
@@ -108,7 +116,8 @@ export class ProviderConfigService implements IStoreService {
     return (
       config.impl === DanmakuSourceType.DanDanPlay ||
       config.impl === DanmakuSourceType.Bilibili ||
-      config.impl === DanmakuSourceType.Tencent
+      config.impl === DanmakuSourceType.Tencent ||
+      config.impl === DanmakuSourceType.MacCMS
     )
   }
 

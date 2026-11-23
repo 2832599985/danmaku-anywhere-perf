@@ -4,10 +4,40 @@ export interface DanmakuFilter {
   enabled: boolean
 }
 
+export type DanmakuMode = 'rtl' | 'ltr' | 'top' | 'bottom'
+
+export interface DanmakuModeFilter {
+  readonly rtl: boolean
+  readonly ltr: boolean
+  readonly top: boolean
+  readonly bottom: boolean
+}
+
+export interface DanmakuColorFilter {
+  readonly enabled: boolean
+  readonly onlyWhite: boolean
+  readonly blacklist: readonly string[]
+}
+
+export interface DanmakuTextStroke {
+  width: number
+  color: string
+}
+
 export interface DanmakuStyle {
   opacity: number
   fontSize: number
   fontFamily: string
+  /**
+   * Unitless line-height for the text box, e.g. 1.2. When set, the height of a
+   * danmaku node is `fontSize * lineHeight` — predictable, so a host can size
+   * its tracks from the font size alone. Left undefined the browser default
+   * applies (≈1.35 for CJK system fonts), which makes a large font taller than
+   * the track and the lines overlap.
+   */
+  lineHeight?: number
+  textStroke?: DanmakuTextStroke
+  textShadow?: string
 }
 
 export type FixedCommentMode = 'normal' | 'hidden' | 'scroll'
@@ -22,6 +52,8 @@ export interface DanmakuOptions {
    */
   readonly allowOverlap: boolean
   readonly filters: DanmakuFilter[]
+  readonly modeFilter: DanmakuModeFilter
+  readonly colorFilter: DanmakuColorFilter
   readonly distribution: 'random' | 'order'
   /**
    * The maximum number of comments to show on the screen at the same time
@@ -70,6 +102,17 @@ export const DEFAULT_DANMAKU_OPTIONS: DanmakuOptions = {
   overlap: 0,
   trackHeight: 32,
   filters: [],
+  modeFilter: {
+    rtl: true,
+    ltr: true,
+    top: true,
+    bottom: true,
+  },
+  colorFilter: {
+    enabled: false,
+    onlyWhite: false,
+    blacklist: [],
+  },
   speed: 1,
   interval: 500,
   maxOnScreen: 500,

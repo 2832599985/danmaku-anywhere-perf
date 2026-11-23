@@ -1,3 +1,5 @@
+export type { AssOptions } from './ass/commentsToAss.js'
+export { commentsToAss } from './ass/commentsToAss.js'
 export * from './canonical/index.js'
 export * from './schema/index.js'
 export { commentsToXml } from './utils/commentsToXml.js'

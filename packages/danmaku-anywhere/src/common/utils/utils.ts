@@ -122,24 +122,21 @@ export const matchWithPinyin = (inputString: string, searchString: string) => {
   return !!pinyinMatches
 }
 
+function fallbackGenerateUUID(): string {
+  const template = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'
+  return template.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
+}
+
 export const getRandomUUID = () => {
   try {
     return globalThis.crypto.randomUUID()
-  } catch (e) {
-    console.warn(
-      'Failed to generate UUID using crypto.randomUUID, falling back to Math.random',
-      e
-    )
+  } catch {
     // fallback to Math.random if crypto.randomUUID is not available
-    const generateUUID = (): string => {
-      const template = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'
-      return template.replace(/[xy]/g, (c) => {
-        const r = (Math.random() * 16) | 0
-        const v = c === 'x' ? r : (r & 0x3) | 0x8
-        return v.toString(16)
-      })
-    }
-    return generateUUID()
+    return fallbackGenerateUUID()
   }
 }
 
@@ -199,4 +196,180 @@ export const concatArr = <T>(a: T[], b: T[]): T[] => {
     a.push(item)
   }
   return a
+}
+
+/**
+ * Composite key built from the comment payload alone.
+ * Safe to compare across providers, since it carries no provider-local ids.
+ */
+const compositeCommentKey = (comment: { p: string; m: string }): string => {
+  return `pt:${comment.p}|${comment.m}`
+}
+
+/**
+ * Build a stable dedup key for a comment.
+ * Prefer `cid` when available, fallback to `p+m` composite key.
+ *
+ * `cid` is only unique *within* one provider — DanDanPlay comment ids,
+ * Bilibili dmids and Tencent barrage ids are separate numbering schemes that
+ * overlap freely. Pass `source` (a provider config id, or any per-source
+ * discriminator) whenever comments from more than one provider can land in the
+ * same key space, or two unrelated comments that happen to share a numeric id
+ * will be treated as duplicates and one of them silently dropped.
+ */
+export const commentKey = (
+  comment: {
+    cid?: number
+    p: string
+    m: string
+  },
+  source?: string
+): string => {
+  if (comment.cid === undefined) {
+    return compositeCommentKey(comment)
+  }
+  return source === undefined
+    ? `cid:${comment.cid}`
+    : `cid:${source}:${comment.cid}`
+}
+
+/**
+ * 弹幕去重：优先使用 cid，fallback 到 content+time 组合
+ *
+ * Pass `source` when the input can mix providers; see {@link commentKey}.
+ */
+export const dedupeComments = <
+  T extends { cid?: number; p: string; m: string },
+>(
+  comments: T[],
+  source?: string
+): T[] => {
+  const seen = new Set<string>()
+  return comments.filter((comment) => {
+    const key = commentKey(comment, source)
+
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
+
+/**
+ * Merge new comments into an existing array, deduplicating using `p+m` composite key.
+ * Returns a new array containing all unique comments from both sources.
+ */
+export const mergeComments = <T extends { cid?: number; p: string; m: string }>(
+  existing: T[],
+  incoming: T[]
+): T[] => {
+  const seen = new Set<string>()
+  const result: T[] = []
+
+  for (const comment of existing) {
+    const key = commentKey(comment)
+    if (!seen.has(key)) {
+      seen.add(key)
+      result.push(comment)
+    }
+  }
+
+  for (const comment of incoming) {
+    const key = commentKey(comment)
+    if (!seen.has(key)) {
+      seen.add(key)
+      result.push(comment)
+    }
+  }
+
+  return result
+}
+
+/**
+ * Extract the time value from a comment's `p` field.
+ * The `p` field is formatted as `time,mode,color[,uid]`.
+ */
+const extractTime = (p: string): number => {
+  const comma = p.indexOf(',')
+  if (comma === -1) return Number.NaN
+  return Number.parseFloat(p.slice(0, comma))
+}
+
+/**
+ * Fuzzy deduplication for multi-source danmaku merge.
+ * Two comments are considered duplicates if:
+ * 1. Their text (`m`) is exactly the same, AND
+ * 2. Their time values are within `timeTolerance` seconds of each other.
+ *
+ * This is a pure function suitable for unit testing.
+ * Time complexity: O(n * m) where n = existing, m = incoming, but in practice
+ * the inner loop is bounded by the number of comments with the same text.
+ *
+ * Identity here is always the `p+m` composite, never `cid`: this helper exists
+ * to merge *across* providers, and a cid is only unique within one provider.
+ * Keying on cid here made a DanDanPlay comment and an unrelated Bilibili
+ * comment that happened to share an id collide, dropping a real comment before
+ * the text/time comparison below ever ran.
+ */
+export const fuzzyDedupeComments = <
+  T extends { cid?: number; p: string; m: string },
+>(
+  existing: T[],
+  incoming: T[],
+  timeTolerance = 1
+): T[] => {
+  // First do exact dedup
+  const seen = new Set<string>()
+  const result: T[] = []
+
+  for (const comment of existing) {
+    const key = compositeCommentKey(comment)
+    if (!seen.has(key)) {
+      seen.add(key)
+      result.push(comment)
+    }
+  }
+
+  // Group existing comments by text for fuzzy matching
+  const existingByText = new Map<string, number[]>()
+  for (const comment of result) {
+    const time = extractTime(comment.p)
+    if (!existingByText.has(comment.m)) {
+      existingByText.set(comment.m, [])
+    }
+    existingByText.get(comment.m)?.push(time)
+  }
+
+  for (const comment of incoming) {
+    const key = compositeCommentKey(comment)
+    // Exact match dedup
+    if (seen.has(key)) {
+      continue
+    }
+
+    // Fuzzy time match: same text within timeTolerance seconds
+    const existingTimes = existingByText.get(comment.m)
+    if (existingTimes) {
+      const incomingTime = extractTime(comment.p)
+      const isFuzzyDuplicate = existingTimes.some(
+        (t) => Math.abs(t - incomingTime) < timeTolerance
+      )
+      if (isFuzzyDuplicate) {
+        continue
+      }
+    }
+
+    seen.add(key)
+    result.push(comment)
+
+    // Track for subsequent fuzzy checks
+    const time = extractTime(comment.p)
+    if (!existingByText.has(comment.m)) {
+      existingByText.set(comment.m, [])
+    }
+    existingByText.get(comment.m)?.push(time)
+  }
+
+  return result
 }

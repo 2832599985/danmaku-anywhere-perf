@@ -9,4 +9,34 @@
 
 :root {
   interpolate-size: allow-keywords;
+
+  /* Modern Glass & Neon Design System */
+  --p-content-border-radius: 16px;
+  --p-dialog-border-radius: 16px;
+  --p-card-border-radius: 16px;
+
+  /* Glass Effect overrides for PrimeNG surfaces */
+  --p-content-background: rgba(15, 23, 42, 0.7); /* slate-900/70 */
+  --p-surface-0: rgba(15, 23, 42, 0.7);
+  --p-surface-50: rgba(15, 23, 42, 0.7);
+  --p-surface-100: rgba(30, 41, 59, 0.7);
+  --p-surface-200: rgba(51, 65, 85, 0.7);
+  --p-surface-300: rgba(71, 85, 105, 0.7);
+  --p-surface-400: rgba(100, 116, 139, 0.7);
+  --p-surface-500: rgba(148, 163, 184, 0.7);
+  --p-surface-600: rgba(71, 85, 105, 0.7);
+  --p-surface-700: rgba(51, 65, 85, 0.7);
+  --p-surface-800: rgba(30, 41, 59, 0.7);
+  --p-surface-900: rgba(15, 23, 42, 0.7);
 }
+
+body {
+  @apply bg-slate-900 text-slate-50;
+}
+
+/* Glassy components */
+.p-component, .p-card, .p-dialog, .p-panel, .p-sidebar, .p-overlaypanel {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+

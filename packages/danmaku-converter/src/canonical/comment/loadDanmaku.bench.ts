@@ -1,12 +1,11 @@
 import { bench, describe } from 'vitest'
-import type { CommentEntity } from './types.js'
-import * as utils from './utils.js'
-
 // Import from source to benchmark the current implementation without requiring a build.
 import {
-  transformComment,
   type ParsedComment,
+  transformComment,
 } from '../../../../danmaku-engine/src/parser'
+import type { CommentEntity } from './types.js'
+import * as utils from './utils.js'
 
 const SIZES = [1_000, 10_000, 100_000] as const
 
@@ -34,16 +33,6 @@ type PayloadScenarioName =
   | 'worstCase'
 
 type EpisodeCount = 1 | 10 | 100
-
-type TimeDataset = {
-  name: TimeScenarioName
-  comments: CommentEntity[]
-}
-
-type PayloadDataset = {
-  name: PayloadScenarioName
-  comments: CommentEntity[]
-}
 
 type SizeDatasets = {
   size: number
@@ -76,7 +65,7 @@ const legacyParseTime = (p: string): number => {
 
 // Baseline commit (f3aceaf5) does not export parseCommentEntityTime.
 const parseTime: (p: string) => number =
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: accessing internal util that may not be exported
   (utils as any).parseCommentEntityTime ?? legacyParseTime
 
 const makeP = (time: number, uid: string) => {
@@ -90,12 +79,15 @@ const makeInvalidP = (i: number) => {
   return `invalid${i}`
 }
 
-const makeCommentsFromTimes = (times: Float64Array, opts: {
-  uid: string
-  text: string
-  gradientRate: number // 0..1
-  invalidRate: number // 0..1
-}) => {
+const makeCommentsFromTimes = (
+  times: Float64Array,
+  opts: {
+    uid: string
+    text: string
+    gradientRate: number // 0..1
+    invalidRate: number // 0..1
+  }
+) => {
   const { uid, text, gradientRate, invalidRate } = opts
   const n = times.length
   const comments: CommentEntity[] = new Array(n)
@@ -106,7 +98,8 @@ const makeCommentsFromTimes = (times: Float64Array, opts: {
     invalidRate <= 0 ? Number.POSITIVE_INFINITY : Math.floor(1 / invalidRate)
 
   for (let i = 0; i < n; i += 1) {
-    const invalid = invalidEvery !== Number.POSITIVE_INFINITY && i % invalidEvery === 0
+    const invalid =
+      invalidEvery !== Number.POSITIVE_INFINITY && i % invalidEvery === 0
     const p = invalid ? makeInvalidP(i) : makeP(times[i], uid)
 
     const useGradient =
@@ -163,7 +156,10 @@ const makeTimesClustered = (n: number, seed: number, bins: number) => {
   return times
 }
 
-const splitEpisodes = (comments: CommentEntity[], episodeCount: EpisodeCount) => {
+const splitEpisodes = (
+  comments: CommentEntity[],
+  episodeCount: EpisodeCount
+) => {
   const episodes: CommentEntity[][] = []
   const chunk = Math.max(1, Math.floor(comments.length / episodeCount))
   for (let i = 0; i < comments.length; i += chunk) {
@@ -178,8 +174,10 @@ const aggregateFlatMap = (episodes: CommentEntity[][]) => {
 
 const aggregatePushLoop = (episodes: CommentEntity[][]) => {
   const out: CommentEntity[] = []
+  // biome-ignore lint/style/useForOf: indexed loops intentional for benchmark comparison
   for (let i = 0; i < episodes.length; i += 1) {
     const ep = episodes[i]
+    // biome-ignore lint/style/useForOf: indexed loops intentional for benchmark comparison
     for (let j = 0; j < ep.length; j += 1) {
       out.push(ep[j])
     }
@@ -189,6 +187,7 @@ const aggregatePushLoop = (episodes: CommentEntity[][]) => {
 
 const parseTimes = (comments: CommentEntity[]) => {
   let sum = 0
+  // biome-ignore lint/style/useForOf: indexed loop intentional for benchmark
   for (let i = 0; i < comments.length; i += 1) {
     sum += parseTime(comments[i].p)
   }
@@ -197,6 +196,7 @@ const parseTimes = (comments: CommentEntity[]) => {
 
 const parseOptions = (comments: CommentEntity[]) => {
   let sum = 0
+  // biome-ignore lint/style/useForOf: indexed loop intentional for benchmark
   for (let i = 0; i < comments.length; i += 1) {
     const o = utils.parseCommentEntityP(comments[i].p)
     sum += o.time + o.color.length + (o.uid?.length ?? 0)
@@ -210,6 +210,7 @@ const buildTimed = (comments: CommentEntity[]) => {
   const timed: Timed = []
   let isSorted = true
   let last = Number.NEGATIVE_INFINITY
+  // biome-ignore lint/style/useForOf: indexed loop intentional for benchmark
   for (let i = 0; i < comments.length; i += 1) {
     const raw = comments[i]
     const time = parseTime(raw.p)
@@ -237,6 +238,7 @@ const mountNewPipeline = (comments: CommentEntity[]) => {
 const mountOldPipeline = (comments: CommentEntity[]) => {
   const parsed: ParsedComment[] = new Array(comments.length)
   let count = 0
+  // biome-ignore lint/style/useForOf: indexed loop intentional for benchmark
   for (let i = 0; i < comments.length; i += 1) {
     // transformComment will throw if p is invalid; skip invalid entries to mimic
     // the new pipeline behavior (which ignores invalid times).
@@ -254,6 +256,7 @@ const mountOldPipeline = (comments: CommentEntity[]) => {
 
 const transformAll = (comments: CommentEntity[]) => {
   let sum = 0
+  // biome-ignore lint/style/useForOf: indexed loop intentional for benchmark
   for (let i = 0; i < comments.length; i += 1) {
     try {
       const parsed = transformComment(comments[i], 0)
@@ -299,11 +302,7 @@ const makeSizeDatasets = (n: number): SizeDatasets => {
   })
 
   const sorted = sortByTime(baseComments)
-  const nearSorted = nearSortedSwap(
-    sorted,
-    NEAR_SORTED_SWAP_RATE,
-    n + 9999
-  )
+  const nearSorted = nearSortedSwap(sorted, NEAR_SORTED_SWAP_RATE, n + 9999)
   const reverse = sorted.slice().reverse()
 
   const time: SizeDatasets['time'] = {

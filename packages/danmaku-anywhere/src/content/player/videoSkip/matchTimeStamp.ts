@@ -33,7 +33,8 @@ function parseTimestamp(
     Number.isNaN(seconds) ||
     seconds >= 60 ||
     minutes < 0 ||
-    seconds < 0
+    seconds < 0 ||
+    minutes > 180
   ) {
     return null
   }

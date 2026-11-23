@@ -9,7 +9,7 @@ import {
   Typography,
 } from '@mui/material'
 import { useQuery } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '@/common/components/Toast/toastStore'
@@ -18,6 +18,7 @@ import {
   localizedDanmakuSourceType,
 } from '@/common/danmaku/enums'
 import { useFetchDanmaku } from '@/common/danmaku/queries/useFetchDanmaku'
+import { useFetchDanmakuLite } from '@/common/danmaku/queries/useFetchDanmakuLite'
 import { seasonQueryKeys } from '@/common/queries/queryKeys'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { getTrackingService } from '@/common/telemetry/getTrackingService'
@@ -25,7 +26,11 @@ import { getTrackingService } from '@/common/telemetry/getTrackingService'
 const validateUrl = (value: string) => {
   try {
     const url = new URL(value)
-    return ['www.bilibili.com', 'v.qq.com'].includes(url.hostname)
+    return (
+      url.hostname === 'bilibili.com' ||
+      url.hostname.endsWith('.bilibili.com') ||
+      url.hostname === 'v.qq.com'
+    )
   } catch {
     return false
   }
@@ -35,7 +40,7 @@ const getUrlType = (url: string) => {
   try {
     const { hostname } = new URL(url)
 
-    if (hostname === 'www.bilibili.com') {
+    if (hostname === 'bilibili.com' || hostname.endsWith('.bilibili.com')) {
       return localizedDanmakuSourceType(DanmakuSourceType.Bilibili)
     }
     if (hostname === 'v.qq.com') {
@@ -59,6 +64,8 @@ export const ParseTabCore = ({ onImportSuccess }: ParseTabCoreProps) => {
   const { t } = useTranslation()
   const toast = useToast.use.toast()
 
+  const [submittedUrl, setSubmittedUrl] = useState('')
+
   const {
     register,
     watch,
@@ -78,7 +85,7 @@ export const ParseTabCore = ({ onImportSuccess }: ParseTabCoreProps) => {
 
   const query = useQuery({
     enabled: false,
-    queryKey: seasonQueryKeys.parseUrl(getValues().url),
+    queryKey: seasonQueryKeys.parseUrl(submittedUrl),
     retry: false,
     queryFn: async () => {
       getTrackingService().track('parseUrl', {
@@ -89,25 +96,33 @@ export const ParseTabCore = ({ onImportSuccess }: ParseTabCoreProps) => {
     select: (res) => res.data,
   })
 
-  const mutation = useFetchDanmaku()
+  // In popup pages we only need to import into extension storage; returning huge `comments`
+  // to the UI can freeze/jank. Only use the full response when the caller needs to mount
+  // the comments to a player immediately (onImportSuccess is provided in controller UI).
+  const fullMutation = useFetchDanmaku()
+  const liteMutation = useFetchDanmakuLite()
+  const isImporting = onImportSuccess
+    ? fullMutation.isPending
+    : liteMutation.isPending
 
   const handleFetchDanmaku = () => {
     if (!query.data) return
 
-    mutation.mutate(
-      {
-        type: 'by-meta',
-        meta: query.data,
-        options: {
-          forceUpdate: true,
-        },
+    const input = {
+      type: 'by-meta' as const,
+      meta: query.data,
+      options: {
+        forceUpdate: true,
       },
-      {
+    }
+
+    if (onImportSuccess) {
+      fullMutation.mutate(input, {
         onSuccess: (data) => {
           toast.success(
             t('searchPage.parse.alert.importSuccess', 'Import successful')
           )
-          onImportSuccess?.(data)
+          onImportSuccess(data)
         },
         onError: () => {
           toast.error(
@@ -120,8 +135,28 @@ export const ParseTabCore = ({ onImportSuccess }: ParseTabCoreProps) => {
             )
           )
         },
-      }
-    )
+      })
+      return
+    }
+
+    liteMutation.mutate(input, {
+      onSuccess: () => {
+        toast.success(
+          t('searchPage.parse.alert.importSuccess', 'Import successful')
+        )
+      },
+      onError: () => {
+        toast.error(
+          t(
+            'danmaku.alert.fetchError',
+            'Failed to fetch danmaku: {{message}}',
+            {
+              message: query.data.title,
+            }
+          )
+        )
+      },
+    })
   }
 
   useEffect(() => {
@@ -141,6 +176,7 @@ export const ParseTabCore = ({ onImportSuccess }: ParseTabCoreProps) => {
         component="form"
         onSubmit={(e) => {
           e.preventDefault()
+          setSubmittedUrl(getValues().url)
           void query.refetch()
         }}
       >
@@ -168,7 +204,7 @@ export const ParseTabCore = ({ onImportSuccess }: ParseTabCoreProps) => {
             slotProps={{
               input: {
                 startAdornment: (
-                  <InputAdornment position="start">{t(urlType)}</InputAdornment>
+                  <InputAdornment position="start">{urlType}</InputAdornment>
                 ),
               },
             }}
@@ -178,7 +214,7 @@ export const ParseTabCore = ({ onImportSuccess }: ParseTabCoreProps) => {
             type="submit"
             loading={query.isLoading}
             variant="contained"
-            disabled={!isValid || mutation.isPending}
+            disabled={!isValid || isImporting}
           >
             {t('searchPage.parse.parse', 'Parse')}
           </Button>
@@ -204,7 +240,7 @@ export const ParseTabCore = ({ onImportSuccess }: ParseTabCoreProps) => {
                 mt: 2,
               }}
               onClick={handleFetchDanmaku}
-              loading={mutation.isPending}
+              loading={isImporting}
               variant="contained"
             >
               {t('searchPage.parse.import', 'Import Danmaku')}

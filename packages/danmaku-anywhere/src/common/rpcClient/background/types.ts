@@ -1,4 +1,5 @@
 import type {
+  Bookmark,
   CommentEntity,
   CustomEpisode,
   CustomEpisodeLite,
@@ -19,6 +20,11 @@ import type {
   SetHeaderRule,
 } from '@danmaku-anywhere/web-scraper'
 import type {
+  MultiSourceFetchInput,
+  MultiSourceFetchResult,
+} from '@/background/services/DanmakuMergeService'
+import type { TranslationRequest } from '@/background/services/translation/types'
+import type {
   GenericVodSearchData,
   MatchEpisodeInput,
   MatchEpisodeResult,
@@ -26,8 +32,24 @@ import type {
   SeasonQueryFilter,
   SeasonSearchRequest,
 } from '@/common/anime/dto'
-import type { BackupData, BackupRestoreResult } from '@/common/backup/dto'
-import type { ImageFetchOptions } from '@/common/components/image/types'
+import type {
+  AuthActionResult,
+  AuthSessionState,
+  AuthSignInInput,
+  AuthSignOutResult,
+  AuthSignUpInput,
+} from '@/common/auth/types'
+import type {
+  BackupData,
+  BackupRestoreResult,
+  CloudBackupItem,
+} from '@/common/backup/dto'
+import type {
+  BookmarkAddInput,
+  BookmarkDeleteBySeasonInput,
+  BookmarkDeleteInput,
+  BookmarkRefreshInput,
+} from '@/common/bookmark/dto'
 import type { BaseUrlConfig } from '@/common/configs/types'
 import type {
   CustomEpisodeQueryFilter,
@@ -77,6 +99,11 @@ export type TestAiProviderResponse =
 
 export type BackgroundMethods = {
   iconSet: RPCDef<IconSetDto, void>
+  authGetSession: RPCDef<void, AuthSessionState | null>
+  authSignUp: RPCDef<AuthSignUpInput, AuthActionResult>
+  authSignIn: RPCDef<AuthSignInInput, AuthActionResult>
+  authSignOut: RPCDef<void, AuthSignOutResult>
+  authDeleteAccount: RPCDef<void, AuthSignOutResult>
   mediaParseUrl: RPCDef<{ url: string }, WithSeason<EpisodeMeta>>
   seasonSearch: RPCDef<SeasonSearchRequest, (Season | CustomSeason)[]>
   seasonFilter: RPCDef<SeasonQueryFilter, Season[]>
@@ -91,6 +118,9 @@ export type BackgroundMethods = {
   episodeFilterLite: RPCDef<EpisodeQueryFilter, WithSeason<EpisodeLite>[]>
   episodeFilter: RPCDef<EpisodeQueryFilter, WithSeason<Episode>[]>
   episodeFetch: RPCDef<DanmakuFetchDto, WithSeason<Episode>>
+  // Fetches danmaku and saves to cache, but only returns lite metadata (no comments).
+  // This avoids transferring large comment arrays over the extension messaging channel.
+  episodeFetchLite: RPCDef<DanmakuFetchDto, WithSeason<EpisodeLite>>
   episodePreloadNext: RPCDef<DanmakuFetchDto, void>
   episodeDelete: RPCDef<EpisodeQueryFilter, void>
   episodeFilterCustom: RPCDef<CustomEpisodeQueryFilter, CustomEpisode[]>
@@ -98,18 +128,27 @@ export type BackgroundMethods = {
   episodeDeleteCustom: RPCDef<CustomEpisodeQueryFilter, void>
   episodeImport: RPCDef<DanmakuImportData[], DanmakuImportResult>
   seasonMapAdd: RPCDef<SeasonMapSnapshot, void>
+  seasonMapPut: RPCDef<SeasonMapSnapshot, void>
   seasonMapDelete: RPCDef<{ key: string }, void>
+  seasonMapRemoveProvider: RPCDef<
+    {
+      key: string
+      providerConfigId: string
+    },
+    void
+  >
+  seasonMapDeleteMany: RPCDef<{ keys: string[] }, void>
 
   seasonMapGetAll: RPCDef<void, SeasonMapSnapshot[]>
   danmakuPurgeCache: RPCDef<number, number>
   bilibiliSetCookies: RPCDef<void, void>
   bilibiliGetLoginStatus: RPCDef<void, BilibiliUserInfo>
   tencentTestCookies: RPCDef<void, boolean>
-  fetchImage: RPCDef<{ src: string; options?: ImageFetchOptions }, string>
+  fetchImage: RPCDef<{ src: string }, string | null>
   getActiveTabUrl: RPCDef<void, string | null>
   getFrameId: RPCDef<void, number>
-  getAllFrames: RPCDef<void, chrome.webNavigation.GetAllFrameResultDetails[]>
-  injectScript: RPCDef<number, void>
+  getExtensionManifest: RPCDef<void, chrome.runtime.ManifestV3>
+  getAlarm: RPCDef<string, chrome.alarms.Alarm | null>
   remoteLog: RPCDef<LogEntry, void>
   exportDebugData: RPCDef<void, { id: string }>
   getFontList: RPCDef<void, chrome.fontSettings.FontName[]>
@@ -135,6 +174,19 @@ export type BackgroundMethods = {
   testAiProvider: RPCDef<AiProviderConfigInput, TestAiProviderResponse>
   backupExport: RPCDef<void, BackupData>
   backupImport: RPCDef<unknown, BackupRestoreResult>
+  cloudBackupList: RPCDef<void, CloudBackupItem[]>
+  cloudBackupCreate: RPCDef<void, { success: boolean; id: string }>
+  cloudBackupDownload: RPCDef<string, BackupData>
+  dataWipeDanmaku: RPCDef<{ includeCustomEpisodes: boolean }, void>
+  episodeFetchMultiSource: RPCDef<MultiSourceFetchInput, MultiSourceFetchResult>
+  bookmarkAdd: RPCDef<BookmarkAddInput, Bookmark>
+  bookmarkDelete: RPCDef<BookmarkDeleteInput, void>
+  bookmarkDeleteBySeason: RPCDef<BookmarkDeleteBySeasonInput, void>
+  bookmarkGetAll: RPCDef<void, Bookmark[]>
+  bookmarkRefresh: RPCDef<BookmarkRefreshInput, Bookmark>
+  translateBatch: RPCDef<TranslationRequest, string[]>
+  upscaleApplyCorsRule: RPCDef<{ videoUrl: string }, void>
+  upscaleRemoveCorsRule: RPCDef<void, void>
 }
 
 type InputWithFrameId<TInput> = TInput extends void
@@ -163,14 +215,101 @@ export type PlayerRelayCommands = {
   'relay:command:seek': RPCDef<InputWithFrameId<number>, void, FrameContext>
   'relay:command:enterPip': RPCDef<InputWithFrameId<void>, void, FrameContext>
   'relay:command:show': RPCDef<InputWithFrameId<boolean>, void, FrameContext>
+  'relay:command:skipOp': RPCDef<InputWithFrameId<void>, void, FrameContext>
+  'relay:command:autoCalibrate': RPCDef<
+    InputWithFrameId<void>,
+    AutoOffsetResultDto | null,
+    FrameContext
+  >
+  'relay:command:applyAutoOffset': RPCDef<
+    InputWithFrameId<number>,
+    void,
+    FrameContext
+  >
+  'relay:command:controllerReady': RPCDef<
+    InputWithFrameId<void>,
+    void,
+    FrameContext
+  >
+  'relay:command:debugSkipButton': RPCDef<
+    InputWithFrameId<void>,
+    void,
+    FrameContext
+  >
+  'relay:command:upscale:toggle': RPCDef<
+    InputWithFrameId<boolean>,
+    void,
+    FrameContext
+  >
+  'relay:command:upscale:setMode': RPCDef<
+    InputWithFrameId<{
+      modeId:
+        | 'builtin-mode-a'
+        | 'builtin-mode-b'
+        | 'builtin-mode-c'
+        | 'builtin-mode-aa'
+        | 'builtin-mode-bb'
+        | 'builtin-mode-ca'
+      performanceTier: 'performance' | 'balanced' | 'quality' | 'ultra'
+      targetResolution:
+        | 'x2'
+        | 'x4'
+        | 'x8'
+        | '720p'
+        | '1080p'
+        | '2k'
+        | '4k'
+        | 'native'
+    }>,
+    void,
+    FrameContext
+  >
+}
+
+export interface AutoOffsetResultDto {
+  offsetMs: number
+  confidence: number
+  densitySpikeTime: number
+  opEndTime: number
+}
+
+type PlayerReadyData = {
+  url: string
+  documentId: string
+}
+
+export interface VideoInfo {
+  src: string
+  width: number
+  height: number
+  playing: boolean
+  muted: boolean
 }
 
 // Player -> Controller communication
 // Here the frameId is used to identify the SOURCE frame
 export type PlayerRelayEvents = {
-  'relay:event:playerReady': RPCDef<InputWithFrameId<void>, void>
-  'relay:event:videoChange': RPCDef<InputWithFrameId<void>, void>
+  'relay:event:playerReady': RPCDef<InputWithFrameId<PlayerReadyData>, void>
+  'relay:event:playerUnload': RPCDef<InputWithFrameId<void>, void>
+  'relay:event:videoChange': RPCDef<InputWithFrameId<VideoInfo>, void>
   'relay:event:videoRemoved': RPCDef<InputWithFrameId<void>, void>
+  'relay:event:videoStateChange': RPCDef<
+    InputWithFrameId<Pick<VideoInfo, 'playing' | 'muted'>>,
+    void
+  >
   'relay:event:preloadNextEpisode': RPCDef<InputWithFrameId<void>, void>
+  'relay:event:videoEnded': RPCDef<InputWithFrameId<void>, void>
   'relay:event:showPopover': RPCDef<InputWithFrameId<void>, void>
+  'relay:event:userInteraction': RPCDef<InputWithFrameId<void>, void>
+  /**
+   * Upscaling failed to start (or died at runtime) and was turned off.
+   * 'cross-origin' means the video's CDN rejected the anonymous CORS
+   * reload, so this source can never be upscaled.
+   */
+  'relay:event:upscaleError': RPCDef<
+    InputWithFrameId<{
+      kind: 'cross-origin' | 'error' | 'frame-interpolation'
+    }>,
+    void
+  >
 }

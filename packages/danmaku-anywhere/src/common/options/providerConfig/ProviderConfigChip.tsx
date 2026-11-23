@@ -15,7 +15,5 @@ export const ProviderConfigChip = ({ config }: { config: ProviderConfig }) => {
       />
     )
   }
-  return (
-    <Chip label={t(localizedDanmakuSourceType(config.impl))} size="small" />
-  )
+  return <Chip label={localizedDanmakuSourceType(config.impl)} size="small" />
 }

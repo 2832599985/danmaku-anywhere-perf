@@ -1,4 +1,5 @@
 import { inject, injectable } from 'inversify'
+import { EXTENSION_VERSION } from '@/common/constants'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import { ExtStorageService } from '@/common/storage/ExtStorageService'
 import { tryCatch } from '@/common/utils/tryCatch'
@@ -28,7 +29,20 @@ export class ReadinessService {
   }
 
   async waitUntilReady() {
-    return this.readyPromise
+    const READY_TIMEOUT = 30_000
+    return Promise.race([
+      this.readyPromise,
+      new Promise<void>((resolve) => {
+        setTimeout(() => {
+          if (!this.isReady) {
+            this.logger.warn(
+              `ReadinessService: timed out after ${READY_TIMEOUT}ms waiting for ready state, resolving anyway`
+            )
+          }
+          resolve()
+        }, READY_TIMEOUT)
+      }),
+    ])
   }
 
   setReady() {
@@ -48,11 +62,12 @@ export class ReadinessService {
 
     if (err) {
       this.logger.error('Failed to read last version', err)
+      this.setReady()
       return
     }
 
     const lastVersion = result?.lastVersion
-    const currentVersion = chrome.runtime.getManifest().version
+    const currentVersion = EXTENSION_VERSION
 
     if (lastVersion === currentVersion) {
       this.logger.debug('Version match, ready immediately')

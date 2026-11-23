@@ -1,0 +1,79 @@
+[package]
+name = "danmaku-player"
+version = "0.0.1"
+description = "Danmaku Player — local desktop video player with danmaku, Anime4K super-resolution and Framegen frame interpolation"
+authors = ["danmaku-anywhere"]
+edition = "2021"
+rust-version = "1.77.2"
+
+# The Tauri app is split into a library (reused by the desktop binary and any
+# future mobile targets) and a thin `main.rs` entry point.
+[lib]
+name = "danmaku_player_lib"
+# Desktop only: the exe and tests link the rlib. staticlib/cdylib are the
+# mobile template defaults and cost a 1.2 GB .lib plus link time per build.
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Custom URI scheme protocols are always available in Tauri v2 — no extra
+# cargo feature is required (the v1-era `protocol-all` feature is gone).
+# `protocol-asset` is intentionally NOT enabled: we serve local media through
+# our own range-capable `stream://` protocol instead.
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-http = "2"
+# Explorer 「打开方式」 while the player is already open: forward the file to
+# the running window instead of starting a second player (src/launch.rs).
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Percent-decodes the absolute file path carried in `stream://` URLs.
+urlencoding = "2"
+# Hidden-WebView network bridge for Bilibili/Tencent (src/source_bridge.rs).
+# The Tauri http plugin (reqwest) is rejected by their risk control; the hidden
+# WebView2 page uses Chromium's network stack and the site's own origin/cookies.
+tokio = { version = "1", features = ["sync", "time"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+# --- subtitle pipeline (src/subtitle/) ---
+# Recognition (whisper.cpp `whisper-server`) and translation (llama.cpp
+# `llama-server`) run as SIDECAR processes driven over loopback HTTP — no
+# native inference library is linked into the app, and killing a sidecar is
+# what returns its VRAM. See src/subtitle/sidecar.rs.
+# Model/runtime download (default features = rustls TLS; no OpenSSL on Windows);
+# `json` gives send_json/into_json for the sidecar clients.
+ureq = { version = "2", features = ["json"] }
+# The whisper.cpp / llama.cpp Windows runtimes ship as zip release assets.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# Download integrity gate before installation.
+sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows = { version = "0.61", features = [
+  # sidecar.rs: kill-on-close Job Object so a crashed/killed player never
+  # leaves a model server holding gigabytes of VRAM behind.
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  # storage.rs: pick a non-system fixed drive for models and caches.
+  "Win32_Storage_FileSystem",
+  # screenshot.rs: write captured video frames directly to the Windows clipboard.
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_Graphics_Gdi",
+] }
+
+# Sensible release optimizations (smaller, faster binary).
+[profile.release]
+codegen-units = 16
+lto = false
+incremental = true
+opt-level = "s"
+strip = true
+panic = "abort"

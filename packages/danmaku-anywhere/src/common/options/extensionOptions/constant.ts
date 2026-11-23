@@ -32,10 +32,30 @@ export const defaultExtensionOptions: ExtensionOptions = {
   // danmakuSources removed - now managed in separate provider config storage
   playerOptions: {
     showSkipButton: true,
+    autoSkipOp: false,
     showDanmakuTimeline: true,
+    enableFixedSkip: false,
+    fixedSkipSeconds: 90,
+    autoDensity: false,
+    autoNextEpisode: true,
+    enableFullscreenInteraction: true,
+    enableTranslation: false,
+    translationTargetLang: 'en',
+    upscale: {
+      enabled: false,
+      modeId: 'builtin-mode-a',
+      performanceTier: 'balanced',
+      targetResolution: 'x2',
+      enableCrossOriginFix: false,
+      frameInterpolation: {
+        enabled: false,
+        resolution: '720p',
+      },
+    },
   },
   theme: {
     colorMode: ColorMode.System,
+    themeId: 'neon-violet',
   },
   matchLocalDanmaku: true,
   hotkeys: defaultKeymap,
@@ -43,4 +63,6 @@ export const defaultExtensionOptions: ExtensionOptions = {
   enableAnalytics: true,
   id: undefined,
   restrictInitiatorDomain: true,
+  enableMultiSourceMerge: false,
+  showFloatingButton: true,
 }

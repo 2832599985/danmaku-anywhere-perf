@@ -8,6 +8,8 @@ export const setupExtractMedia = () => {
   chrome.runtime.onConnect.addListener((port) => {
     if (port.name !== portNames.extractMedia) return
 
+    let isCompleted = false
+
     port.onMessage.addListener(async (message) => {
       if (message.action === 'extractMedia' && port.sender?.tab?.id) {
         const tabId = port.sender.tab.id
@@ -16,45 +18,68 @@ export const setupExtractMedia = () => {
         try {
           const cleanup = await extractMedia(url, {
             onMediaFound: (mediaInfo) => {
-              port.postMessage({
-                action: 'extractMedia',
-                success: true,
-                data: mediaInfo,
-                isLast: false,
-              })
+              if (isCompleted) return
+              try {
+                port.postMessage({
+                  action: 'extractMedia',
+                  success: true,
+                  data: mediaInfo,
+                  isLast: false,
+                })
+              } catch {
+                // Port disconnected, clean up
+                isCompleted = true
+                cleanup()
+              }
             },
             onError: (error) => {
-              port.postMessage({
-                action: 'extractMedia',
-                success: false,
-                err: error.message,
-                isLast: true,
-              })
+              if (isCompleted) return
+              isCompleted = true
+              try {
+                port.postMessage({
+                  action: 'extractMedia',
+                  success: false,
+                  err: error.message,
+                  isLast: true,
+                })
+              } catch {
+                // Port already disconnected
+              }
             },
             onComplete: () => {
+              isCompleted = true
               port.disconnect()
             },
           })
 
           // abort after 30 seconds
-          setTimeout(() => {
+          const timeoutId = setTimeout(() => {
             cleanup()
           }, 30000)
 
-          portCleanupCallbacks.set(tabId, cleanup)
-        } catch (err) {
-          port.postMessage({
-            action: 'extractMedia',
-            success: false,
-            err: err instanceof Error ? err.message : 'Unknown error',
-            isLast: true,
+          portCleanupCallbacks.set(tabId, () => {
+            clearTimeout(timeoutId)
+            cleanup()
           })
+        } catch (err) {
+          isCompleted = true
+          try {
+            port.postMessage({
+              action: 'extractMedia',
+              success: false,
+              err: err instanceof Error ? err.message : 'Unknown error',
+              isLast: true,
+            })
+          } catch {
+            // Port already disconnected
+          }
           port.disconnect()
         }
       }
     })
 
     port.onDisconnect.addListener((port) => {
+      isCompleted = true
       if (port.sender?.tab?.id) {
         const tabId = port.sender.tab.id
         const cleanup = portCleanupCallbacks.get(tabId)

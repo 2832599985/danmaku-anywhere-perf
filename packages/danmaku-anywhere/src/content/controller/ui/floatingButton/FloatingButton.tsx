@@ -1,17 +1,23 @@
+import { Check } from '@mui/icons-material'
 import type { FabProps, PopoverVirtualElement } from '@mui/material'
 import {
   Badge,
+  Box,
   ClickAwayListener,
   Fab,
   Fade,
+  keyframes,
   SpeedDialIcon,
   styled,
 } from '@mui/material'
 import type { MouseEventHandler } from 'react'
-import { forwardRef, useRef, useState } from 'react'
+import { forwardRef, useEffect, useRef, useState } from 'react'
 import { useAnyLoading } from '@/common/hooks/useAnyLoading'
 import { useMergeRefs } from '@/common/hooks/useMergeRefs'
 import { isConfigIncomplete } from '@/common/options/mountConfig/isPermissive'
+import { GLASS_TEXT_SHADOW } from '@/common/theme/liquidGlass'
+import { useThemeContext } from '@/common/theme/Theme'
+import type { ThemePalette } from '@/common/theme/themes'
 import { createVirtualElement } from '@/common/utils/utils'
 import { useActiveConfig } from '@/content/controller/common/context/useActiveConfig'
 import { useStore } from '@/content/controller/store/store'
@@ -26,13 +32,123 @@ interface FloatingButtonProps extends FabProps {
   isOpen: boolean
 }
 
+// The animated box-shadow replaces the whole stack each frame, so the static
+// specular/depth stack must ride along in every keyframe. status.error is hex,
+// so alpha rides as an 8-digit hex suffix (…66 ≈ 0.4, …00 = 0) — a prior
+// rgba-only fade left the ring fully opaque and it never faded out.
+const makeErrorPulse = (staticShadow: string, errorColor: string) => keyframes`
+  0%, 100% {
+    box-shadow: ${staticShadow}, 0 0 0 0 ${errorColor}66;
+  }
+  50% {
+    box-shadow: ${staticShadow}, 0 0 0 8px ${errorColor}00;
+  }
+`
+
+// Mounted = danmaku is live. The glow shadow is painted ONCE on the ::after
+// pseudo-element and only its opacity animates — opacity runs on the
+// compositor, so the breathing costs no repaint. Animating box-shadow here
+// would re-blur the backdrop-filter FAB every frame, which is measurable when
+// the GPU is already saturated by Anime4K upscaling.
+const breatheOpacity = keyframes`
+  0%, 100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+`
+
+const checkFadeInOut = keyframes`
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  15% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  75% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+`
+
 const StyledFab = styled(Fab, {
-  shouldForwardProp: (prop) => prop !== 'hover',
-})<{ hover: boolean }>(({ hover }) => {
+  shouldForwardProp: (prop) =>
+    prop !== 'hover' &&
+    prop !== 'palette' &&
+    prop !== 'hasError' &&
+    prop !== 'mounted',
+})<{
+  hover: boolean
+  palette: ThemePalette
+  hasError: boolean
+  mounted: boolean
+}>(({ hover, palette, hasError, mounted, theme }) => {
+  const g = palette.glass
+  const staticShadow = `${g.specular}, ${g.depth}`
   return {
-    transition: 'transform 0.2s ease-in-out',
-    transform: hover ? 'rotate(45deg)' : 'rotate(0deg)',
+    transition: 'all 0.2s ease-in-out',
+    transform: hover ? 'rotate(45deg) scale(1.05)' : 'rotate(0deg)',
     touchAction: 'none',
+    // !important: the Fab color prop injects its own background
+    backgroundColor: `${g.base} !important`,
+    backgroundImage: `${g.tint} !important`,
+    backdropFilter: g.blur,
+    WebkitBackdropFilter: g.blur,
+    border: 'none',
+    boxShadow: staticShadow,
+    color: theme.palette.mode === 'light' ? theme.palette.text.primary : '#fff',
+    '&::before': {
+      content: '""',
+      position: 'absolute',
+      inset: 0,
+      borderRadius: 'inherit',
+      padding: '1px',
+      background: g.borderGradient,
+      WebkitMask:
+        'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+      WebkitMaskComposite: 'xor',
+      maskComposite: 'exclude',
+      pointerEvents: 'none',
+    },
+    // Breathing glow carrier: shadow painted once, only opacity animates
+    '&::after': {
+      content: '""',
+      position: 'absolute',
+      inset: 0,
+      borderRadius: 'inherit',
+      boxShadow: g.glow,
+      opacity: 0,
+      pointerEvents: 'none',
+      ...(mounted &&
+        !hasError && {
+          animation: `${breatheOpacity} 4s ease-in-out infinite`,
+        }),
+    },
+    '& svg': {
+      filter: GLASS_TEXT_SHADOW,
+    },
+    '&:hover': {
+      backgroundColor: `${g.hover} !important`,
+    },
+    '&:active': {
+      transform: hover
+        ? 'rotate(45deg) scale(0.94)'
+        : 'rotate(0deg) scale(0.94)',
+    },
+    ...(hasError && {
+      animation: `${makeErrorPulse(staticShadow, palette.status.error)} 1.5s ease-in-out infinite`,
+    }),
+    '@media (prefers-reduced-motion: reduce)': {
+      animation: 'none',
+      '&::after': { animation: 'none' },
+    },
   }
 })
 
@@ -44,6 +160,11 @@ const useInitialAnchor = () => {
   return useRef(createVirtualElement(left, bottom))
 }
 
+const formatBadgeCount = (count: number): string => {
+  if (count > 999) return '999+'
+  return String(count)
+}
+
 export const FloatingButton = forwardRef<
   HTMLButtonElement,
   FloatingButtonProps
@@ -51,14 +172,36 @@ export const FloatingButton = forwardRef<
   const isLoading = useAnyLoading()
 
   const showFab = useShowFab()
+  const { palette } = useThemeContext()
 
   const [contextMenuAnchor, setContextMenuAnchor] =
     useState<PopoverVirtualElement | null>(null)
   const [fabHover, setFabHover] = useState(false)
+  const [showCheck, setShowCheck] = useState(false)
 
-  const { isMounted } = useStore.use.danmaku()
+  const { isMounted, comments } = useStore.use.danmaku()
   const isDisconnected = useStore.use.isDisconnected()
+  const matchResult = useStore((state) => state.integration.matchResult)
   const activeConfig = useActiveConfig()
+
+  const prevMatchStatusRef = useRef<string | undefined>(undefined)
+
+  // Track match success transitions to show checkmark animation
+  useEffect(() => {
+    const currentStatus = matchResult?.status
+    if (
+      currentStatus === 'success' &&
+      prevMatchStatusRef.current !== 'success'
+    ) {
+      prevMatchStatusRef.current = currentStatus
+      setShowCheck(true)
+      const timer = setTimeout(() => {
+        setShowCheck(false)
+      }, 1500)
+      return () => clearTimeout(timer)
+    }
+    prevMatchStatusRef.current = currentStatus
+  }, [matchResult?.status])
 
   const fabAnchor = useInitialAnchor()
 
@@ -100,6 +243,9 @@ export const FloatingButton = forwardRef<
 
   const isIncomplete = isConfigIncomplete(activeConfig)
 
+  const commentCount = comments.length
+  const showCountBadge = isMounted && commentCount > 0
+
   return (
     <ClickAwayListener onClickAway={handleCloseContextMenu}>
       <div>
@@ -139,20 +285,73 @@ export const FloatingButton = forwardRef<
                       },
                     }}
                   >
-                    <StyledFab
-                      size="small"
-                      onContextMenu={handleContextMenu}
-                      ref={mergedFabRefs}
-                      color={dialColor}
-                      hover={fabHover}
-                      onMouseOver={() => setFabHover(true)}
-                      onMouseOut={() => setFabHover(false)}
+                    <Badge
+                      badgeContent={
+                        showCountBadge
+                          ? formatBadgeCount(commentCount)
+                          : undefined
+                      }
+                      invisible={!showCountBadge}
+                      max={9999}
+                      sx={{
+                        '& .MuiBadge-badge': {
+                          zIndex: 1402,
+                          backgroundColor: palette.primary,
+                          color: '#fff',
+                          fontSize: '0.65rem',
+                          minWidth: 18,
+                          height: 18,
+                          padding: '0 4px',
+                          fontWeight: 600,
+                        },
+                      }}
                     >
-                      <SpeedDialIcon />
-                      <FabLoadingIndicator
-                        isLoading={!isDisconnected && isLoading}
-                      />
-                    </StyledFab>
+                      <StyledFab
+                        size="small"
+                        onContextMenu={handleContextMenu}
+                        ref={mergedFabRefs}
+                        color={dialColor}
+                        hover={fabHover}
+                        palette={palette}
+                        hasError={isDisconnected}
+                        mounted={isMounted && !isDisconnected}
+                        onMouseOver={() => setFabHover(true)}
+                        onMouseOut={() => setFabHover(false)}
+                      >
+                        <SpeedDialIcon />
+                        <FabLoadingIndicator
+                          isLoading={!isDisconnected && isLoading}
+                          primaryColor={`${palette.primary}80`}
+                          secondaryColor={`${palette.secondary}40`}
+                        />
+                        {/* Checkmark overlay on match success */}
+                        {showCheck && (
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%',
+                              height: '100%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              pointerEvents: 'none',
+                              animation: `${checkFadeInOut} 1.5s ease-in-out forwards`,
+                              zIndex: 1,
+                            }}
+                          >
+                            <Check
+                              sx={{
+                                fontSize: 24,
+                                color: palette.status.success,
+                                filter: `drop-shadow(0 0 4px ${palette.status.success}80)`,
+                              }}
+                            />
+                          </Box>
+                        )}
+                      </StyledFab>
+                    </Badge>
                   </Badge>
                 </div>
               </Fade>

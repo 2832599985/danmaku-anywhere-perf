@@ -20,6 +20,24 @@ export function migrateOptions<T extends OptionsSchema>(
       : undefined
   }
 
+  /**
+   * Options live in chrome.storage.sync, so a profile running a newer build
+   * can push a future-versioned blob down to an older one. There is no
+   * downgrade path; use the data as-is and leave storage alone rather than
+   * writing it back under a version this build doesn't understand.
+   */
+  const latestVersion = versions.reduce(
+    (acc, v) => (v.version > acc ? v.version : acc),
+    0
+  )
+
+  if (fromOption.version > latestVersion) {
+    logger.warn(
+      `Stored options are at version ${fromOption.version}, newer than the latest known version ${latestVersion}. Using them as-is without migrating.`
+    )
+    return fromOption
+  }
+
   let currentOptions = fromOption
   let nextVersion = getNextVersion(currentOptions.version)
 

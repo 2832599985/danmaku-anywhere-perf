@@ -1,7 +1,6 @@
-/// <reference types="vitest" />
 import { crx } from '@crxjs/vite-plugin'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import { manifest } from './manifest'
 import { getBuildContext } from './scripts/getBuildContext'
 
@@ -15,7 +14,11 @@ if (!['chrome', 'firefox'].includes(browser.name)) {
   )
 }
 
-const port = isChrome ? 3000 : 3001
+const defaultPort = isChrome ? 23333 : 23334
+const envPort = process.env.VITE_PORT
+  ? Number(process.env.VITE_PORT)
+  : undefined
+const port = envPort && !Number.isNaN(envPort) ? envPort : defaultPort
 
 console.log('Building for', {
   browser,
@@ -42,9 +45,15 @@ export default defineConfig({
   define: {
     'import.meta.env.VITE_TARGET_BROWSER': JSON.stringify(browser.name),
     'import.meta.env.VERSION': JSON.stringify(appVersion),
+    'import.meta.env.VITE_STANDALONE': JSON.stringify(false),
   },
   build: {
     emptyOutDir: true,
+    // Extension chunks load from local disk, so modulepreload gains nothing —
+    // and in content scripts the preload helper resolves dep URLs against the
+    // HOST PAGE origin, spamming 404s (e.g. https://<site>/assets/vendor-*.js)
+    // every time the upscaler lazy-loads anime4k-webgpu.
+    modulePreload: false,
     rollupOptions: {
       input: {
         app: 'pages/popup.html',
@@ -74,5 +83,7 @@ export default defineConfig({
   },
   test: {
     setupFiles: ['src/tests/mockChromeApis.ts', 'src/tests/mockI18n.ts'],
+    environment: 'jsdom',
+    exclude: ['e2e/**', 'node_modules/**'],
   },
 })

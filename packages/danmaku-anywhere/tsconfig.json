@@ -7,14 +7,21 @@
     "moduleResolution": "Bundler",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "types": ["chrome", "react-dom", "react", "@types/wicg-file-system-access"],
+    "types": [
+      "chrome",
+      "react-dom",
+      "react",
+      "@types/wicg-file-system-access",
+      "@webgpu/types"
+    ],
     "jsx": "react-jsx",
     "paths": {
       "@/*": ["./src/*"],
       "@danmaku-anywhere/danmaku-engine": ["../danmaku-engine/src"],
       "@danmaku-anywhere/danmaku-provider": ["../danmaku-provider/src"],
       "@danmaku-anywhere/danmaku-converter": ["../danmaku-converter/src"],
-      "@danmaku-anywhere/web-scraper": ["../web-scraper/src"]
+      "@danmaku-anywhere/web-scraper": ["../web-scraper/src"],
+      "@danmaku-anywhere/upscale-engine": ["../upscale-engine/src"]
     }
   },
   "include": ["src"],

@@ -1,4 +1,10 @@
-import { Movie, Settings, SmartToy, Title } from '@mui/icons-material'
+import {
+  Movie,
+  Settings,
+  SmartToy,
+  Title,
+  TravelExplore,
+} from '@mui/icons-material'
 import {
   Box,
   Button,
@@ -17,6 +23,7 @@ import { isConfigPermissive } from '@/common/options/mountConfig/isPermissive'
 import { useActiveConfig } from '@/content/controller/common/context/useActiveConfig'
 import { useActiveIntegration } from '@/content/controller/common/context/useActiveIntegration'
 import { useStore } from '@/content/controller/store/store'
+import { MatchResultPanel, MatchSuccessIndicator } from './MatchResultPanel'
 
 interface StepData {
   label: string
@@ -42,9 +49,9 @@ function getActiveStep(steps: StepData[]) {
 export const MatchingSteps = () => {
   const { t } = useTranslation()
   const activeConfig = useActiveConfig()
-  const videoId = useStore.use.videoId?.()
+  const hasVideo = useStore((s) => s.frame.activeFrame?.hasVideo ?? false)
   const { toggleEditor, toggleAiEditor } = useStore.use.integrationForm()
-  const { mediaInfo, foundElements, errorMessage, active } =
+  const { mediaInfo, foundElements, errorMessage, active, matchResult } =
     useStore.use.integration()
   const activeIntegration = useActiveIntegration()
   const openImportDialog = useImportShareCodeDialog({
@@ -52,6 +59,9 @@ export const MatchingSteps = () => {
     configId: activeConfig.id,
   })
   const { getProviderById } = useAiProviderConfig()
+
+  const isMatchFailed = matchResult?.status === 'notFound'
+  const isMatchSuccess = matchResult?.status === 'success'
 
   const steps = useMemo<StepData[]>(() => {
     const isPermissive = isConfigPermissive(activeConfig)
@@ -157,8 +167,6 @@ export const MatchingSteps = () => {
         ),
     }
 
-    const hasVideo = !!videoId
-
     const checkVideoStep = {
       label: t('integration.steps.checkVideo', 'Check Video'),
       icon: () => <Movie />,
@@ -229,6 +237,30 @@ export const MatchingSteps = () => {
       description: mediaInfo?.toString() || '',
     }
 
+    const episodeMatchStep: StepData = {
+      label: t('integration.steps.episodeMatch', 'Episode Match'),
+      icon: () => <TravelExplore />,
+      completed: isMatchSuccess,
+      error: isMatchFailed,
+      description: isMatchSuccess
+        ? t(
+            'integration.steps.episodeMatchPass',
+            'Episode matched successfully'
+          )
+        : isMatchFailed
+          ? t('integration.steps.episodeMatchFail', 'Episode matching failed')
+          : '',
+      renderContent: () => {
+        if (isMatchSuccess) {
+          return <MatchSuccessIndicator />
+        }
+        if (isMatchFailed) {
+          return <MatchResultPanel />
+        }
+        return null
+      },
+    }
+
     if (isAiMode) {
       return [
         checkAiStep,
@@ -237,6 +269,7 @@ export const MatchingSteps = () => {
         integrationEnabledStep,
         aiRequestStep,
         mediaInfoStep,
+        episodeMatchStep,
       ]
     }
 
@@ -247,17 +280,19 @@ export const MatchingSteps = () => {
       matchNodesStep,
       extractMediaInfoStep,
       mediaInfoStep,
+      episodeMatchStep,
     ]
   }, [
     t,
     activeIntegration,
-    videoId,
+    hasVideo,
     activeConfig,
     active,
-    isConfigPermissive,
     mediaInfo,
     foundElements,
     errorMessage,
+    isMatchFailed,
+    isMatchSuccess,
   ])
 
   const activeStep = getActiveStep(steps)

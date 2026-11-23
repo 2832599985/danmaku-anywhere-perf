@@ -100,6 +100,23 @@ export class DanmakuOptionsService implements IStoreService {
           })
         },
       })
+      .version(8, {
+        upgrade: (data) => {
+          return produce<PrevOptions>(data, (draft) => {
+            draft.modeFilter = {
+              rtl: true,
+              ltr: true,
+              top: true,
+              bottom: true,
+            }
+            draft.colorFilter = {
+              enabled: false,
+              onlyWhite: false,
+              blacklist: [],
+            }
+          })
+        },
+      })
   }
 
   async get() {

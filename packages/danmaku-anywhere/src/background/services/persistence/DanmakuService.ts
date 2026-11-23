@@ -23,6 +23,7 @@ import type {
 import { DanmakuSourceType } from '@/common/danmaku/enums'
 import { DanmakuAnywhereDb } from '@/common/db/db'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
+import { SeasonMap } from '@/common/seasonMap/SeasonMap'
 import type { DbEntity } from '@/common/types/dbEntity'
 import { tryCatch } from '@/common/utils/tryCatch'
 import { invariant, isServiceWorker } from '@/common/utils/utils'
@@ -94,6 +95,11 @@ export class DanmakuService {
     })
   }
 
+  async getCustomByTitle(title: string): Promise<CustomEpisode | undefined> {
+    const normalized = title.startsWith('/') ? title : `/${title}`
+    return this.db.customEpisode.get({ title: normalized })
+  }
+
   async matchLocalByTitle(title: string): Promise<CustomEpisode | undefined> {
     // episode title can be a path, so we need to match it by comparing the last part
     const customEpisodesLite = await this.filterCustomLite({
@@ -124,24 +130,98 @@ export class DanmakuService {
   }
 
   async bulkUpsert(data: EpisodeInsert[]): Promise<Episode[]> {
-    const results: Episode[] = []
-    for (const item of data) {
-      results.push(await this.upsert(item))
-    }
-    return results
+    if (data.length === 0) return []
+
+    return this.db.transaction(
+      'rw',
+      this.db.episode,
+      this.db.season,
+      async () => {
+        const now = Date.now()
+        const results: Episode[] = []
+
+        // Batch lookup: find existing episodes by seasonId+indexedId
+        const existingMap = new Map<string, Episode>()
+        for (const item of data) {
+          const existing = await this.db.episode.get({
+            seasonId: item.seasonId,
+            indexedId: item.indexedId,
+          })
+          if (existing) {
+            existingMap.set(`${item.seasonId}:${item.indexedId}`, existing)
+          }
+        }
+
+        const toUpdate: Episode[] = []
+        const toAdd: Omit<Episode, 'id'>[] = []
+        const updateIndices: number[] = []
+        const addIndices: number[] = []
+
+        for (let i = 0; i < data.length; i++) {
+          const item = data[i]
+          const key = `${item.seasonId}:${item.indexedId}`
+          const existing = existingMap.get(key)
+
+          if (existing) {
+            toUpdate.push({
+              ...existing,
+              ...item,
+              timeUpdated: now,
+              version: existing.version + 1,
+            })
+            updateIndices.push(i)
+          } else {
+            toAdd.push({
+              ...item,
+              timeUpdated: now,
+              version: 1,
+            })
+            addIndices.push(i)
+          }
+        }
+
+        // Batch update via bulkPut
+        if (toUpdate.length > 0) {
+          await this.db.episode.bulkPut(toUpdate)
+          for (let j = 0; j < toUpdate.length; j++) {
+            results[updateIndices[j]] = toUpdate[j]
+          }
+        }
+
+        // Batch insert via bulkAdd
+        if (toAdd.length > 0) {
+          const ids = await this.db.episode.bulkAdd(toAdd, { allKeys: true })
+          for (let j = 0; j < toAdd.length; j++) {
+            results[addIndices[j]] = {
+              ...toAdd[j],
+              id: ids[j],
+            } as Episode
+          }
+        }
+
+        return results
+      }
+    )
   }
 
   async upsert<T extends EpisodeInsert>(data: T): Promise<DbEntity<T>> {
-    const existing = await this.db.episode.get({
-      seasonId: data.seasonId,
-      indexedId: data.indexedId,
-    })
+    return this.db.transaction(
+      'rw',
+      this.db.episode,
+      this.db.season,
+      async () => {
+        const existing = await this.db.episode.get({
+          seasonId: data.seasonId,
+          indexedId: data.indexedId,
+        })
 
-    if (existing) {
-      return (await this.update({ ...existing, ...data })) as DbEntity<T>
-    }
+        if (existing) {
+          return (await this.update({ ...existing, ...data })) as DbEntity<T>
+        }
 
-    return this.add(data)
+        return this.add(data)
+      }
+    )
   }
 
   async add<T extends EpisodeInsert>(data: T): Promise<DbEntity<T>> {
@@ -397,10 +477,76 @@ export class DanmakuService {
     const threshold = now - days * 24 * 60 * 60 * 1000
 
     // delete danmaku older than threshold, ignoring custom danmaku
-    const deleteCount = await this.db.episode
-      .where('timeUpdated')
-      .below(threshold)
-      .delete()
+    // then clean up orphan seasons that no longer have any episodes
+    const deleteCount = await this.db.transaction(
+      'rw',
+      this.db.episode,
+      this.db.season,
+      this.db.seasonMap,
+      this.db.bookmark,
+      async () => {
+        // Collect seasonIds of episodes about to be deleted
+        const affectedSeasonIds = new Set<number>()
+        await this.db.episode
+          .where('timeUpdated')
+          .below(threshold)
+          .each((episode) => {
+            affectedSeasonIds.add(episode.seasonId)
+          })
+
+        // Delete the old episodes
+        const count = await this.db.episode
+          .where('timeUpdated')
+          .below(threshold)
+          .delete()
+
+        // For each affected season, check if it still has episodes
+        if (affectedSeasonIds.size > 0) {
+          const orphanSeasonIds: number[] = []
+          for (const seasonId of affectedSeasonIds) {
+            const remaining = await this.db.episode.where({ seasonId }).count()
+            if (remaining === 0) {
+              orphanSeasonIds.push(seasonId)
+            }
+          }
+
+          if (orphanSeasonIds.length > 0) {
+            await this.db.season.bulkDelete(orphanSeasonIds)
+
+            /**
+             * Drop the references too, mirroring SeasonService.delete.
+             * Without this a purge leaves seasonMap entries pointing at
+             * deleted seasons (so automatic matching keeps resolving to a
+             * season that is gone) and bookmark rows holding a dangling
+             * unique seasonId.
+             */
+            await this.db.bookmark
+              .where('seasonId')
+              .anyOf(orphanSeasonIds)
+              .delete()
+
+            for (const seasonId of orphanSeasonIds) {
+              await this.db.seasonMap
+                .where('seasonIds')
+                .equals(seasonId)
+                .modify((val) => {
+                  const updated =
+                    SeasonMap.fromSnapshot(val).withoutSeasonId(seasonId)
+                  const snapshot = updated.toSnapshot()
+                  val.seasonIds = snapshot.seasonIds
+                  val.seasons = snapshot.seasons
+                })
+            }
+
+            this.logger.log(
+              `Cleaned up ${orphanSeasonIds.length} orphan seasons`
+            )
+          }
+        }
+
+        return count
+      }
+    )
 
     this.logger.log(
       `Purged ${deleteCount} danmaku older than ${new Date(threshold).toLocaleString()}`

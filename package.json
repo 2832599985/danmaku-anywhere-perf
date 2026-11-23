@@ -12,6 +12,9 @@
   ],
   "repository": "https://github.com/Mr-Quin/danmaku-anywhere",
   "scripts": {
+    "dev:web-app": "pnpm -r -F \"./app/web\" start",
+    "dev:extension": "pnpm -r -F \"./packages/danmaku-anywhere\" dev",
+    "dev:extension:standalone": "pnpm -r -F \"./packages/danmaku-anywhere\" standalone:dev",
     "build": "pnpm -r build",
     "build:packages": "pnpm -r -F \"./packages/**\" build",
     "format": "pnpm -r -F \"./packages/**\" format",
@@ -20,18 +23,23 @@
     "test": "pnpm -r test run",
     "type-check": "pnpm -r type-check",
     "sync-changelog": "node --experimental-strip-types scripts/sync-changelog.ts Mr-Quin/danmaku-anywhere docs/src/content/docs/change-log.mdx",
+    "knip": "knip",
     "prepare": "lefthook install"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.7",
     "@typescript/native-preview": "7.0.0-dev.20251123.1",
+    "knip": "^6.3.0",
     "lefthook": "^2.0.4",
     "typescript": "^5.9.3"
   },
   "pnpm": {
     "patchedDependencies": {
       "@mui/system": "patches/@mui__system.patch"
-    }
+    },
+    "ignoredBuiltDependencies": [
+      "workerd"
+    ]
   },
   "packageManager": "pnpm@10.11.0+sha256.a69e9cb077da419d47d18f1dd52e207245b29cac6e076acedbeb8be3b1a67bd7"
 }

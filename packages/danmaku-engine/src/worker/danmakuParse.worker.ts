@@ -13,35 +13,47 @@ const ctx: DedicatedWorkerGlobalScope = self as DedicatedWorkerGlobalScope
 const parseComments = (
   taskId: number,
   comments: CommentEntity[],
-  chunkSize: number
+  chunkSize: number,
+  startIndex?: number
 ) => {
   const safeChunkSize = Math.max(1, chunkSize)
+  const total = comments.length
+  const safeStart = Number.isFinite(startIndex)
+    ? Math.min(Math.max(Math.trunc(startIndex as number), 0), total)
+    : 0
   const start = performance.now()
 
-  let index = 0
-  while (index < comments.length) {
-    const end = Math.min(index + safeChunkSize, comments.length)
-    const parsed: Array<ParsedComment | undefined> = []
+  const parseRange = (rangeStart: number, rangeEnd: number) => {
+    let index = rangeStart
+    while (index < rangeEnd) {
+      const end = Math.min(index + safeChunkSize, rangeEnd)
+      const parsed: Array<ParsedComment | undefined> = []
 
-    for (let i = index; i < end; i += 1) {
-      try {
-        parsed.push(transformComment(comments[i], 0))
-      } catch {
-        // Keep holes instead of crashing the whole worker.
-        parsed.push(undefined)
+      for (let i = index; i < end; i += 1) {
+        try {
+          parsed.push(transformComment(comments[i], 0))
+        } catch {
+          // Keep holes instead of crashing the whole worker.
+          parsed.push(undefined)
+        }
       }
-    }
 
-    const chunkMessage: ParseChunkMessage = {
-      type: 'chunk',
-      taskId,
-      startIndex: index,
-      parsed,
-    }
-    ctx.postMessage(chunkMessage)
+      const chunkMessage: ParseChunkMessage = {
+        type: 'chunk',
+        taskId,
+        startIndex: index,
+        parsed,
+      }
+      ctx.postMessage(chunkMessage)
 
-    index = end
+      index = end
+    }
   }
+
+  // Prioritize parsing comments near the playback cursor. This reduces the chance of
+  // main-thread parsing causing visible timeline drift during playback.
+  parseRange(safeStart, total)
+  parseRange(0, safeStart)
 
   const doneMessage: ParseDoneMessage = {
     type: 'done',
@@ -56,5 +68,5 @@ ctx.addEventListener('message', (event: MessageEvent<ParseRequestMessage>) => {
   if (!data || data.type !== 'parse') {
     return
   }
-  parseComments(data.taskId, data.comments, data.chunkSize)
+  parseComments(data.taskId, data.comments, data.chunkSize, data.startIndex)
 })

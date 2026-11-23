@@ -1,0 +1,684 @@
+import { alpha, Box, Menu, MenuItem } from '@mui/material'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import { getPlatform } from '@/platform'
+import { usePlayerCommands } from '@/player/commands'
+import { useOpEdMarks } from '@/player/useOpEdMarks'
+import { usePlayerStore } from '@/store/playerStore'
+import type { TargetResolution } from '@/store/settings'
+import {
+  INK,
+  INK_SCRIM_HEAVY,
+  INK_SCRIM_LIGHT,
+  inkStampPressSx,
+  LINE_STRONG,
+  MONO,
+  MOTION_PANEL,
+  OVERLAY_GRADIENT,
+  PAPER,
+  STAGE_Z,
+  VERMILION,
+} from '@/theme/theme'
+import {
+  ExitFullscreenIcon,
+  FullscreenIcon,
+  MiniPlayerIcon,
+  NextIcon,
+  PauseIcon,
+  PlayIcon,
+  PrevIcon,
+  SkipForwardIcon,
+} from './icons'
+import { ProgressBar } from './ProgressBar'
+import {
+  DanmakuQuickButton,
+  SubtitleQuickButton,
+  UpscaleQuickButton,
+} from './QuickButtons'
+import { ScreenshotButton } from './ScreenshotButton'
+import { TimeDisplay } from './TimeDisplay'
+import { VolumeControl } from './VolumeControl'
+
+const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2] as const
+
+/** Human label for the render target shown in the HUD. */
+const SCALE_LABEL: Record<TargetResolution, string> = {
+  x2: '2×',
+  x4: '4×',
+  x8: '8×',
+  '720p': '720p',
+  '1080p': '1080p',
+  '2k': '2K',
+  '4k': '4K',
+  native: '原生',
+}
+
+// Keep stage overlays below the top bar's 48px hit area.
+const TOP_BAR_HEIGHT = 48
+const OVERLAY_TOP = TOP_BAR_HEIGHT + 14
+
+/** 38×38 outlined square — the secondary control shape. */
+const squareSx = {
+  appearance: 'none',
+  width: 38,
+  height: 38,
+  '@media (max-width: 960px)': { width: 34, height: 34 },
+  border: LINE_STRONG,
+  background: 'transparent',
+  color: PAPER,
+  fontSize: 13,
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flexShrink: 0,
+  padding: 0,
+  lineHeight: 1,
+  transition: 'background-color 0ms, color 0ms',
+  '&:hover': { background: PAPER, color: INK },
+  '&:focus-visible': {
+    outline: `2px solid ${VERMILION}`,
+    outlineOffset: '2px',
+  },
+  '&:disabled': { opacity: 0.35, cursor: 'default' },
+  '&:disabled:hover': { background: 'transparent', color: PAPER },
+} as const
+
+interface ControlsProps {
+  /** When false, the bar fades and slides out (parent owns the hide timer). */
+  visible: boolean
+  /**
+   * Reports the bar's measured height in px whenever it changes, so the
+   * subtitle layer can lift its rows clear of it. The bar's height is a
+   * constant (padding + content) while the stage is not, so a percentage
+   * lift is wrong at the sizes it was not tuned for.
+   */
+  onHeightChange?: (height: number) => void
+}
+
+export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
+  const commands = usePlayerCommands()
+  const playing = usePlayerStore((s) => s.playback.playing)
+  const fullscreen = usePlayerStore((s) => s.playback.fullscreen)
+  // The mini window resizes the native window; a browser tab cannot.
+  const isTauri = getPlatform().isTauri
+  const playbackRate = usePlayerStore((s) => s.playback.playbackRate)
+  const duration = usePlayerStore((s) => s.playback.duration)
+  const comments = usePlayerStore((s) => s.comments)
+  const playlist = usePlayerStore((s) => s.playlist)
+  const playlistIndex = usePlayerStore((s) => s.playlistIndex)
+  const upscale = usePlayerStore((s) => s.upscale)
+  const upscaleStatus = usePlayerStore((s) => s.upscaleStatus)
+  const holdControls = usePlayerStore((s) => s.holdControls)
+
+  const [rateAnchor, setRateAnchor] = useState<HTMLElement | null>(null)
+  const [densityHover, setDensityHover] = useState<number | null>(null)
+  const barRef = useRef<HTMLDivElement | null>(null)
+  const [barHeight, setBarHeight] = useState(0)
+
+  const rateOpen = Boolean(rateAnchor)
+  useEffect(() => {
+    if (!rateOpen) return
+    holdControls(1)
+    return () => holdControls(-1)
+  }, [rateOpen, holdControls])
+
+  // The bar's height depends on its own content (the danmaku density strip
+  // appears once comments load, the status capsules come and go), so the
+  // subtitle layer needs the measured value — not a percentage of the stage.
+  //
+  // Measuring it is fussier than it looks: the bar's height is mostly
+  // *padding* (`52px 24px 16px`), and `ResizeObserver`'s `contentRect` (what
+  // most examples reach for) reports the content box only — 74px against the
+  // real 142px border box. Worse, a padding-only height never re-fires the
+  // observer, so the value would freeze at whatever it was on first paint.
+  // The observer entry's `borderBoxSize` is the honest box; a layout effect
+  // measures it again after every commit, which is when the density strip
+  // actually arrives.
+  const measureBar = useCallback(() => {
+    const bar = barRef.current
+    if (!bar) return
+    // `offsetHeight` rounds to an integer and includes padding + border.
+    const height = bar.offsetHeight
+    if (height > 0) {
+      onHeightChange?.(height)
+      setBarHeight((prev) => (prev === height ? prev : height))
+    }
+  }, [onHeightChange])
+
+  useLayoutEffect(() => {
+    measureBar()
+  })
+
+  useEffect(() => {
+    const bar = barRef.current
+    if (!bar) return
+    // The observer covers changes that do not re-render this component (the
+    // density strip's own resize, a font swap); the layout effect covers the
+    // ones that do.
+    const observer = new ResizeObserver(measureBar)
+    observer.observe(bar)
+    return () => observer.disconnect()
+  }, [measureBar])
+
+  const canPrev = playlistIndex > 0
+  const canNext = playlistIndex >= 0 && playlistIndex < playlist.length - 1
+
+  // 48-bucket danmaku density. Recomputed only when the comment set or the
+  // (rounded) duration changes — never per frame.
+  const durationKey = Math.round(duration)
+  const density = useMemo(() => {
+    if (durationKey <= 0 || comments.length === 0) return null
+    const BUCKETS = 48
+    const bins = new Array<number>(BUCKETS).fill(0)
+    for (const c of comments) {
+      const t = Number.parseFloat(c.p)
+      if (!Number.isFinite(t) || t < 0) continue
+      const idx = Math.min(BUCKETS - 1, Math.floor((t / durationKey) * BUCKETS))
+      bins[idx] += 1
+    }
+    let peakIdx = 0
+    for (let i = 1; i < BUCKETS; i++) if (bins[i] > bins[peakIdx]) peakIdx = i
+    const max = bins[peakIdx]
+    if (max === 0) return null
+    return {
+      bins,
+      max,
+      peakCount: max,
+      peakTime: (peakIdx / BUCKETS) * durationKey,
+    }
+  }, [comments, durationKey])
+
+  const fi = upscale.frameInterpolation
+  const upscaleStats = usePlayerStore((s) => s.upscaleStats)
+  const interpolationStatus = usePlayerStore((s) => s.interpolationStatus)
+  const playbackSettings = usePlayerStore((s) => s.playbackSettings)
+  const currentTime = usePlayerStore((s) => s.playback.currentTime)
+
+  // OP/ED marks for the skip-OP button.
+  const { opEnd } = useOpEdMarks(comments, duration)
+  const showSkipOp =
+    playbackSettings.skipOpEd !== 'off' && opEnd !== null && currentTime < opEnd
+  const autoSkippedRef = useRef(false)
+
+  // Auto-skip OP when mode is 'auto' and we're in the OP zone.
+  if (
+    playbackSettings.skipOpEd === 'auto' &&
+    opEnd !== null &&
+    currentTime > 1 &&
+    currentTime < opEnd &&
+    !autoSkippedRef.current
+  ) {
+    autoSkippedRef.current = true
+    commands.seekTo(opEnd)
+  }
+  // Reset auto-skip flag when media changes or OP ends.
+  if (currentTime >= (opEnd ?? Number.POSITIVE_INFINITY) || currentTime < 1) {
+    autoSkippedRef.current = false
+  }
+
+  const peakClock = (sec: number) => {
+    const s = Math.max(0, Math.floor(sec))
+    return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`
+  }
+
+  const fade = {
+    opacity: visible ? 1 : 0,
+    transition: `opacity ${MOTION_PANEL}`,
+    pointerEvents: visible ? ('auto' as const) : ('none' as const),
+  }
+
+  const playedRatio = duration > 0 ? currentTime / duration : 0
+  const hoveredBucket =
+    densityHover === null
+      ? -1
+      : Math.min(47, Math.max(0, Math.floor(densityHover * 48)))
+
+  return (
+    <>
+      {/* Real-time HUD (top-right, below the top bar; opt-in via settings/quick panel) */}
+      {playbackSettings.showPerformanceHud &&
+        upscaleStatus === 'active' &&
+        upscaleStats !== null && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: OVERLAY_TOP,
+              right: 26,
+              zIndex: STAGE_Z.HUD,
+              background: INK_SCRIM_HEAVY,
+              border: LINE_STRONG,
+              padding: '8px 12px 10px',
+              display: 'flex',
+              gap: '18px',
+              alignItems: 'flex-end',
+              ...fade,
+              // A readout, not a target: never swallow the pause click.
+              pointerEvents: 'none',
+            }}
+          >
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+              <Box
+                component="span"
+                sx={{
+                  fontFamily: MONO,
+                  fontSize: 9,
+                  letterSpacing: '0.22em',
+                  color: alpha(PAPER, 0.5),
+                }}
+              >
+                OUTPUT FPS
+              </Box>
+              <Box
+                component="span"
+                sx={{
+                  fontFamily: MONO,
+                  fontSize: 24,
+                  fontWeight: 700,
+                  color: PAPER,
+                  lineHeight: 1,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {upscaleStats.fps}
+              </Box>
+              {/* The composition, so the big number is never mistaken for the
+                display refresh or for the interpolated rate alone. Stated
+                factually rather than as a warning: 0 interpolated frames is
+                legitimate while paused, on a static passage, or in the first
+                second after enabling, so alarming wording would cry wolf. A
+                persistent "补帧 0" while playing is the real signal. The one
+                definitive failure the engine reports is its fallback state. */}
+              {fi.enabled && (
+                <Box
+                  component="span"
+                  sx={{
+                    fontFamily: MONO,
+                    fontSize: 10,
+                    letterSpacing: '0.1em',
+                    color:
+                      interpolationStatus === 'fallback'
+                        ? VERMILION
+                        : alpha(PAPER, 0.45),
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {interpolationStatus === 'fallback'
+                    ? '补帧不可用'
+                    : `源 ${upscaleStats.sourceFps} + 补帧 ${upscaleStats.generatedFps}`}
+                </Box>
+              )}
+            </Box>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+              <Box
+                component="span"
+                sx={{
+                  fontFamily: MONO,
+                  fontSize: 9,
+                  letterSpacing: '0.22em',
+                  color: alpha(PAPER, 0.5),
+                }}
+              >
+                SCALE
+              </Box>
+              <Box
+                component="span"
+                sx={{
+                  fontFamily: MONO,
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: PAPER,
+                  lineHeight: 1.6,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {SCALE_LABEL[upscale.targetResolution]}
+              </Box>
+            </Box>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+              <Box
+                component="span"
+                sx={{
+                  fontFamily: MONO,
+                  fontSize: 9,
+                  letterSpacing: '0.22em',
+                  color: alpha(PAPER, 0.5),
+                }}
+              >
+                CPU ms/帧
+              </Box>
+              <Box
+                component="span"
+                sx={{
+                  fontFamily: MONO,
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: PAPER,
+                  lineHeight: 1.6,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {upscaleStats.cpuFrameMs > 0
+                  ? upscaleStats.cpuFrameMs.toFixed(1)
+                  : '—'}
+              </Box>
+            </Box>
+          </Box>
+        )}
+
+      {/* Skip OP: bottom-right, just above the control bar — where streaming
+          players put it. It does NOT fade with the controls: in 询问 mode the
+          point is to offer the skip during the OP, and the controls hide 2.6 s
+          after the mouse stops, long before the OP ends. */}
+      {showSkipOp && (
+        <Box
+          sx={{
+            position: 'absolute',
+            right: 30,
+            bottom: 18,
+            zIndex: STAGE_Z.CHROME + 1,
+            pointerEvents: 'none',
+            transform: `translateY(${visible ? -barHeight : 0}px)`,
+            transition: `transform ${MOTION_PANEL}`,
+            '@media (prefers-reduced-motion: reduce)': {
+              transition: 'none',
+            },
+          }}
+        >
+          <Box
+            component="button"
+            type="button"
+            onClick={() => {
+              if (opEnd !== null) commands.seekTo(opEnd)
+            }}
+            sx={{
+              appearance: 'none',
+              border: LINE_STRONG,
+              background: INK_SCRIM_LIGHT,
+              color: PAPER,
+              fontSize: 13,
+              fontWeight: 700,
+              padding: '8px 14px',
+              cursor: 'pointer',
+              letterSpacing: '0.06em',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '7px',
+              pointerEvents: 'auto',
+              ...inkStampPressSx(4, VERMILION, {
+                background: PAPER,
+                color: INK,
+              }),
+              '&:focus-visible': {
+                outline: `2px solid ${VERMILION}`,
+                outlineOffset: '2px',
+              },
+            }}
+          >
+            跳过 OP
+            <Box
+              component="span"
+              sx={{
+                fontFamily: MONO,
+                fontSize: 11,
+                opacity: 0.7,
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {peakClock(opEnd ?? 0)}
+            </Box>
+            <SkipForwardIcon size={13} />
+          </Box>
+        </Box>
+      )}
+
+      {/* bottom bar — gradient only, no frame (per design) */}
+      <Box
+        ref={barRef}
+        data-controls-bar
+        sx={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: STAGE_Z.CHROME,
+          padding: '52px 24px 16px',
+          '@media (max-width: 960px)': { padding: '52px 12px 16px' },
+          background: OVERLAY_GRADIENT,
+          opacity: visible ? 1 : 0,
+          transform: visible ? 'translateY(0)' : 'translateY(12px)',
+          transition: `opacity ${MOTION_PANEL}, transform ${MOTION_PANEL}`,
+          pointerEvents: visible ? 'auto' : 'none',
+        }}
+      >
+        <Box sx={{ position: 'relative', margin: '0 6px 14px' }}>
+          {density && (
+            <>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  gap: '2px',
+                  height: 34,
+                  marginBottom: '5px',
+                }}
+              >
+                {density.bins.map((count, i) => {
+                  const played = (i + 0.5) / density.bins.length <= playedRatio
+                  const hovered = i === hoveredBucket
+                  return (
+                    <Box
+                      key={`bin-${i}`}
+                      sx={{
+                        flex: 1,
+                        minHeight: 2,
+                        height: `${(count / density.max) * 100}%`,
+                        opacity: played ? 1 : hovered ? 0.78 : 0.42,
+                        background: played
+                          ? `linear-gradient(to top, ${VERMILION}, ${alpha(PAPER, 0.92)})`
+                          : alpha(PAPER, hovered ? 0.38 : 0.12),
+                        outline: hovered ? `2px solid ${PAPER}` : 'none',
+                        outlineOffset: 1,
+                        position: 'relative',
+                        zIndex: hovered ? 1 : 0,
+                        transition:
+                          'background 0ms, opacity 0ms, outline-color 0ms',
+                      }}
+                    />
+                  )
+                })}
+              </Box>
+              <Box
+                sx={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  marginBottom: '6px',
+                }}
+              >
+                <Box
+                  component="span"
+                  sx={{
+                    fontFamily: MONO,
+                    fontSize: 9,
+                    letterSpacing: '0.22em',
+                    color: alpha(PAPER, 0.42),
+                  }}
+                >
+                  DANMAKU DENSITY / 弹幕密度
+                </Box>
+                <Box
+                  component="span"
+                  sx={{
+                    fontFamily: MONO,
+                    fontSize: 9,
+                    letterSpacing: '0.22em',
+                    color: VERMILION,
+                  }}
+                >
+                  PEAK {peakClock(density.peakTime)} · {density.peakCount}
+                </Box>
+              </Box>
+            </>
+          )}
+
+          <ProgressBar onHoverRatio={setDensityHover} />
+        </Box>
+
+        {/* control row */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            '@media (max-width: 1000px)': { gap: '6px' },
+            margin: '0 6px',
+          }}
+        >
+          <Box
+            component="button"
+            type="button"
+            aria-label={playing ? '暂停 / Pause' : '播放 / Play'}
+            onClick={() => commands.togglePlay()}
+            sx={{
+              appearance: 'none',
+              width: 46,
+              height: 46,
+              '@media (max-width: 960px)': { width: 42, height: 42 },
+              border: LINE_STRONG,
+              background: PAPER,
+              color: INK,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              padding: 0,
+              lineHeight: 1,
+              ...inkStampPressSx(4, VERMILION, {
+                background: VERMILION,
+                color: PAPER,
+              }),
+            }}
+          >
+            {playing ? <PauseIcon size={17} /> : <PlayIcon size={17} />}
+          </Box>
+
+          <Box
+            component="button"
+            type="button"
+            aria-label="上一个 / Previous"
+            disabled={!canPrev}
+            onClick={() => commands.playlistPrev()}
+            sx={squareSx}
+          >
+            <PrevIcon size={16} />
+          </Box>
+          <Box
+            component="button"
+            type="button"
+            aria-label="下一个 / Next"
+            disabled={!canNext}
+            onClick={() => commands.playlistNext()}
+            sx={squareSx}
+          >
+            <NextIcon size={16} />
+          </Box>
+
+          <TimeDisplay />
+          <VolumeControl />
+
+          <Box sx={{ flex: 1, minWidth: 8 }} />
+
+          <Box
+            component="button"
+            type="button"
+            aria-label="播放速度 / Speed"
+            onClick={(e: React.MouseEvent<HTMLElement>) =>
+              setRateAnchor(e.currentTarget)
+            }
+            sx={{
+              appearance: 'none',
+              border: LINE_STRONG,
+              background: 'transparent',
+              color: playbackRate !== 1 ? VERMILION : PAPER,
+              fontFamily: MONO,
+              fontSize: 13,
+              fontWeight: 700,
+              padding: '8px 10px',
+              cursor: 'pointer',
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
+              transition: 'background-color 0ms, color 0ms',
+              '&:hover': { background: PAPER, color: INK },
+            }}
+          >
+            {playbackRate}×
+          </Box>
+          <Menu
+            anchorEl={rateAnchor}
+            open={Boolean(rateAnchor)}
+            onClose={() => setRateAnchor(null)}
+            anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+            transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+          >
+            {PLAYBACK_RATES.map((rate) => (
+              <MenuItem
+                key={rate}
+                dense
+                selected={rate === playbackRate}
+                onClick={() => {
+                  commands.setPlaybackRate(rate)
+                  setRateAnchor(null)
+                }}
+                sx={{ fontFamily: MONO, fontWeight: 700 }}
+              >
+                {rate}×{rate === 1 ? ' 正常' : ''}
+              </MenuItem>
+            ))}
+          </Menu>
+
+          <UpscaleQuickButton />
+          <DanmakuQuickButton />
+          <SubtitleQuickButton />
+
+          <ScreenshotButton />
+
+          {isTauri && (
+            <Box
+              component="button"
+              type="button"
+              aria-label="小窗播放 (P) / Mini player"
+              title="小窗播放 (P)"
+              onClick={() => void commands.toggleMiniPlayer()}
+              sx={squareSx}
+            >
+              <MiniPlayerIcon size={16} />
+            </Box>
+          )}
+
+          <Box
+            component="button"
+            type="button"
+            aria-label={
+              fullscreen ? '退出全屏 / Exit fullscreen' : '全屏 / Fullscreen'
+            }
+            onClick={() => commands.toggleFullscreen()}
+            sx={squareSx}
+          >
+            {fullscreen ? (
+              <ExitFullscreenIcon size={17} />
+            ) : (
+              <FullscreenIcon size={17} />
+            )}
+          </Box>
+        </Box>
+      </Box>
+    </>
+  )
+}

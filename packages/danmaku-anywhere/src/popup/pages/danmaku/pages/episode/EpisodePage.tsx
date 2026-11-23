@@ -9,6 +9,7 @@ import { TabLayout } from '@/common/components/layout/TabLayout'
 import { TabToolbar } from '@/common/components/layout/TabToolbar'
 import { DrilldownMenu } from '@/common/components/Menu/DrilldownMenu'
 import { useDeleteEpisode } from '@/common/danmaku/queries/useDeleteEpisode'
+import { useExportAss } from '@/popup/hooks/useExportAss'
 import { useExportDanmaku } from '@/popup/hooks/useExportDanmaku'
 import { useExportXml } from '@/popup/hooks/useExportXml'
 import { useGoBack } from '@/popup/hooks/useGoBack'
@@ -47,6 +48,7 @@ export const EpisodePage = () => {
 
   const exportDanmaku = useExportDanmaku()
   const exportXml = useExportXml()
+  const exportAss = useExportAss()
   const deleteMutation = useDeleteEpisode()
   const dialog = useDialog()
 
@@ -86,6 +88,18 @@ export const EpisodePage = () => {
       })
     } else {
       exportXml.mutate({
+        filter: { ids: selectedEpisodes },
+      })
+    }
+  }
+
+  const handleExportAss = () => {
+    if (isCustom) {
+      exportAss.mutate({
+        customFilter: { ids: selectedEpisodes },
+      })
+    } else {
+      exportAss.mutate({
         filter: { ids: selectedEpisodes },
       })
     }
@@ -135,6 +149,14 @@ export const EpisodePage = () => {
               onClick: handleExportXml,
               disabled: exportXml.isPending,
               loading: exportXml.isPending,
+            },
+            {
+              id: 'exportAss',
+              label: t('danmaku.exportAss', 'Export ASS'),
+              icon: <Download />,
+              onClick: handleExportAss,
+              disabled: exportAss.isPending,
+              loading: exportAss.isPending,
             },
           ]}
         />

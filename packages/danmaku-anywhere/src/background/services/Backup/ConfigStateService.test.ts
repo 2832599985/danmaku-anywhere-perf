@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BackupData } from '@/common/backup/dto'
 import type { ILogger } from '@/common/Logger'
+import { mockChrome } from '@/tests/mockChromeApis'
 import { ConfigStateService } from './ConfigStateService'
 
 // Manual mocks without relying on IOC
@@ -64,6 +65,10 @@ describe('ConfigStateService', () => {
       ],
       mockLogger
     )
+
+    mockChrome.runtime.getManifest.mockReturnValue({
+      version: '1.0.0',
+    })
   })
 
   afterEach(() => {
@@ -167,6 +172,40 @@ describe('ConfigStateService', () => {
       await expect(service.restoreState({ meta: {} } as any)).rejects.toThrow(
         'Invalid backup format'
       )
+    })
+
+    it('should skip services with shouldBackup=false', async () => {
+      const mockUserAuthService = {
+        ...createMockOptionService('userAuth'),
+        shouldBackup: false,
+      }
+
+      service = new ConfigStateService(
+        [
+          mockDanmakuOptionsService,
+          mockExtensionOptionsService,
+          mockMountConfigService,
+          mockProviderConfigService,
+          mockIntegrationPolicyService,
+          mockUserAuthService,
+        ],
+        mockLogger
+      )
+
+      const maliciousBackup: BackupData = {
+        meta: { version: 1, timestamp: 12345 },
+        services: {
+          userAuth: {
+            data: { token: 'attacker-token', user: { id: 'evil' } },
+            version: 1,
+          },
+        },
+      }
+
+      await service.restoreState(maliciousBackup)
+
+      expect(mockUserAuthService.options.set).not.toHaveBeenCalled()
+      expect(mockUserAuthService.options.upgrade).not.toHaveBeenCalled()
     })
   })
 })

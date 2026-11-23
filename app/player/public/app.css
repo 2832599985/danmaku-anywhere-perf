@@ -1,0 +1,290 @@
+/* App shell base — must live in a real stylesheet, NOT an inline <style>:
+ * Tauri nonces inline styles in index.html, and a CSP nonce makes
+ * 'unsafe-inline' ignored, which would block all Emotion/MUI runtime styles. */
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: #0a0a0c;
+  overflow: hidden;
+}
+
+::selection {
+  background: #ff2f4d;
+  color: #0a0a0c;
+}
+
+/* 墨线 theme keyframes — shared by EmptyState / Controls / panels.
+ * Hard cuts (steps) for blinks, linear drifts for danmaku/tone. */
+@keyframes ink-dm {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    /* Text width plus the container, so 2K/4K stages don't cut it early. */
+    transform: translateX(calc(-100% - 100cqw));
+  }
+}
+/* Travel spans the text plus its inline-size container, not the viewport. */
+@keyframes ink-dm-box {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(calc(-100% - 100cqw));
+  }
+}
+@keyframes ink-blink {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  61%,
+  100% {
+    opacity: 0.25;
+  }
+}
+/* Crisp comic-panel motion. 120–160ms, one decelerating curve. */
+@keyframes ink-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Consecutive OSD taps (volume up-up-up): re-stamp the block instead of
+ * replaying the fade-in from opacity 0, which blinked on every keypress. */
+@keyframes ink-stamp-pulse {
+  from {
+    transform: scale(0.96);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+/* Quick-panel storyboard rise. MUI Fade owns opacity; this owns the lift. */
+@keyframes ink-popover-rise {
+  from {
+    transform: translateY(6px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* Settings sub-page cross-cut: a short upward settle, never a full slide. */
+@keyframes ink-settings-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+/* Loading ticks (InkLoadingTicks): a three-beat press rhythm. */
+@keyframes ink-tick {
+  0%,
+  100% {
+    background: rgba(244, 241, 232, 0.35);
+  }
+  40% {
+    background: #ff2f4d;
+  }
+}
+
+@keyframes ink-sparkle {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.4) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1) rotate(90deg);
+  }
+}
+@keyframes ink-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Subtitle layer — content owned by src/player/subtitle/SubtitleRenderer.ts.
+ * The renderer only sets classes and these custom properties; everything the
+ * lines look like is here, so a settings change never rebuilds them.
+ *   --sub-size     px font size (the player's setting)
+ *   --sub-bottom   % of stage height between the bottom row and the edge
+ *   --sub-opacity  0..1
+ *   --sub-ar       source aspect ratio (w/h), places `\pos` signs on the
+ *                  picture instead of the letterbox
+ *   --sub-bar      px height of the bottom control bar (measured in
+ *                  Controls.tsx) — the lift clears exactly that much, plus a
+ *                  small gap. A percentage cannot: the bar's height is a
+ *                  constant while the stage is not.
+ * `.sub-lifted` moves the rows clear of the bottom controls / top bar.
+ * ------------------------------------------------------------------------- */
+.sub-root {
+  --sub-size: 30;
+  --sub-bottom: 6;
+  --sub-opacity: 1;
+  --sub-ar: 1.7778;
+  --sub-bar: 0px;
+  --sub-lift: 0px;
+  position: absolute;
+  inset: 0;
+  container-type: size;
+  font-family:
+    "Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  font-size: calc(var(--sub-size) * 1px);
+  font-weight: 700;
+  line-height: 1.35;
+  color: #f4f1e8;
+  opacity: var(--sub-opacity);
+}
+.sub-root.sub-lifted {
+  /* The bar's gradient starts at its top edge, so clearing the bar itself
+   * (not just its buttons) keeps the line off the dimmed band. */
+  --sub-lift: calc(var(--sub-bar) + 8px);
+  --sub-top-clear: 52px; /* the top bar is 48px */
+}
+.sub-row {
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.16em;
+}
+.sub-row-bottom {
+  bottom: calc(var(--sub-bottom) * 1%);
+  /* Match the control bar's 180ms lift instead of jumping. */
+  transition: bottom 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sub-lifted .sub-row-bottom {
+  /* Whichever is lower: the user's own margin, or clear of the bar. */
+  bottom: max(calc(var(--sub-bottom) * 1%), var(--sub-lift));
+}
+.sub-row-top {
+  top: calc(3% + var(--sub-top-clear, 0px));
+  transition: top 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.sub-row-middle {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.sub-line {
+  align-self: center;
+  max-width: 100%;
+  text-align: center;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* Balanced breaks: a long line wraps into two halves, not a long line and
+   * a single orphaned word. */
+  text-wrap: balance;
+}
+.sub-line[data-h="left"] {
+  align-self: flex-start;
+  text-align: left;
+}
+.sub-line[data-h="right"] {
+  align-self: flex-end;
+  text-align: right;
+}
+/* AI dual subtitles: the smaller original sits one step below the translation. */
+.sub-line[data-secondary="true"] {
+  color: rgba(244, 241, 232, 0.84);
+}
+/* Signs (`\pos`) live in a frame the size of the picture itself (object-fit:
+ * contain), so script coordinates land where the typesetter put them. */
+.sub-frame {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(100cqw, 100cqh * var(--sub-ar));
+  height: min(100cqh, 100cqw / var(--sub-ar));
+  transform: translate(-50%, -50%);
+}
+.sub-sign {
+  position: absolute;
+  max-width: 90%;
+  width: max-content;
+}
+/* Ink outline: a real stroke painted UNDER the fill (paint-order), plus a soft
+ * shadow for bright frames. Without paint-order the stroke eats into the
+ * glyphs; measured in Chromium: 5785 fill pixels kept vs 157. */
+.sub-root.sub-outline .sub-line {
+  -webkit-text-stroke: 0.14em #0a0a0c;
+  paint-order: stroke fill;
+  text-shadow: 0 0.04em 0.2em rgba(10, 10, 12, 0.85);
+}
+.sub-root:not(.sub-outline) .sub-line {
+  text-shadow: 0 0 0.12em rgba(10, 10, 12, 0.9);
+}
+
+/* ---------------------------------------------------------------------------
+ * Reduced motion — the stage stays legible and calm. Continuous drifts,
+ * sparkles, blinks and stamp transforms become static; opacity changes remain
+ * effectively instantaneous rather than looping forever.
+ * ------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .sub-row-bottom,
+  .sub-row-top {
+    transition: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Ink scrollbars — the native Windows light-grey bar looked pasted on.
+ * ------------------------------------------------------------------------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(244, 241, 232, 0.28) #0a0a0c;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: #0a0a0c;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(244, 241, 232, 0.28);
+  border-radius: 0;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #ff2f4d;
+}
+
+/* Keyboard focus: one sharp vermilion ring for every hand-written control. */
+button:focus-visible,
+[role="button"]:focus-visible,
+[role="slider"]:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #ff2f4d;
+  outline-offset: 2px;
+}

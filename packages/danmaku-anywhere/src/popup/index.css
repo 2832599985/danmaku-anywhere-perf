@@ -1,4 +1,31 @@
+/* Fallback canvas color before React mounts; PopupLayout's GlobalStyles
+   takes over with the active theme's canvas.backdrop afterwards.
+   These values mirror the neon-violet theme defaults: #0f172a (dark) and #f4f6fb (light).
+   Pre-React phase: theme is not loaded yet, so hardcoding these defaults is necessary. */
 body {
   margin: 0;
-  background: black;
+  color: white;
+  background-color: #0f172a;
+}
+
+@media (prefers-color-scheme: light) {
+  body {
+    color: rgba(0, 0, 0, 0.87);
+    background-color: #f4f6fb;
+  }
+}
+
+/* View Transition API — circular expand animation for theme switching */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  z-index: 9999;
 }

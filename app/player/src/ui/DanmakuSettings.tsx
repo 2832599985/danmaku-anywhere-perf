@@ -1,0 +1,693 @@
+import { Box, Button, Stack, Typography } from '@mui/material'
+import { alpha } from '@mui/material/styles'
+import { useState } from 'react'
+import { SOURCE_LABELS, type SourceId } from '@/danmaku/sources'
+import { getPlatform } from '@/platform'
+import {
+  LINE_HEIGHT_MAX,
+  LINE_HEIGHT_MIN,
+  LINE_HEIGHT_STEP,
+} from '@/player/danmaku/trackHeight'
+import { usePlayerStore } from '@/store/playerStore'
+import { DEFAULT_DANMAKU } from '@/store/settings'
+import {
+  hatchSx,
+  INK,
+  LINE_STRONG,
+  LINE_SUBTLE,
+  MONO,
+  PAPER,
+  VERMILION,
+} from '@/theme/theme'
+import { FilenameRulesSettings } from './FilenameRulesSettings'
+import { CloseIcon, PlaylistAddIcon, PlusIcon, TrashIcon } from './icons'
+import {
+  InkLabel,
+  InkLabeledSlider,
+  type InkOption,
+  InkSection,
+  InkSwitch,
+  InkToggleGroup,
+} from './ink'
+
+export const DanmakuSettings = () => {
+  const danmaku = usePlayerStore((s) => s.danmakuSettings)
+  const danmakuSource = usePlayerStore((s) => s.danmakuSource)
+  const updateDanmakuSettings = usePlayerStore((s) => s.updateDanmakuSettings)
+  const toggleDanmakuVisible = usePlayerStore((s) => s.toggleDanmakuVisible)
+  const clearDanmaku = usePlayerStore((s) => s.clearDanmaku)
+  const setDanmakuDialogOpen = usePlayerStore((s) => s.setDanmakuDialogOpen)
+
+  const [regexMode, setRegexMode] = useState(false)
+  const [filterInput, setFilterInput] = useState('')
+  const [editingFilterIdx, setEditingFilterIdx] = useState<number | null>(null)
+
+  const handleAddFilter = () => {
+    const trimmed = filterInput.trim()
+    if (!trimmed) return
+
+    const isDuplicate = danmaku.filters.some((f) => f.pattern === trimmed)
+    if (isDuplicate) {
+      setFilterInput('')
+      return
+    }
+
+    const newFilters = [
+      ...danmaku.filters,
+      { pattern: trimmed, isRegex: regexMode },
+    ]
+    updateDanmakuSettings({ filters: newFilters })
+    setFilterInput('')
+    setEditingFilterIdx(null)
+  }
+
+  const handleRemoveFilter = (idx: number) => {
+    const newFilters = danmaku.filters.filter((_, i) => i !== idx)
+    updateDanmakuSettings({ filters: newFilters })
+  }
+
+  const AREA_OPTIONS: InkOption<number>[] = [
+    { value: 25, label: '1/4', mono: true },
+    { value: 50, label: '半屏', mono: true },
+    { value: 80, label: '80%', mono: true },
+    { value: 100, label: '全屏', mono: true },
+  ]
+
+  return (
+    <Stack spacing={2.5}>
+      {/* Live preview window */}
+      <Box sx={{ border: LINE_STRONG, position: 'relative', ...hatchSx() }}>
+        <Box
+          data-danmaku-preview
+          sx={{
+            height: 96,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            overflow: 'hidden',
+            position: 'relative',
+            containerType: 'inline-size',
+          }}
+        >
+          {/* First scrolling comment — left:100% so the line sweeps R→L. */}
+          <Typography
+            sx={{
+              position: 'absolute',
+              left: '100%',
+              top: '10px',
+              fontSize: danmaku.fontSize * 0.6,
+              fontWeight: 700,
+              color: PAPER,
+              textShadow: `1px 1px 0 ${INK}, -1px -1px 0 ${INK}`,
+              whiteSpace: 'nowrap',
+              opacity: danmaku.opacity,
+              animation: `ink-dm-box ${7 / danmaku.speed}s linear infinite`,
+              animationDelay: `${-2 / danmaku.speed}s`,
+              '@media (prefers-reduced-motion: reduce)': {
+                animation: 'none',
+                left: 18,
+                right: 18,
+                whiteSpace: 'normal',
+              },
+            }}
+          >
+            预览：这就是当前样式
+          </Typography>
+
+          {/* Second scrolling comment */}
+          <Typography
+            sx={{
+              position: 'absolute',
+              left: '100%',
+              top: '40px',
+              fontSize: danmaku.fontSize * 0.6,
+              fontWeight: 700,
+              color: VERMILION,
+              textShadow: `1px 1px 0 ${INK}, -1px -1px 0 ${INK}`,
+              whiteSpace: 'nowrap',
+              opacity: danmaku.opacity,
+              animation: `ink-dm-box ${9 / danmaku.speed}s linear infinite`,
+              animationDelay: `${-3 / danmaku.speed}s`,
+              '@media (prefers-reduced-motion: reduce)': {
+                animation: 'none',
+                left: 18,
+                right: 18,
+                whiteSpace: 'normal',
+              },
+            }}
+          >
+            草 www
+          </Typography>
+        </Box>
+
+        {/* Bottom right label */}
+        <Typography
+          sx={{
+            position: 'absolute',
+            bottom: 4,
+            right: 6,
+            fontFamily: MONO,
+            fontSize: 9,
+            fontWeight: 700,
+            color: alpha(PAPER, 0.4),
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+          }}
+        >
+          LIVE PREVIEW
+        </Typography>
+      </Box>
+
+      {/* ---------------------------------------------------------------- */}
+      <InkSection zh="来源" en="SOURCE">
+        <Box sx={{ border: LINE_SUBTLE, padding: '12px' }}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+          >
+            <InkLabel zh="显示弹幕" en="VISIBLE · 快捷键 D" size={13} />
+            <InkSwitch
+              checked={danmaku.visible}
+              onChange={() => toggleDanmakuVisible()}
+              label="显示弹幕"
+            />
+          </Stack>
+          <Typography
+            sx={{
+              fontFamily: MONO,
+              fontSize: 10,
+              fontWeight: 700,
+              color: danmakuSource ? alpha(PAPER, 0.7) : alpha(PAPER, 0.4),
+              marginTop: '8px',
+              letterSpacing: '0.06em',
+            }}
+          >
+            {danmakuSource
+              ? `当前 · ${danmakuSource.label} · ${danmakuSource.count} 条`
+              : '当前没有挂载弹幕'}
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={1}>
+          <Button
+            fullWidth
+            variant="outlined"
+            startIcon={<PlaylistAddIcon size={16} />}
+            onClick={() => setDanmakuDialogOpen(true)}
+            sx={{
+              textTransform: 'none',
+              fontWeight: 700,
+              '&:focus-visible': {
+                outline: `2px solid ${VERMILION}`,
+                outlineOffset: '2px',
+              },
+            }}
+          >
+            {danmakuSource ? '换弹幕源…' : '挂载弹幕…'}
+          </Button>
+          <Button
+            fullWidth
+            variant="outlined"
+            color="error"
+            startIcon={<TrashIcon size={16} />}
+            disabled={!danmakuSource}
+            onClick={() => clearDanmaku()}
+            sx={{
+              textTransform: 'none',
+              fontWeight: 700,
+              '&:focus-visible': {
+                outline: `2px solid ${VERMILION}`,
+                outlineOffset: '2px',
+              },
+            }}
+          >
+            清除弹幕
+          </Button>
+        </Stack>
+      </InkSection>
+
+      {/* ---------------------------------------------------------------- */}
+      <InkSection zh="显示" en="DISPLAY">
+        <InkLabeledSlider
+          zh="不透明度"
+          en="OPACITY"
+          display={`${Math.round(danmaku.opacity * 100)}%`}
+          value={danmaku.opacity}
+          defaultValue={DEFAULT_DANMAKU.opacity}
+          min={0}
+          max={1}
+          step={0.05}
+          onChange={(v) => updateDanmakuSettings({ opacity: v })}
+        />
+
+        <InkLabeledSlider
+          zh="字号"
+          en="FONT SIZE"
+          display={`${danmaku.fontSize}px`}
+          value={danmaku.fontSize}
+          defaultValue={DEFAULT_DANMAKU.fontSize}
+          min={12}
+          max={48}
+          step={1}
+          onChange={(v) => updateDanmakuSettings({ fontSize: v })}
+        />
+
+        <InkLabeledSlider
+          zh="行距"
+          en="LINE HEIGHT"
+          display={`${danmaku.lineHeight.toFixed(2)}×`}
+          value={danmaku.lineHeight}
+          defaultValue={DEFAULT_DANMAKU.lineHeight}
+          min={LINE_HEIGHT_MIN}
+          max={LINE_HEIGHT_MAX}
+          step={LINE_HEIGHT_STEP}
+          onChange={(v) => updateDanmakuSettings({ lineHeight: v })}
+        />
+
+        <InkLabeledSlider
+          zh="滚动速度"
+          en="SPEED"
+          display={`${danmaku.speed.toFixed(1)}×`}
+          value={danmaku.speed}
+          defaultValue={DEFAULT_DANMAKU.speed}
+          min={0.5}
+          max={2}
+          step={0.1}
+          onChange={(v) => updateDanmakuSettings({ speed: v })}
+        />
+
+        <InkLabeledSlider
+          zh="时间偏移"
+          en="OFFSET"
+          display={`${danmaku.offset > 0 ? '+' : ''}${(danmaku.offset / 1000).toFixed(1)}s`}
+          value={danmaku.offset}
+          defaultValue={DEFAULT_DANMAKU.offset}
+          min={-10000}
+          max={10000}
+          step={100}
+          onChange={(v) => updateDanmakuSettings({ offset: v })}
+          centerTick
+        />
+
+        <InkLabeledSlider
+          zh="密度上限"
+          en="MAX ON SCREEN"
+          display={`${danmaku.maxOnScreen}`}
+          value={danmaku.maxOnScreen}
+          defaultValue={DEFAULT_DANMAKU.maxOnScreen}
+          min={50}
+          max={1000}
+          step={50}
+          onChange={(v) => updateDanmakuSettings({ maxOnScreen: v })}
+        />
+
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <InkLabel zh="显示区域" en="AREA · 屏幕高度占比" size={12} />
+          <InkToggleGroup
+            options={AREA_OPTIONS}
+            value={danmaku.area}
+            onChange={(v) => updateDanmakuSettings({ area: v })}
+            columns={4}
+          />
+        </Box>
+
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, 1fr)',
+            gap: '8px',
+          }}
+        >
+          <LabeledSwitch
+            label="允许重叠"
+            en="OVERLAP"
+            checked={danmaku.overlap > 0}
+            onChange={(next) =>
+              updateDanmakuSettings({ overlap: next ? 100 : 0 })
+            }
+          />
+          <LabeledSwitch
+            label="合并重复"
+            en="MERGE DUP"
+            checked={danmaku.mergeDuplicates}
+            onChange={(next) =>
+              updateDanmakuSettings({ mergeDuplicates: next })
+            }
+          />
+        </Box>
+      </InkSection>
+
+      {/* ---------------------------------------------------------------- */}
+      <InkSection zh="匹配" en="MATCHING">
+        <Box sx={{ border: LINE_SUBTLE, padding: '12px' }}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+          >
+            <InkLabel zh="在线匹配" en="AI + 多源" size={13} />
+            <InkSwitch
+              checked={danmaku.autoOnlineMatch}
+              onChange={(v) => updateDanmakuSettings({ autoOnlineMatch: v })}
+              label="在线匹配"
+            />
+          </Stack>
+          <Typography
+            sx={{
+              fontFamily: MONO,
+              fontSize: 10,
+              fontWeight: 700,
+              color: alpha(PAPER, 0.5),
+              marginTop: '8px',
+              letterSpacing: '0.04em',
+              lineHeight: 1.5,
+            }}
+          >
+            无同名弹幕文件时，用文件名解析番名/集数并自动挂载
+          </Typography>
+        </Box>
+
+        <Box sx={{ border: LINE_SUBTLE, padding: '12px' }}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+          >
+            <InkLabel zh="匹配失败自动弹窗" en="AUTO OPEN PICKER" size={13} />
+            <InkSwitch
+              checked={danmaku.autoOpenPickerOnMiss}
+              disabled={!danmaku.autoOnlineMatch}
+              onChange={(v) =>
+                updateDanmakuSettings({ autoOpenPickerOnMiss: v })
+              }
+              label="匹配失败自动弹窗"
+            />
+          </Stack>
+          <Typography
+            sx={{
+              fontFamily: MONO,
+              fontSize: 10,
+              fontWeight: 700,
+              color: alpha(PAPER, 0.5),
+              marginTop: '8px',
+              letterSpacing: '0.04em',
+              lineHeight: 1.5,
+            }}
+          >
+            自动匹配未命中时直接弹出弹幕源搜索框并聚焦输入框，省去手动点开
+          </Typography>
+        </Box>
+
+        <Box
+          sx={{
+            border: LINE_SUBTLE,
+            padding: '12px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
+        >
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            gap={1}
+          >
+            <InkLabel zh="弹幕渠道" en="SOURCES" size={13} />
+            {getPlatform().isTauri && (
+              <Stack direction="row" spacing={1}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => void getPlatform().sourceLogin('bilibili')}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  登录 B站
+                </Button>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => void getPlatform().sourceLogin('tencent')}
+                  sx={{ textTransform: 'none', fontWeight: 700 }}
+                >
+                  登录腾讯
+                </Button>
+              </Stack>
+            )}
+          </Stack>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+              gap: '8px',
+            }}
+          >
+            {(['ddp', 'bilibili', 'tencent'] as SourceId[]).map((source) => (
+              <LabeledSwitch
+                key={source}
+                label={SOURCE_LABELS[source]}
+                en={source.toUpperCase()}
+                checked={danmaku.sources[source]}
+                onChange={(next) =>
+                  updateDanmakuSettings({
+                    sources: { ...danmaku.sources, [source]: next },
+                  })
+                }
+              />
+            ))}
+          </Box>
+          <LabeledSwitch
+            label="合并多源弹幕"
+            en="MERGE SOURCES"
+            checked={danmaku.mergeSources}
+            onChange={(next) => updateDanmakuSettings({ mergeSources: next })}
+          />
+          <Typography
+            sx={{
+              fontFamily: MONO,
+              fontSize: 10,
+              fontWeight: 700,
+              color: alpha(PAPER, 0.5),
+              letterSpacing: '0.04em',
+              lineHeight: 1.5,
+            }}
+          >
+            合并开启时会同时挂载同一集在多个渠道的弹幕并去重；B站/腾讯仅桌面版可用
+          </Typography>
+        </Box>
+        <FilenameRulesSettings />
+      </InkSection>
+
+      {/* ---------------------------------------------------------------- */}
+      <InkSection
+        zh="屏蔽词"
+        en={`FILTER · ${danmaku.filters.length}`}
+        action={
+          <Box
+            component="button"
+            type="button"
+            aria-pressed={regexMode}
+            onClick={() => setRegexMode(!regexMode)}
+            sx={{
+              appearance: 'none',
+              cursor: 'pointer',
+              background: regexMode ? alpha(VERMILION, 0.16) : 'transparent',
+              border: `2px solid ${regexMode ? VERMILION : alpha(PAPER, 0.22)}`,
+              padding: '2px 7px',
+              color: regexMode ? VERMILION : alpha(PAPER, 0.5),
+              fontFamily: MONO,
+              fontSize: 10,
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              transition: 'color 0ms, border-color 0ms, background 0ms',
+              '&:hover': { color: PAPER, borderColor: PAPER },
+              '&:focus-visible': {
+                outline: `2px solid ${VERMILION}`,
+                outlineOffset: '2px',
+              },
+            }}
+          >
+            正则模式
+          </Box>
+        }
+      >
+        <Stack spacing={1}>
+          {/* Filter chips */}
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {danmaku.filters.map((filter, idx) => (
+              <Box
+                key={idx}
+                sx={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '4px 8px',
+                  border: LINE_SUBTLE,
+                  background: 'transparent',
+                  borderRadius: 0,
+                }}
+              >
+                <Typography
+                  sx={{
+                    fontFamily: filter.isRegex ? MONO : 'inherit',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: PAPER,
+                    maxWidth: 120,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {filter.pattern}
+                </Typography>
+                <Box
+                  component="button"
+                  type="button"
+                  aria-label={`删除屏蔽词 ${filter.pattern}`}
+                  onClick={() => handleRemoveFilter(idx)}
+                  sx={{
+                    appearance: 'none',
+                    cursor: 'pointer',
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    color: alpha(PAPER, 0.6),
+                    fontSize: 12,
+                    fontWeight: 700,
+                    transition: 'color 0ms',
+                    '&:hover': { color: VERMILION },
+                    '&:focus-visible': {
+                      outline: `2px solid ${VERMILION}`,
+                      outlineOffset: '1px',
+                    },
+                  }}
+                >
+                  <CloseIcon size={10} />
+                </Box>
+              </Box>
+            ))}
+
+            {/* Add filter chip or input */}
+            {editingFilterIdx === null ? (
+              <Box
+                component="button"
+                type="button"
+                onClick={() => setEditingFilterIdx(-1)}
+                sx={{
+                  appearance: 'none',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '4px 8px',
+                  border: `2px dashed ${alpha(PAPER, 0.3)}`,
+                  background: 'transparent',
+                  color: alpha(PAPER, 0.5),
+                  fontFamily: MONO,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  transition: 'border 0ms, color 0ms',
+                  '&:hover': {
+                    borderColor: PAPER,
+                    color: PAPER,
+                  },
+                }}
+              >
+                <PlusIcon size={11} />
+                添加
+              </Box>
+            ) : (
+              <Box sx={{ display: 'flex', gap: '4px' }}>
+                <Box
+                  component="input"
+                  type="text"
+                  value={filterInput}
+                  onChange={(e) => setFilterInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleAddFilter()
+                    if (e.key === 'Escape') {
+                      setFilterInput('')
+                      setEditingFilterIdx(null)
+                    }
+                  }}
+                  autoFocus
+                  placeholder="输入..."
+                  sx={{
+                    appearance: 'none',
+                    padding: '4px 6px',
+                    border: LINE_SUBTLE,
+                    background: INK,
+                    color: PAPER,
+                    fontFamily: MONO,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    outline: 'none',
+                    minWidth: 100,
+                    '&:focus': {
+                      borderColor: VERMILION,
+                    },
+                  }}
+                />
+                <Box
+                  component="button"
+                  type="button"
+                  onClick={handleAddFilter}
+                  sx={{
+                    appearance: 'none',
+                    cursor: 'pointer',
+                    padding: '4px 8px',
+                    border: LINE_SUBTLE,
+                    background: alpha(PAPER, 0.1),
+                    color: PAPER,
+                    fontSize: 11,
+                    fontWeight: 700,
+                    transition:
+                      'background-color 0ms, color 0ms, border-color 0ms',
+                    '&:hover': {
+                      background: PAPER,
+                      color: INK,
+                    },
+                  }}
+                >
+                  <PlusIcon size={11} />
+                </Box>
+              </Box>
+            )}
+          </Box>
+        </Stack>
+      </InkSection>
+    </Stack>
+  )
+}
+
+/** Bordered card: text label on the left, ON/OFF pill on the right. */
+const LabeledSwitch = ({
+  label,
+  en,
+  checked,
+  onChange,
+}: {
+  label: string
+  en: string
+  checked: boolean
+  onChange: (next: boolean) => void
+}) => (
+  <Box
+    sx={{
+      border: `2px solid ${checked ? VERMILION : 'transparent'}`,
+      background: checked ? alpha(VERMILION, 0.1) : 'transparent',
+      boxShadow: checked ? 'none' : `inset 0 0 0 1px ${alpha(PAPER, 0.22)}`,
+      padding: '10px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 1,
+      transition: 'border-color 0ms, background-color 0ms, box-shadow 0ms',
+    }}
+  >
+    <InkLabel zh={label} en={en} size={12} />
+    <InkSwitch checked={checked} onChange={onChange} label={label} />
+  </Box>
+)

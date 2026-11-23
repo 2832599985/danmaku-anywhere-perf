@@ -5,6 +5,7 @@ import type {
   GenericEpisodeLite,
   Season,
 } from '@danmaku-anywhere/danmaku-converter'
+import { useEventCallback } from '@mui/material'
 import { useTreeViewApiRef } from '@mui/x-tree-view/hooks'
 import { RichTreeView } from '@mui/x-tree-view/RichTreeView'
 import {
@@ -13,8 +14,11 @@ import {
   type SyntheticEvent,
   useImperativeHandle,
   useMemo,
+  useRef,
   useState,
 } from 'react'
+import { BOOKMARK_REFRESH_TTL_MS } from '@/common/bookmark/constants'
+import { useBookmarkRefresh } from '@/common/bookmark/queries/useBookmarkRefresh'
 import {
   DanmakuTreeContext,
   type DanmakuTreeContextMenuState,
@@ -23,7 +27,9 @@ import {
 import type { ExtendedTreeItem } from '@/common/components/DanmakuSelector/tree/ExtendedTreeItem'
 import { DanmakuTreeItem } from '@/common/components/DanmakuSelector/tree/items/DanmakuTreeItem'
 import { useDanmakuTree } from '@/common/components/DanmakuSelector/tree/useDanmakuTree'
+import { usePersistedExpandedItems } from '@/common/components/DanmakuSelector/tree/usePersistedExpandedItems'
 import { isNotCustom } from '@/common/danmaku/utils'
+import { useNamingRules } from '@/common/options/localMatchingRule/useLocalMatchingRule'
 import { EmptyDanmakuTree } from '../components/EmptyDanmakuTree'
 
 export interface DanmakuSelection {
@@ -139,9 +145,46 @@ export const DanmakuTree = ({
   const [contextMenu, setContextMenu] =
     useState<DanmakuTreeContextMenuState | null>(null)
 
-  const { treeItems, treeItemMap } = useDanmakuTree(filter, typeFilter)
+  const { treeItems, treeItemMap, bookmarks } = useDanmakuTree(
+    filter,
+    typeFilter
+  )
 
   const apiRef = useTreeViewApiRef()
+  const bookmarkRefresh = useBookmarkRefresh({ silent: true })
+  const refreshedRef = useRef(new Set<number>())
+  const { expandedItems, handleExpandedItemsChange: persistExpandedItems } =
+    usePersistedExpandedItems()
+
+  // Filter out stale IDs from deleted seasons/folders
+  const validExpandedItems = useMemo(() => {
+    return expandedItems.filter((id) => treeItemMap.has(id))
+  }, [expandedItems, treeItemMap])
+
+  const bookmarkBySeasonId = useMemo(() => {
+    return new Map(bookmarks.map((b) => [b.seasonId, b]))
+  }, [bookmarks])
+
+  const handleExpandedItemsChange = useEventCallback(
+    (_event: SyntheticEvent | null, itemIds: string[]) => {
+      persistExpandedItems(itemIds)
+
+      for (const itemId of itemIds) {
+        const item = treeItemMap.get(itemId)
+        if (!item || item.kind !== 'season' || !item.bookmarked) {
+          continue
+        }
+        const bookmark = bookmarkBySeasonId.get(item.data.id)
+        if (!bookmark || refreshedRef.current.has(bookmark.id)) {
+          continue
+        }
+        if (Date.now() - bookmark.lastRefreshed > BOOKMARK_REFRESH_TTL_MS) {
+          refreshedRef.current.add(bookmark.id)
+          bookmarkRefresh.mutate(bookmark.id)
+        }
+      }
+    }
+  )
 
   useImperativeHandle(
     ref,
@@ -196,6 +239,13 @@ export const DanmakuTree = ({
     }
   }
 
+  const { rules: namingRules } = useNamingRules()
+
+  const namingRuleByFolderPath = useMemo(
+    () => new Map(namingRules.map((rule) => [rule.folderPath, rule])),
+    [namingRules]
+  )
+
   const contextValue = useMemo(
     () => ({
       itemMap: treeItemMap,
@@ -204,8 +254,16 @@ export const DanmakuTree = ({
       isMultiSelect: multiselect,
       contextMenu,
       setContextMenu,
+      namingRuleByFolderPath,
     }),
-    [treeItemMap, apiRef, onViewDanmaku, multiselect, contextMenu]
+    [
+      treeItemMap,
+      apiRef,
+      onViewDanmaku,
+      multiselect,
+      contextMenu,
+      namingRuleByFolderPath,
+    ]
   )
 
   if (treeItems.length === 0) {
@@ -218,11 +276,14 @@ export const DanmakuTree = ({
         items={treeItems}
         multiSelect={multiselect}
         checkboxSelection={multiselect}
+        expandedItems={validExpandedItems}
         selectedItems={
           multiselect ? selectedNodeIds : selectedNodeIds[0] || null
         }
         selectionPropagation={selectionPropagation}
         onSelectedItemsChange={handleSelectedItemsChange}
+        onExpandedItemsChange={handleExpandedItemsChange}
+        isItemSelectionDisabled={(item) => item.kind === 'stub'}
         slots={{ item: DanmakuTreeItem }}
         apiRef={apiRef}
       />

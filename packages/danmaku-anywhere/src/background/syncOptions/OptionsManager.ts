@@ -24,7 +24,7 @@ export class OptionsManager {
 
   setup() {
     chrome.runtime.onInstalled.addListener(async (details) => {
-      this.tryUpgradeOptions()
+      await this.tryUpgradeOptions()
 
       if (details.reason === 'update') {
         await this.extensionOptionsService.update({ showReleaseNotes: true })

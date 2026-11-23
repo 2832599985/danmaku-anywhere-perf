@@ -1,4 +1,5 @@
 import { SvgIcon } from '@mui/material'
+import { BRAND_COLORS } from '@/common/theme/brandColors'
 
 export const CNFlagIcon = () => {
   return (
@@ -16,8 +17,8 @@ export const CNFlagIcon = () => {
         xmlSpace="preserve"
       >
         <circle
-          fill="#DC2E27"
-          stroke="#000000"
+          fill={BRAND_COLORS.cnFlag.red}
+          stroke={BRAND_COLORS.cnFlag.black}
           strokeMiterlimit="10"
           cx="157"
           cy="157"
@@ -25,33 +26,33 @@ export const CNFlagIcon = () => {
         />
         <path
           id="path3374_1_"
-          fill="#F7DC15"
+          fill={BRAND_COLORS.cnFlag.yellow}
           d="M191.928,83.868l7.479,12.46l-9.544,10.964l14.164-3.26l7.478,12.459l1.279-14.476
-	l14.159-3.26l-13.371-5.685l1.271-14.479l-9.538,10.964L191.928,83.868z"
+			l14.159-3.26l-13.371-5.685l1.271-14.479l-9.538,10.964L191.928,83.868z"
         />
         <path
           id="path3433_1_"
-          fill="#F7DC15"
+          fill={BRAND_COLORS.cnFlag.yellow}
           d="M107.009,97l-13.46,41.46H49.94l35.271,25.628L71.743,205.54l35.276-25.616l35.265,25.612
-	l-13.473-41.444l35.264-25.64l-43.6,0.012L107.009,97z"
+			l-13.473-41.444l35.264-25.64l-43.6,0.012L107.009,97z"
         />
         <path
           id="path3447_1_"
-          fill="#F7DC15"
+          fill={BRAND_COLORS.cnFlag.yellow}
           d="M238.217,119.048l2.061,14.38l-13.047,6.399l14.314,2.492L243.6,156.7l6.797-12.844
-	l14.313,2.488l-10.12-10.424l6.788-12.848l-13.045,6.404L238.217,119.048z"
+			l14.313,2.488l-10.12-10.424l6.788-12.848l-13.045,6.404L238.217,119.048z"
         />
         <path
           id="path3453_1_"
-          fill="#F7DC15"
+          fill={BRAND_COLORS.cnFlag.yellow}
           d="M214.076,218.288L205,229.636l-13.6-5.128l7.982,12.141l-9.074,11.344l14.012-3.84
-	l7.984,12.132l0.672-14.507l14.012-3.85l-13.586-5.123L214.076,218.288z"
+			l7.984,12.132l0.672-14.507l14.012-3.85l-13.586-5.123L214.076,218.288z"
         />
         <path
           id="path3475_1_"
-          fill="#F7DC15"
+          fill={BRAND_COLORS.cnFlag.yellow}
           d="M246.305,177.012l-3.99,13.973l-14.527,0.521l12.057,8.116l-3.99,13.968l11.442-8.956
-	l12.054,8.108l-4.984-13.644l11.439-8.965l-14.523,0.524L246.305,177.012z"
+			l12.054,8.108l-4.984-13.644l11.439-8.965l-14.523,0.524L246.305,177.012z"
         />
       </svg>
     </SvgIcon>

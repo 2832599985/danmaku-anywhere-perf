@@ -80,8 +80,18 @@ const fetchDanDanPlay = async <T extends ZodType>(
 
   // parse query early
   if (options.requestSchema?.query) {
-    options.query = options.requestSchema.query.parse(options.query)
-    options.requestSchema.query = undefined
+    try {
+      options.query = options.requestSchema.query.parse(options.query)
+    } catch (e) {
+      // schema validation throws, it must not escape the Result boundary
+      return err(
+        new InputError(
+          `Invalid request for ${options.path}: ${
+            e instanceof Error ? e.message : String(e)
+          }`
+        )
+      )
+    }
   }
   // append query to path
   let path = options.path
@@ -97,8 +107,12 @@ const fetchDanDanPlay = async <T extends ZodType>(
       )
     }
     return fetchData<T>({
-      url: `${context.baseUrl}${options.path}`, // use unmodified path
+      url: `${context.baseUrl}${path}`,
       ...options,
+      // query was already parsed and baked into `path`, clear to prevent
+      // fetchData from double-appending query params or re-parsing
+      query: undefined,
+      requestSchema: undefined,
       headers,
     })
   }
@@ -110,6 +124,9 @@ const fetchDanDanPlay = async <T extends ZodType>(
     query: {
       path,
     },
+    // requestSchema.query was already applied above; clear it so fetchData's
+    // validateRequest doesn't re-parse the proxy query and strip the `path` key
+    requestSchema: undefined,
     headers,
     isDaRequest: true,
   })
@@ -182,10 +199,13 @@ export const commentGetComment = async (
   )
 
   if (!result.success) return result
-  return ok(result.data.comments)
+  const data = result.data
+
+  return ok(data.comments)
 }
 
 export const commentSendComment = async (
+  episodeId: number,
   request: SendCommentRequest,
   context?: DanDanPlayQueryContext
 ): Promise<
@@ -193,7 +213,7 @@ export const commentSendComment = async (
 > => {
   const result = await fetchDanDanPlay(
     {
-      path: '/v2/search/episodes',
+      path: `/v2/comment/${episodeId.toString()}`,
       body: request,
       responseSchema: zSendCommentResponseV2,
       requestSchema: {
@@ -247,7 +267,25 @@ export const commentGetCommentManualWithRelated = async (
   )
 
   if (!commentsResult.success) return commentsResult
-  const comments = commentsResult.data
+
+  // De-dupe by a stable key. Some servers may return overlapping comments across
+  // base/related sources or duplicated related URLs.
+  const keyOf = (comment: CommentData) => {
+    // `cid` is optional and may differ across endpoints for the same payload.
+    // Using only `p`+`m` yields better de-dupe across base/related sources.
+    return `${comment.p}\u0000${comment.m}`
+  }
+
+  const seen = new Set<string>()
+  const baseComments: CommentData[] = []
+  for (const comment of commentsResult.data) {
+    const key = keyOf(comment)
+    if (seen.has(key)) continue
+    seen.add(key)
+    baseComments.push(comment)
+  }
+
+  const comments = baseComments
 
   if (params.withRelated) {
     try {
@@ -268,10 +306,15 @@ export const commentGetCommentManualWithRelated = async (
               // if the shift is not 0, we need to adjust the time of the comments
               if (entry.shift !== 0) {
                 const options = parseCommentEntityP(comment.p)
-                options.time += entry.shift
+                options.time = Math.max(0, options.time + entry.shift)
                 comment.p = commentOptionsToString(options)
               }
 
+              const key = keyOf(comment)
+              if (seen.has(key)) {
+                return
+              }
+              seen.add(key)
               comments.push(comment)
             })
           }

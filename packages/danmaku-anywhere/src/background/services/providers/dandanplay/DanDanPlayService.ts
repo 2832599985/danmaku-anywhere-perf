@@ -8,14 +8,14 @@ import type {
 } from '@danmaku-anywhere/danmaku-converter'
 import type { DanmakuProviderError } from '@danmaku-anywhere/danmaku-provider'
 import * as danDanPlay from '@danmaku-anywhere/danmaku-provider/ddp'
+import { findEpisodeByNumber } from '@danmaku-anywhere/media-parser'
 import type { Result } from '@danmaku-anywhere/result'
-import type { DanmakuFetchRequest } from '@/common/danmaku/dto'
+import type { DanmakuFetchByMeta } from '@/common/danmaku/dto'
 import { DanmakuSourceType } from '@/common/danmaku/enums'
 import { assertProviderType, isProvider } from '@/common/danmaku/utils'
 import type { ILogger } from '@/common/Logger'
 import type { DanDanPlayProviderConfig } from '@/common/options/providerConfig/schema'
 import { tryCatch } from '@/common/utils/tryCatch'
-import { findEpisodeByNumber } from '../common/findEpisodeByNumber'
 import type {
   IDanmakuProvider,
   OmitSeasonId,
@@ -111,7 +111,7 @@ export class DanDanPlayService implements IDanmakuProvider {
     })
   }
 
-  async getDanmaku(request: DanmakuFetchRequest): Promise<CommentEntity[]> {
+  async getDanmaku(request: DanmakuFetchByMeta): Promise<CommentEntity[]> {
     const { meta, options = {} } = request
     const { season, ...rest } = meta
     assertProviderType(season, DanmakuSourceType.DanDanPlay)
@@ -156,7 +156,7 @@ export class DanDanPlayService implements IDanmakuProvider {
     return comments
   }
 
-  async preloadNextEpisode(request: DanmakuFetchRequest) {
+  async preloadNextEpisode(request: DanmakuFetchByMeta) {
     const meta = request.meta
     assertProviderType(meta, DanmakuSourceType.DanDanPlay)
 
@@ -240,7 +240,11 @@ export class DanDanPlayService implements IDanmakuProvider {
 
     this.logger.debug('Fetching danmaku', meta, paramsCopy)
 
-    const commentsRes = await danDanPlay.commentGetComment(
+    // NOTE:
+    // Some DanDanPlay servers may return related/third-party comments without applying the
+    // required time shift, which makes a subset of comments appear minutes off. Fetching
+    // related items manually allows us to apply `shift` precisely.
+    const commentsRes = await danDanPlay.commentGetCommentManualWithRelated(
       providerIds.episodeId,
       paramsCopy,
       this.context
@@ -284,9 +288,14 @@ export class DanDanPlayService implements IDanmakuProvider {
   }
 
   async sendComment(
+    episodeId: number,
     request: danDanPlay.SendCommentRequest
   ): Promise<Result<{ cid: number }, DanmakuProviderError>> {
-    return danDanPlay.commentSendComment(request)
+    const res = await danDanPlay.commentSendComment(episodeId, request)
+    if (!res.success) return res
+    // commentSendComment handles inner API error, so data is always the success variant
+    const { cid } = res.data as { cid: number }
+    return { success: true, data: { cid } }
   }
 
   async register(

@@ -1,7 +1,8 @@
-import { zValidator } from '@hono/zod-validator'
 import { HTTPException } from 'hono/http-exception'
+import { describeRoute, resolver, validator } from 'hono-openapi'
 import z from 'zod'
 import { factory } from '@/factory'
+import { requireAuth } from '@/middleware/requireAuth'
 import * as schemas from './schemas'
 import * as service from './service'
 
@@ -9,7 +10,18 @@ export const policyRouter = factory.createApp()
 
 policyRouter.get(
   '/',
-  zValidator('query', schemas.listQuerySchema),
+  describeRoute({
+    description: 'List policies',
+    responses: {
+      200: {
+        description: 'Successful response',
+        content: {
+          'application/json': { schema: resolver(schemas.listResponseSchema) },
+        },
+      },
+    },
+  }),
+  validator('query', schemas.listQuerySchema),
   async function list(c) {
     const { keyword, domain, tag, page, limit } = c.req.valid('query')
     const db = c.get('createDb')()
@@ -37,7 +49,20 @@ policyRouter.get(
 
 policyRouter.post(
   '/',
-  zValidator('json', schemas.uploadSchema),
+  describeRoute({
+    description: 'Create policy',
+    responses: {
+      200: {
+        description: 'Successful response',
+        content: {
+          'application/json': {
+            schema: resolver(schemas.createResponseSchema),
+          },
+        },
+      },
+    },
+  }),
+  validator('json', schemas.uploadSchema),
   async function create(c) {
     const data = c.req.valid('json')
     const db = c.get('createDb')()
@@ -56,7 +81,20 @@ policyRouter.post(
 
 policyRouter.get(
   '/domain',
-  zValidator('query', z.object({ domain: schemas.zDomain })),
+  describeRoute({
+    description: 'Get policies by domain',
+    responses: {
+      200: {
+        description: 'Successful response',
+        content: {
+          'application/json': {
+            schema: resolver(schemas.getByDomainResponseSchema),
+          },
+        },
+      },
+    },
+  }),
+  validator('query', z.object({ domain: schemas.zDomain })),
   async function getByDomain(c) {
     const { domain } = c.req.valid('query')
     const db = c.get('createDb')()
@@ -75,8 +113,22 @@ policyRouter.get(
 
 policyRouter.post(
   '/:id/vote',
-  zValidator('json', z.object({ type: z.enum(['up', 'down']) })),
-  zValidator('param', z.object({ id: z.string() })),
+  describeRoute({
+    description: 'Vote on policy',
+    responses: {
+      200: {
+        description: 'Successful response',
+        content: {
+          'application/json': {
+            schema: resolver(schemas.successResponseSchema),
+          },
+        },
+      },
+    },
+  }),
+  requireAuth(),
+  validator('json', z.object({ type: z.enum(['up', 'down']) })),
+  validator('param', z.object({ id: z.string() })),
   async function vote(c) {
     const configId = c.req.param('id')
     const { type } = c.req.valid('json')
@@ -96,7 +148,20 @@ policyRouter.post(
 
 policyRouter.post(
   '/:id/download',
-  zValidator('param', z.object({ id: z.string() })),
+  describeRoute({
+    description: 'Track policy download',
+    responses: {
+      200: {
+        description: 'Successful response',
+        content: {
+          'application/json': {
+            schema: resolver(schemas.successResponseSchema),
+          },
+        },
+      },
+    },
+  }),
+  validator('param', z.object({ id: z.string() })),
   async function trackDownload(c) {
     const configId = c.req.param('id')
     const db = c.get('createDb')()

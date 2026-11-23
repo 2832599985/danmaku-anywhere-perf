@@ -2,6 +2,7 @@ import { err, ok, type Result } from '@danmaku-anywhere/result'
 import type { ZodType, z } from 'zod'
 import type { DanmakuProviderError } from '../../exceptions/BaseError.js'
 import { HttpException } from '../../exceptions/HttpException.js'
+import { InputError } from '../../exceptions/InputError.js'
 import { ResponseParseException } from '../../exceptions/ResponseParseException.js'
 import { getApiStore } from '../../shared/store.js'
 import { tryCatch } from './tryCatch.js'
@@ -18,6 +19,7 @@ export interface FetchOptions<T extends ZodType> {
   responseType?: 'json' | 'text'
   responseSchema: T
   headers?: Record<string, string>
+  credentials?: RequestCredentials
   // if this request goes to the danmaku-anywhere backend
   isDaRequest?: boolean
   getErrorMessage?: (res: Response) => Promise<string | undefined>
@@ -35,7 +37,8 @@ const validateRequest = <T extends FetchOptions<any>>(options: T) => {
   if (requestSchema?.body) {
     clone.body = requestSchema.body.parse(body)
   }
-  if (requestSchema?.query && query) {
+  if (requestSchema?.query) {
+    // parse even when query is undefined so schema defaults are applied
     clone.query = requestSchema.query.parse(query)
   }
 
@@ -51,15 +54,28 @@ const createUrl = (url: string, query?: Record<string, unknown>) => {
 
 async function defaultGetErrorMessage(res: Response) {
   if (res.headers.has('X-Error-Message')) {
-    return res.headers.get('X-Error-Message')
+    return res.headers.get('X-Error-Message') ?? undefined
   }
-  return null
+  return undefined
 }
 
 export const fetchData = async <OutSchema extends ZodType>(
   options: FetchOptions<OutSchema>
 ): Promise<Result<z.output<OutSchema>, DanmakuProviderError>> => {
-  const validatedOptions = validateRequest(options)
+  let validatedOptions: FetchOptions<OutSchema>
+
+  try {
+    validatedOptions = validateRequest(options)
+  } catch (e) {
+    // request schema validation throws, it must not escape the Result boundary
+    return err(
+      new InputError(
+        `Invalid request for ${options.url}: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      )
+    )
+  }
 
   const {
     url,
@@ -67,6 +83,7 @@ export const fetchData = async <OutSchema extends ZodType>(
     body,
     responseSchema,
     headers = {},
+    credentials,
     getErrorMessage,
   } = validatedOptions
 
@@ -95,6 +112,7 @@ export const fetchData = async <OutSchema extends ZodType>(
     const res = await fetch(finalUrl, {
       headers: { ...headers },
       method,
+      credentials,
       body: body ? JSON.stringify(body) : undefined,
     })
 

@@ -5,10 +5,11 @@ export interface SkipButtonProps {
   target: SkipTarget
   onClick: () => void
   onClose: () => void
+  hotkeyHint?: string
 }
 
 export function SkipButton(props: SkipButtonProps) {
-  const { target, onClick, onClose } = props
+  const { target, onClick, onClose, hotkeyHint } = props
 
   const [isExiting, setIsExiting] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -35,6 +36,9 @@ export function SkipButton(props: SkipButtonProps) {
       <div className={alertClassName}>
         <button type="button" className="da-text-button" onClick={onClick}>
           {`空降至 ${formatTimestamp(target.endTime)}`}
+          {hotkeyHint && (
+            <span className="da-hotkey-hint">{` [${hotkeyHint}]`}</span>
+          )}
         </button>
         <div className="da-actions">
           <button

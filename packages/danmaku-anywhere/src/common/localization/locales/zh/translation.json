@@ -49,12 +49,33 @@
     "matchingStrategy": {
       "local": "本地匹配",
       "mapping": "映射匹配",
+      "mediaServer": "媒体服务器",
       "search": "搜索匹配"
     },
     "numericEpisode": "第{{episode}}集",
     "numericSeason": "第{{season}}季",
     "refreshMetadata": "刷新元数据",
     "title": "标题"
+  },
+  "autoOffset": {
+    "applied": "已自动校准偏移：{{offset}}ms",
+    "calibrateTooltip": "自动校准弹幕时间偏移",
+    "error": "自动校准失败",
+    "noCalibrationNeeded": "无需校准时间偏移"
+  },
+  "bookmark": {
+    "add": "收藏",
+    "refreshEpisodes": "刷新剧集",
+    "remove": "取消收藏"
+  },
+  "cheatSheet": {
+    "group": {
+      "danmaku": "弹幕控制",
+      "panel": "面板控制",
+      "video": "视频控制"
+    },
+    "hint": "按住 ? 显示，松开关闭",
+    "title": "快捷键一览"
   },
   "common": {
     "acknowledge": "知道了",
@@ -63,6 +84,7 @@
     "apply": "应用",
     "autoSave": "自动保存",
     "cancel": "取消",
+    "clear": "清空",
     "close": "关闭",
     "confirm": "确认",
     "confirmDeleteMessage": "确定要删除 \"{{name}}\" 吗？",
@@ -74,7 +96,9 @@
     "delete": "删除",
     "deleted": "已删除",
     "docs": "文档",
+    "done": "完成",
     "duration": {
+      "day_one": "天",
       "day_other": "天"
     },
     "enable": "启用",
@@ -90,10 +114,12 @@
     "pip": "画中画",
     "regexShort": "正则",
     "reset": "重置",
+    "restore": "恢复",
     "save": "保存",
     "saved": "已保存",
     "saving": "正在保存...",
     "search": "搜索",
+    "selectAll": "全选",
     "success": "成功",
     "test": "测试",
     "time": "时间",
@@ -101,6 +127,10 @@
     "value": "值",
     "valueJson": "JSON值",
     "viewDocs": "查看文档"
+  },
+  "community": {
+    "inputPlaceholder": "发个弹幕吧~",
+    "title": "社区弹幕"
   },
   "configPage": {
     "copyShareCode": "复制分享码",
@@ -123,6 +153,11 @@
       "mediaQuery": "视频节点",
       "name": "名称",
       "pattern": "模式",
+      "preferredProviders": {
+        "description": "点击添加弹幕源并排序。设置后，自动匹配时将仅使用这些弹幕源。",
+        "reset": "重置为默认",
+        "title": "弹幕源优先级"
+      },
       "step": {
         "ai": "编辑AI",
         "automation": "自动化",
@@ -135,6 +170,10 @@
       "tooPermissive": "匹配模式过于宽松，AI功能将被禁用",
       "urlPatterns": "URL 模式"
     },
+    "exportConfig": {
+      "error": "导出配置失败",
+      "success": "配置已导出"
+    },
     "goCreate": "创建一个",
     "import": {
       "error": "导入失败：{{message}}",
@@ -144,10 +183,25 @@
       "presets": "预设",
       "success": "导入成功"
     },
+    "importConfig": {
+      "error": "导入配置失败",
+      "success": "配置已导入"
+    },
     "importShareCode": "导入分享码",
     "importShareCodePlaceholder": "粘贴分享码",
     "name": "装填配置",
-    "noConfigs": "这里还没有配置..."
+    "noConfigs": "这里还没有配置...",
+    "templates": {
+      "alreadyImported": "已导入",
+      "browse": "浏览模板",
+      "categoryChinese": "国内站点",
+      "categoryInternational": "国际站点",
+      "categorySelfHosted": "自建服务",
+      "description": "导入常用视频站点的预配置模板。自建服务需要在导入后手动设置URL模式。",
+      "imported": "已导入模板：{{name}}",
+      "importError": "导入模板失败",
+      "title": "站点模板"
+    }
   },
   "configs": {
     "alert": {
@@ -159,16 +213,26 @@
   },
   "danmaku": {
     "alert": {
+      "assExported": "导出ASS成功",
+      "assExportError": "导出ASS失败：{{message}}",
       "deleted": "弹幕已删除",
       "deleteError": "弹幕删除失败：{{message}}",
       "exported": "导出成功",
       "exportError": "导出失败：{{message}}",
       "fetchError": "获取弹幕失败：{{message}}",
-      "frameListEmpty": "浏览器返回的Frame列表为空，这可能是浏览器的bug。",
+      "merged_one": "弹幕已合并：{{name}} (总计: {{count}})",
+      "merged_other": "弹幕已合并：{{name}} (总计: {{count}})",
+      "mergedMultiple_one": "已合并{{count}}个来源 (总计: {{total}})",
+      "mergedMultiple_other": "已合并{{count}}个来源 (总计: {{total}})",
+      "mounted_one": "弹幕已装填：{{name}} ({{count}})",
       "mounted_other": "弹幕已装填：{{name}} ({{count}})",
+      "mountedMultiple_one": "已装填{{count}}个多选弹幕",
       "mountedMultiple_other": "已装填{{count}}个多选弹幕",
       "mountError": "装填弹幕失败：{{message}}",
-      "multipleFrames": "检测到多个含有视频的Frame",
+      "multiSourceMerged": "已合并多源弹幕：{{sources}}",
+      "nextEpisodePreloaded": "下一集弹幕已预加载",
+      "nextEpisodeReady": "下一集弹幕已就绪",
+      "refreshed_one": "弹幕已刷新：{{name}} ({{count}})",
       "refreshed_other": "弹幕已刷新：{{name}} ({{count}})",
       "refreshingDanmaku": "正在刷新弹幕",
       "unmounted": "弹幕已卸载",
@@ -177,17 +241,29 @@
     },
     "backup": "导出备份",
     "commentContent": "弹幕内容",
+    "commentCounted_one": "{{count}}条弹幕",
     "commentCounted_other": "{{count}}条弹幕",
+    "commentCountedEpisodes_one": "{{count}}集",
+    "commentCountedEpisodes_other": "{{count}}集",
     "disable": "隐藏弹幕",
     "enable": "显示弹幕",
+    "exportAss": "导出ASS",
     "exportBackup": "导出备份",
     "exportXml": "导出XML",
     "local": "本地弹幕",
+    "merge": {
+      "mergeWithCurrent": "合并到当前弹幕",
+      "sourceCount_one": "已加载{{count}}个弹幕来源",
+      "sourceCount_other": "已加载{{count}}个弹幕来源",
+      "sources": "已合并来源",
+      "totalMerged_other": "总计: {{count}}条弹幕"
+    },
     "mountShort": "装填",
     "noComments": "弹幕列表为空",
     "refresh": "刷新弹幕",
     "type": {
       "bilibili": "B站",
+      "custom": "本地",
       "danDanPlay": "弹弹Play",
       "macCms": "MacCMS",
       "tencent": "腾讯"
@@ -198,16 +274,33 @@
   "danmakuFilter": {
     "activeFilters": "生效的屏蔽词",
     "addFilterPattern": "添加屏蔽词",
-    "description": "通过关键字或正则屏蔽不需要的弹幕",
+    "colorFilter": {
+      "addColor": "添加",
+      "blacklistColors": "屏蔽的颜色",
+      "enabled": "启用颜色过滤",
+      "noColors": "没有屏蔽的颜色",
+      "onlyWhite": "仅显示白色弹幕",
+      "title": "颜色过滤"
+    },
+    "description": "通过关键字、正则、弹幕类型或颜色屏蔽不需要的弹幕",
     "enterFilterPattern": "输入屏蔽词，正则以 \"/\" 开头和结尾",
     "enterFilterPatternPlaceholder": "输入屏蔽词",
     "enterTestText": "输入测试文本",
+    "modeFilter": {
+      "bottom": "底部",
+      "ltr": "从左到右",
+      "rtl": "从右到左 (滚动)",
+      "title": "弹幕类型过滤",
+      "top": "顶部"
+    },
     "noActiveFilters": "没有生效的屏蔽词",
     "testFilterPatterns": "测试屏蔽词",
     "testResultExclude": "这段文本将被过滤",
     "testResultInclude": "这段文本不会被过滤",
+    "textFilter": "文字过滤",
     "validation": {
       "duplicate": "重复的屏蔽词",
+      "invalidColor": "无效的颜色格式，请使用十六进制如 #ff0000",
       "invalidRegex": "无效的正则 {{message}}",
       "patternEmpty": "屏蔽词不能为空"
     }
@@ -216,6 +309,7 @@
     "animeList": "剧集列表",
     "backupAll": "全部导出为备份",
     "confirmDeleteMessage": "确定要删除选中的弹幕吗？",
+    "exportAllAss": "全部导出为ASS",
     "exportAllXml": "全部导出为XML",
     "noAnime": "没有可用的番剧",
     "noResult": "没有找到标题为 '{{filter}}' 的番剧"
@@ -229,6 +323,21 @@
   "error": {
     "unknown": "出错啦!"
   },
+  "form": {
+    "precision": {
+      "alt": "Alt",
+      "drag": "拖拽 / 滚轮",
+      "shift": "Shift"
+    },
+    "resetToZero": "归零"
+  },
+  "highlights": {
+    "copied": "已复制到剪贴板",
+    "count_other": "{{count}}条弹幕",
+    "noData": "装填弹幕后可查看高能时刻",
+    "share": "复制分享",
+    "title": "高能时刻"
+  },
   "importPage": {
     "confirm": "确认导入",
     "help": {
@@ -237,11 +346,15 @@
     },
     "import": "导入弹幕",
     "importDesc": "导入本地弹幕时文件名将用为弹幕名称。支持.json和.xml文件",
+    "importError_one": "{{count}}个文件导入失败",
     "importError_other": "{{count}}个文件导入失败",
     "importFolder": "导入文件夹",
+    "importSuccess_one": "成功导入{{count}}个文件",
     "importSuccess_other": "成功导入{{count}}个文件",
     "parseError": "文件解析失败",
+    "skipped_one": "跳过{{count}}个文件",
     "skipped_other": "跳过{{count}}个文件",
+    "willImport_one": "将导入{{count}}个文件",
     "willImport_other": "将导入{{count}}个文件"
   },
   "integration": {
@@ -256,11 +369,8 @@
     "alert": {
       "aiDisabledTooPermissive": "AI已禁用：匹配模式过于宽松",
       "AIResult": "AI解析结果：{{title}}",
-      "matchedLocalDanmaku": "以匹配本地弹幕",
       "matchError": "匹配剧集失败：{{message}}",
-      "noEpisodeMatched": "未找到匹配的剧集（{{title}}）：{{cause}}",
       "noIntegration": "未设置自动化配置",
-      "openSearch": "打开搜索页面",
       "search": "搜索番剧：{{title}}",
       "usingAI": "正在使用AI解析",
       "usingMode": "正在使用模式：{{mode}}"
@@ -276,6 +386,18 @@
       }
     },
     "manualModeEnabled": "已启用手动模式，如需自动请切换至其他模式",
+    "matchResult": {
+      "cause": "原因",
+      "createMapping": "标题映射",
+      "detectedMedia": "检测到的媒体",
+      "manualSearch": "手动搜索",
+      "matched": "剧集匹配成功",
+      "noMatch": "未匹配",
+      "retry": "重试",
+      "skipped": "已跳过",
+      "strategiesTried": "尝试的匹配策略",
+      "title": "剧集匹配失败"
+    },
     "mode": {
       "ai": {
         "description": "让AI自动解析视频信息并自动装填弹幕",
@@ -303,6 +425,9 @@
       "configAvailablePass": "自动化配置可用",
       "enableAi": "启用AI",
       "enableAiPass": "AI已启用",
+      "episodeMatch": "剧集匹配",
+      "episodeMatchFail": "剧集匹配失败",
+      "episodeMatchPass": "剧集匹配成功",
       "integrationEnabled": "启用自动模式",
       "integrationEnabledFail": "未启用自动模式",
       "integrationEnabledPass": "自动模式已启用",
@@ -327,8 +452,10 @@
       "pickElement": "选择元素",
       "quick": "优先",
       "regex": "正则表达式（可选）",
+      "regexRuleCount_one": "{{count}}个正则规则",
       "regexRuleCount_other": "{{count}}个正则规则",
       "seasonNumber": "季数（可选）",
+      "selectorRuleCount_one": "{{count}}个XPath规则",
       "selectorRuleCount_other": "{{count}}个XPath规则",
       "title": "配置自动化配置",
       "videoTitle": "视频标题",
@@ -336,30 +463,89 @@
     },
     "name": "自动化配置"
   },
+  "matching": {
+    "allStrategiesExhausted": "所有匹配策略均已尝试，未找到匹配",
+    "episodeNumberUndefined": "无法确定集数",
+    "noSeasonsAllProviders": "所有弹幕源均未找到匹配的番剧",
+    "passedToNext": "未找到匹配，已传递给下一策略",
+    "previousStrategyTerminal": "已跳过：上一策略返回了终止结果"
+  },
   "mountPage": {
     "alert": {
-      "checkMountConfig": "检查装填配置",
-      "mountingDisabled": "无法在当前页面装填弹幕"
+      "createMountConfig": "创建装填配置",
+      "disabledMountConfig": "装填配置 \"{{name}}\" 已禁用",
+      "enableMountConfig": "启用配置",
+      "extensionDisabled": "弹幕任何地方已禁用",
+      "noMountConfig": "该网站暂无装填配置",
+      "pageUnsupported": "该类型页面无法装填弹幕"
     },
+    "confirmDeleteMultiple_one": "确定要删除{{count}}个弹幕吗？",
     "confirmDeleteMultiple_other": "确定要删除{{count}}个弹幕吗？",
     "goSearch": "前往搜索",
     "importDanmaku": "导入弹幕（或拖拽至此）",
     "libraryEmpty": "弹幕库里什么也没有...",
     "or": "或者",
     "pageTitle": "弹幕库",
+    "selectedCount_one": "已选择{{count}}",
     "selectedCount_other": "已选择{{count}}"
   },
+  "namingRule": {
+    "create": "创建命名规则",
+    "deleteConfirm": "确定要删除此命名规则吗？",
+    "duplicateTitle": "已存在相同标题的命名规则",
+    "edit": "编辑命名规则",
+    "episodeLabel": "第 {{number}} 集",
+    "filesInFolder": "文件夹中的文件",
+    "folder": "文件夹",
+    "local": "本地",
+    "matchCount": "{{matched}} / {{total}} 已匹配",
+    "noRules": "没有定义命名规则",
+    "rootFolder": "（根目录）",
+    "ruleCreated": "命名规则已保存",
+    "ruleCreateFailed": "保存命名规则失败",
+    "ruleDeleted": "命名规则已删除",
+    "template": "文件名模板",
+    "templateHelp": "使用 {episode} 表示集数，{episode:02d} 表示补零",
+    "title": "标题"
+  },
   "optionsPage": {
+    "auth": {
+      "confirmPassword": "确认密码",
+      "email": "电子邮箱",
+      "emailHelper": "邮箱仅用于找回密码",
+      "name": "昵称",
+      "nameHelper": "别的用户可以看到你的昵称",
+      "password": "密码",
+      "passwordHelper": "长度至少为6个字符",
+      "signedInAs": "已登录",
+      "signIn": "登录",
+      "signOut": "退出登录",
+      "signUp": "注册",
+      "signUpSuccess": "注册成功"
+    },
     "backup": {
       "alert": {
         "exportSuccess": "成功导出备份",
         "importSuccess": "成功导入备份"
       },
-      "export": "导出备份",
-      "exportDescription": "导出所有配置到 JSON 文件",
-      "import": "导入备份",
-      "importDescription": "从 JSON 文件导入配置",
-      "importError": "导入失败"
+      "cloudBackup": "云备份",
+      "cloudBackupCreate": "创建云备份",
+      "cloudCreateError": "云备份失败：{{message}}",
+      "cloudCreateSuccess": "云备份已创建",
+      "cloudDescription": "将设置同步到云端。最多保留3个版本。",
+      "cloudDownloadError": "下载云备份失败：{{message}}",
+      "cloudListError": "加载云备份失败。",
+      "cloudSignInRequired": "登录后即可使用云备份。",
+      "exportToFile": "保存到文件",
+      "goToSignIn": "前往登录",
+      "importError": "导入失败",
+      "importFromFile": "从文件恢复",
+      "latestRevision": "最新",
+      "localBackup": "本地备份",
+      "localDescription": "将设置保存为JSON文件，或从文件恢复。",
+      "noCloudBackups": "暂无云备份。创建一个开始使用。",
+      "restoreConfirmDesc": "恢复此备份将覆盖您当前的设置。确定要继续吗？",
+      "restoreConfirmTitle": "恢复设置？"
     },
     "chConvert": {
       "name": "简繁转换",
@@ -388,17 +574,50 @@
         "stripColor": "去除弹幕颜色"
       }
     },
+    "dataManagement": {
+      "wipeDanmakuData": "清空弹幕库",
+      "wipeData": {
+        "confirm1": "确定要清空所有弹幕，剧集，映射吗？此操作无法恢复。",
+        "confirm2": "此操作无法恢复，确定要继续吗？",
+        "includeCustomEpisodes": "同时清空本地弹幕"
+      }
+    },
     "enableAnalytics": "匿名数据收集",
+    "enableFullscreenInteraction": "全屏时启用交互",
+    "enableMultiSourceMerge": "启用多源弹幕合并",
+    "enableMultiSourceMergeDescription": "匹配到集数后，同时搜索其他已启用的弹幕源并合并去重后显示。",
     "help": {
       "feedback": "提交意见或建议",
       "reportBug": "报告Bug"
     },
     "hotkeys": {
       "addHotkey": "添加快捷键",
+      "conflict": "与以下快捷键冲突：{{actions}}",
+      "danmakuDensityToggle": "切换弹幕密度",
+      "danmakuSpeedToggle": "切换弹幕速度",
+      "danmakuTimeOffsetDecrease": "弹幕时间偏移 -0.5s",
+      "danmakuTimeOffsetIncrease": "弹幕时间偏移 +0.5s",
+      "decreaseFontSize": "减小字体 (-2px)",
+      "decreaseOffset": "弹幕时间偏移 -1s",
+      "decreaseOpacity": "减少不透明度 (-10%)",
+      "decreaseSpeed": "减慢弹幕速度 (-0.25)",
+      "densityChanged": "最大同屏弹幕数：{{value}}",
+      "densityPlotChanged": "弹幕密度图：{{value}}",
       "enterKey": "输入快捷键",
+      "fontSizeChanged": "字体大小：{{value}}px",
+      "increaseFontSize": "增大字体 (+2px)",
+      "increaseOffset": "弹幕时间偏移 +1s",
+      "increaseOpacity": "增加不透明度 (+10%)",
+      "increaseSpeed": "加快弹幕速度 (+0.25)",
+      "opacityChanged": "不透明度：{{value}}%",
       "refreshComments": "刷新弹幕",
+      "skipOp": "跳过OP",
+      "speedChanged": "速度：{{value}}x",
+      "timeOffsetChanged": "时间偏移：{{value}}s",
+      "toggleDensityPlot": "开关弹幕密度图",
       "toggleEnableDanmaku": "显示/隐藏弹幕",
       "togglePip": "画中画（实验）",
+      "toggleStylePanel": "切换样式面板",
       "unmountComments": "卸载弹幕"
     },
     "language": "语言",
@@ -406,19 +625,33 @@
     "name": "设置",
     "pages": {
       "advanced": "高级设置",
+      "auth": "账号",
       "backup": "备份",
+      "dataManagement": "数据管理",
       "help": "关于",
       "hotkeys": "快捷键",
       "player": "播放设置",
-      "retentionPolicy": "自动删除"
+      "storage": "存储"
     },
     "player": {
+      "autoDensity": "自动调整弹幕密度",
+      "autoNextEpisode": "自动加载下一集弹幕",
+      "autoSkipOp": "自动跳过片头（OP）",
+      "enableFixedSkip": "显示固定时间跳过按钮",
+      "fixedSkip": "跳过 {{seconds}} 秒",
+      "fixedSkipSeconds": "跳过秒数",
       "showDanmakuTimeline": "显示弹幕密度",
-      "showSkipButton": "显示跳过按钮（OP/ED）"
+      "showSkipButton": "显示跳过按钮（OP/ED）",
+      "upscale": {
+        "crossOriginFix": "启用跨域视频兼容修复",
+        "description": "使用 WebGPU 增强当前视频，并保持弹幕显示在超分画面之上。",
+        "title": "视频超分辨率（Anime4K）"
+      }
     },
     "restrictInitiatorDomain": "限制DNR至发起自扩展的请求",
     "retentionPolicy": {
       "alert": {
+        "nDanmakuDeleted_one": "已删除{{count}}条弹幕",
         "nDanmakuDeleted_other": "已删除{{count}}条弹幕"
       },
       "deleteCommentsAfter": "弹幕保留时间",
@@ -430,6 +663,12 @@
       }
     },
     "searchUsingSimplified": "使用简体中文搜索",
+    "showFloatingButton": "显示浮动按钮",
+    "storage": {
+      "overview": "存储概览",
+      "seasonBreakdown": "按季度统计",
+      "warningHigh": "存储占用较高，建议清理不再使用的数据。"
+    },
     "theme": {
       "colorMode": {
         "dark": "深色",
@@ -459,13 +698,13 @@
       "headerValue": "请求头值",
       "helper": {
         "authHeaders": "随每个请求发送的自定义请求头 (例如 Authorization、X-AppSecret)",
-        "baseUrl": "弹弹Play或兼容弹弹Play的API地址",
+        "baseUrl": "弹弹play或兼容弹弹play的API地址",
         "builtInName": "内置弹幕源的名称不可更改"
       },
       "name": "名称",
       "title": {
         "add": "添加弹幕源",
-        "addDanDanPlay": "添加弹弹Play弹幕源",
+        "addDanDanPlay": "添加弹弹play弹幕源",
         "addMacCms": "添加MacCMS弹幕源",
         "edit": "编辑弹幕源: {{name}}"
       }
@@ -477,9 +716,22 @@
       "mappingFailed": "标题映射失败：{{message}}",
       "mappingSuccess": "标题映射成功"
     },
+    "batchDownload": {
+      "cancelled": "批量下载已停止：已完成 {{done}}/{{total}}",
+      "done": "批量下载完成",
+      "download_other": "下载 ({{count}})",
+      "enable": "批量下载",
+      "failed": "批量下载失败：{{message}}",
+      "partial": "批量下载结束：成功 {{done}}/{{total}}，失败 {{failed}} 集（{{message}}）",
+      "progress": "下载进度：{{done}}/{{total}}",
+      "start_other": "开始批量下载：{{count}} 集"
+    },
     "error": {
       "noProviders": "没有启用的弹幕来源，请在设置中启用",
       "noResultFound": "没有找到结果, 请尝试其他关键词"
+    },
+    "favorites": {
+      "title": "收藏"
     },
     "name": "搜索番剧",
     "parse": {
@@ -515,6 +767,23 @@
     "noAnimeFound": "没有可供选择的内容",
     "selectAnime": "找到多个匹配项：{{name}}，请选择"
   },
+  "statsPage": {
+    "avgLength": "平均长度",
+    "chars": "字",
+    "densityTimeline": "密度时间线",
+    "episodeCount": "集数",
+    "modeBottom": "底部",
+    "modeLtr": "逆向",
+    "modeRtl": "滚动",
+    "modeTop": "顶部",
+    "noData": "装填弹幕后查看统计",
+    "peakTime": "峰值时间",
+    "seasonCount": "季度",
+    "title": "统计",
+    "topKeywords": "热门关键词",
+    "totalCount": "总数",
+    "typeDistribution": "类型分布"
+  },
   "stylePage": {
     "customCssDescription": "自定义 CSS 将应用到每条弹幕。详细说明请查看文档。",
     "distribution": "弹幕分布",
@@ -522,10 +791,23 @@
     "interval": "发射间隔",
     "maxOnScreen": "最大同屏弹幕数",
     "name": "弹幕设置",
-    "offset": "时间轴（毫秒）",
+    "offset": "时间轴",
     "opacity": "不透明度",
     "orderDistribution": "顺序",
     "overlap": "重叠比例",
+    "preset": {
+      "balanced": "均衡",
+      "custom": "自定义",
+      "eyeCare": "护眼",
+      "immersive": "沉浸",
+      "label": "预设",
+      "minimal": "精简"
+    },
+    "preview": {
+      "hide": "隐藏",
+      "label": "预览",
+      "show": "显示"
+    },
     "randomDistribution": "均匀",
     "safeZone": {
       "y": "Y轴显示范围"
@@ -539,12 +821,20 @@
     },
     "speed": "弹幕速度",
     "speedSettings": "速度设置",
+    "strokePreset": "描边 / 阴影",
+    "strokePresets": {
+      "3d": "立体阴影",
+      "glow": "发光",
+      "none": "默认",
+      "thick": "粗描边",
+      "thin": "细描边"
+    },
     "style": "样式",
     "tooltip": {
       "distribution": "均匀：弹幕将均匀地填充屏幕。顺序：弹幕将从上到下填充屏幕",
       "interval": "值越小弹幕越密集。过低可能导致卡顿。",
       "maxOnScreen": "屏幕上显示的弹幕数量不超过此值。超过此值的弹幕将被丢弃。",
-      "offset": "弹幕出现的时间位移。 正值使弹幕延后出现，负值使弹幕提前出现。",
+      "offsetScrubber": "水平拖动或使用滚轮调整，双击手动输入。正值使弹幕延后出现，负值使弹幕提前出现。",
       "overlap": "允许弹幕重叠以减少弹幕之间的间距，值越高，重叠幅度越大。0表示禁止重叠。",
       "safeZone": {
         "y": "Y轴（上下）的显示范围"
@@ -554,6 +844,12 @@
     },
     "trackHeight": "弹幕行高",
     "useCustomCss": "使用自定义 CSS"
+  },
+  "tabGroups": {
+    "content": "内容",
+    "debug": "调试",
+    "display": "显示",
+    "system": "系统"
   },
   "tabs": {
     "aiProviders": "AI源",
@@ -566,13 +862,67 @@
     "providers": "弹幕源",
     "search": "搜索番剧",
     "selector": "选择",
+    "stats": "统计",
     "style": "弹幕设置",
     "titleMapping": "标题映射"
   },
+  "theme": {
+    "emberGlow": "琥珀焰",
+    "neonViolet": "霓虹紫",
+    "oceanDepth": "深海蓝",
+    "sakuraNoir": "樱花黑",
+    "selectTheme": "选择主题"
+  },
   "titleMapping": {
+    "deleteConfirm_other": "确定要删除 {{count}} 个标题映射吗？",
+    "deleteConfirmOne": "确定要删除此标题映射吗？",
     "empty": "没有标题映射",
     "noSeasons": "没有可以映射的番剧",
     "title": "标题映射",
     "unmapped": "未映射"
+  },
+  "translation": {
+    "enable": "启用弹幕翻译"
+  },
+  "upscale": {
+    "alert": {
+      "crossOriginBlocked": "该视频源跨域受限，无法超分",
+      "failed": "超分出错，已自动关闭",
+      "frameInterpolationUnavailable": "当前视频或 GPU 无法使用补帧，Anime4K 超分将继续运行"
+    },
+    "corsFix": "跨域修复",
+    "enable": "超分辨率",
+    "frameInterpolation": {
+      "description": "在 Anime4K 之前使用 Framegen 生成一张中间帧。会增加少量画面延迟，GPU 负载过高时自动退回仅超分。",
+      "enable": "视频补帧",
+      "licenseNotice": "内置模型权重仅限个人与非商业用途。",
+      "shortDescription": "Framegen 补帧后再超分，过载时自动旁路。",
+      "title": "2× 视频补帧"
+    },
+    "mode": "模式",
+    "native": "原始分辨率",
+    "performanceTier": "性能档位",
+    "resolution": "分辨率",
+    "settings": "超分参数",
+    "settingsHint": "修改后立即应用到当前视频。",
+    "shortLabel": "超分",
+    "tiers": {
+      "balanced": "均衡",
+      "performance": "快速",
+      "quality": "画质",
+      "ultra": "极致"
+    },
+    "unsupported": "当前浏览器不支持 WebGPU"
+  },
+  "watchParty": {
+    "connected": "已连接",
+    "copied": "已复制",
+    "create": "创建房间",
+    "invite": "复制邀请链接",
+    "join": "加入房间",
+    "leave": "离开房间",
+    "members_other": "{{count}}人在线",
+    "roomId": "房间号",
+    "title": "一起看"
   }
 }

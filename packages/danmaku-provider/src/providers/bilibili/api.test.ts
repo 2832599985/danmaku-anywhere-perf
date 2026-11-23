@@ -69,6 +69,30 @@ describe('Bilibili', () => {
       expect(result.success).toBe(true)
     })
 
+    it('should return partial results when one search type is blocked', async () => {
+      vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(
+          new Response('blocked', {
+            status: 412,
+            statusText: 'Precondition Failed',
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(mockBilibiliMediaSearchResponse), {
+            headers: {
+              'content-type': 'application/json',
+            },
+          })
+        )
+
+      const result = await searchMedia({ keyword: 'MyGo' })
+
+      expect(result.success).toBe(true)
+      if (result.success) {
+        expect(result.data.length).toBeGreaterThan(0)
+      }
+    })
+
     it('should return error on API error (logical)', async () => {
       const mockResponse = {
         code: -412,

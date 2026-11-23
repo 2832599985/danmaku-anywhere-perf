@@ -1,4 +1,5 @@
 import { Mutex } from 'async-mutex'
+import { Logger } from '@/common/Logger'
 import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
 import { container } from '../ioc'
 import { getSelfDomain } from './getSelfDomain'
@@ -51,46 +52,14 @@ export async function setSessionHeader(
     return {
       removeRule,
       async [Symbol.asyncDispose]() {
-        await removeRule()
+        try {
+          await removeRule()
+        } catch (e) {
+          Logger.warn('Failed to remove session rule during dispose', e)
+        }
       },
     }
   } finally {
     release()
-  }
-}
-
-type Headers = Record<string, string>
-
-export interface WithSessionHeaderOptions<Args extends unknown[]> {
-  matchUrl: string
-  headers: Headers
-  getHeaders?: (args: Args) => Headers
-}
-
-// decorator that sets session header for a method
-export function WithSessionHeader<Args extends unknown[]>(
-  options: WithSessionHeaderOptions<Args>
-) {
-  return function wrap(
-    target: Object,
-    propertyKey: string,
-    descriptor: PropertyDescriptor
-  ) {
-    const originalMethod = descriptor.value
-
-    async function overrideMethod(this: unknown, ...args: Args) {
-      let resolvedHeaders = options.headers
-
-      if (options.getHeaders) {
-        resolvedHeaders = { ...options.headers, ...options.getHeaders(args) }
-      }
-
-      await using _ = await setSessionHeader(options.matchUrl, resolvedHeaders)
-
-      return await originalMethod.apply(this, args)
-    }
-    descriptor.value = overrideMethod
-
-    return descriptor
   }
 }

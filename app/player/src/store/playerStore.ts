@@ -1,0 +1,1065 @@
+import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
+import { create } from 'zustand'
+import {
+  createJSONStorage,
+  type PersistStorage,
+  persist,
+  type StorageValue,
+} from 'zustand/middleware'
+import { immer } from 'zustand/middleware/immer'
+import { type FilenameRule, ruleShape } from '@/danmaku/filenameRules'
+import type { PickedMedia } from '@/platform/types'
+import {
+  DEFAULT_LINE_HEIGHT,
+  LINE_HEIGHT_MAX,
+  LINE_HEIGHT_MIN,
+} from '@/player/danmaku/trackHeight'
+import type { EmbeddedTrack } from '@/subtitle/native'
+import type { SubtitleCue, SubtitleSource } from '@/subtitle/types'
+import {
+  type DanmakuSettings,
+  DEFAULT_DANMAKU,
+  DEFAULT_PLAYBACK,
+  DEFAULT_SUBTITLE,
+  DEFAULT_UPSCALE,
+  type PlaybackSettings,
+  type SubtitleSettings,
+  type UpscaleSettings,
+  type UpscaleSettingsPatch,
+} from './settings'
+
+export type UpscaleStatus = 'idle' | 'initializing' | 'active' | 'error'
+export type InterpolationStatus = 'off' | 'active' | 'fallback'
+/**
+ * AI subtitle generation status (CONTRACT §34), published by
+ * `subtitle/generate.ts` — only when a field changes, never per frame.
+ */
+export interface AiGenState {
+  /** burst = auto-paused on the GPU; follow = keeping up while playing */
+  phase: 'burst' | 'follow'
+  stage: 'recognizing' | 'translating' | 'waiting'
+  /** burst progress 0..1 */
+  progress: number
+  /** where each engine actually runs (null = not started yet) */
+  asrGpu: boolean | null
+  mtGpu: boolean | null
+  /** Chinese is ready at the playhead (the burst overlay offers 直接播放) */
+  ready: boolean
+  /** follow: playback ran past the finished Chinese */
+  behind: boolean
+}
+
+/** Playlist item: a queued media file. */
+export interface PlaylistItem {
+  url: string
+  name: string
+  path?: string
+}
+
+/** Persisted resume point for a local file (keyed by absolute path). */
+export interface ResumeEntry {
+  /** last playback position in seconds. */
+  time: number
+  /** media duration in seconds (to compute near-end and show progress). */
+  duration: number
+  /** epoch ms of the last write (for future pruning). */
+  updatedAt: number
+}
+
+/** Live playback state mirrored from the <video> element (not persisted). */
+export interface PlaybackState {
+  ready: boolean
+  playing: boolean
+  currentTime: number
+  duration: number
+  volume: number
+  muted: boolean
+  playbackRate: number
+  bufferedEnd: number
+  videoWidth: number
+  videoHeight: number
+  fullscreen: boolean
+}
+
+export interface DanmakuSource {
+  label: string
+  count: number
+}
+
+/**
+ * Opening state for the danmaku source dialog. The automatic matcher fills
+ * this in when it cannot pick a season/episode on its own, so the dialog opens
+ * pre-searched with the episode we believe we want already highlighted.
+ */
+export interface DanmakuSearchPrefill {
+  /** Search keyword (the show title we parsed out of the file name). */
+  keyword: string
+  /** Episode number to highlight; 0/undefined = unknown, let the user pick. */
+  targetEpisode?: number
+  /** Short reason line shown above the results ("未能确定是第几集"). */
+  note?: string
+}
+
+/** Live renderer statistics for the HUD (session-only, ~1s cadence). */
+export interface UpscaleStats {
+  /**
+   * True on-screen frame rate: the source frames plus the interpolated
+   * sub-frames the engine produced, capped by how often the canvas was
+   * presented. NOT the canvas swap cadence, which just tracks the display
+   * refresh and reads the same with interpolation off.
+   */
+  fps: number
+  /** Source-video frame rate on its own (what the file carries). */
+  sourceFps: number
+  /** average CPU cost per frame in ms. */
+  cpuFrameMs: number
+  /** interpolation-generated frames per second (0 when off). */
+  generatedFps: number
+}
+
+export interface OsdMessage {
+  id: number
+  text: string
+  /** optional short glyph/emoji rendered before the text */
+  icon?: string
+}
+
+const INITIAL_PLAYBACK: PlaybackState = {
+  ready: false,
+  playing: false,
+  currentTime: 0,
+  duration: 0,
+  volume: 1,
+  muted: false,
+  playbackRate: 1,
+  bufferedEnd: 0,
+  videoWidth: 0,
+  videoHeight: 0,
+  fullscreen: false,
+}
+
+export interface PlayerStore {
+  // --- media / danmaku ---
+  media: PickedMedia | null
+  /**
+   * Why the current media failed to load (missing file, unsupported codec, …),
+   * or null. The persistent history means stale paths are normal, so a failure
+   * must be visible instead of leaving a black screen.
+   */
+  mediaError: string | null
+  comments: CommentEntity[]
+  danmakuSource: DanmakuSource | null
+
+  // --- subtitles (session-only; re-mounted per media by the auto-load effect) ---
+  // Which cues are on screen is NOT store state: the SubtitleController draws
+  // them straight into the stage (a store write per line re-rendered the
+  // player and re-persisted its settings on every subtitle change).
+  subtitleCues: SubtitleCue[]
+  subtitleSource: SubtitleSource | null
+  /** Subtitle streams INSIDE the current file (mkv/mp4/webm); empty = none. */
+  embeddedTracks: EmbeddedTrack[]
+  /** Stream index of the mounted embedded track, null when none is mounted. */
+  activeEmbeddedTrack: number | null
+  /** Why the probe failed (no ffprobe, unreadable file) — null when it worked. */
+  embeddedError: string | null
+
+  // --- AI subtitle generation (session-only) ---
+  /** null = not generating for this video. */
+  aiGen: AiGenState | null
+  /** last generation failure shown in 设置 → 字幕 (null = none). */
+  aiError: string | null
+
+  // --- source HDR (detected from the decoded frame; session-only) ---
+  isHdr: boolean
+  hdrTransfer: string | null
+
+  // --- live playback ---
+  playback: PlaybackState
+
+  // --- engine status ---
+  upscaleStatus: UpscaleStatus
+  upscaleError: string | null
+  interpolationStatus: InterpolationStatus
+  /** live HUD stats, null while the renderer is off. */
+  upscaleStats: UpscaleStats | null
+  /** A/B compare split ratio (0..1 = position of the divider), null = off. */
+  compareRatio: number | null
+  /**
+   * Mini player (小窗): the window is shrunk, pinned top-most and the chrome is
+   * reduced to a hover strip. Session-only — never persisted, so a crash while
+   * mini cannot relaunch the app as a tiny always-on-top window.
+   */
+  miniPlayer: boolean
+
+  // --- transient UI ---
+  osd: OsdMessage | null
+  /** Number of active hover/popover locks keeping top/bottom chrome visible. */
+  controlsHoldCount: number
+  settingsOpen: boolean
+  /** which page the settings window shows (also used to deep-link into it). */
+  settingsSection: string
+  danmakuDialogOpen: boolean
+  /**
+   * What the danmaku source dialog should open with. Set by the automatic
+   * matcher when it cannot decide on its own (prefilled keyword + the episode
+   * number it believes it wants, highlighted in the list). Session-only.
+   */
+  danmakuSearchPrefill: DanmakuSearchPrefill | null
+
+  // --- playlist (session-only) ---
+  playlist: PlaylistItem[]
+  playlistIndex: number
+  playlistOpen: boolean
+
+  // --- resume history (persisted, keyed by absolute file path) ---
+  progress: Record<string, ResumeEntry>
+
+  /**
+   * Learned file-name shapes (persisted, global): one entry per manual
+   * season/episode choice, replayed for the rest of the download batch. Unlike
+   * `danmakuSearchPrefill` this is knowledge, not per-media state, so it
+   * survives media switches.
+   */
+  filenameRules: FilenameRule[]
+
+  // --- persisted settings ---
+  upscale: UpscaleSettings
+  danmakuSettings: DanmakuSettings
+  playbackSettings: PlaybackSettings
+  subtitleSettings: SubtitleSettings
+
+  // --- actions ---
+  setMedia: (media: PickedMedia | null) => void
+  /** record (or clear, with null) why the current media could not be played. */
+  setMediaError: (message: string | null) => void
+  setComments: (comments: CommentEntity[], source: DanmakuSource | null) => void
+  clearDanmaku: () => void
+  /**
+   * Mount a subtitle track (external file, embedded track or generated cues).
+   * `embeddedTrack` is the stream index when the cues come from the video's
+   * own track (the picker highlights it); anything else clears the highlight.
+   */
+  setSubtitles: (
+    cues: SubtitleCue[],
+    source: SubtitleSource,
+    embeddedTrack?: number | null
+  ) => void
+  clearSubtitles: () => void
+  /** record the subtitle streams found inside the current file. */
+  setEmbeddedTracks: (tracks: EmbeddedTrack[]) => void
+  /** remember which embedded track is mounted (picker highlight). */
+  setActiveEmbeddedTrack: (index: number | null) => void
+  /** record why the probe failed (cleared on the next successful one). */
+  setEmbeddedError: (message: string | null) => void
+  setAiGen: (state: AiGenState | null) => void
+  setAiError: (message: string | null) => void
+  /** record the detected HDR transfer ('pq'/'hlg') or null for SDR. */
+  setHdr: (transfer: string | null) => void
+
+  patchPlayback: (partial: Partial<PlaybackState>) => void
+
+  setUpscaleStatus: (status: UpscaleStatus, error?: string | null) => void
+  setInterpolationStatus: (status: InterpolationStatus) => void
+  setUpscaleStats: (stats: UpscaleStats | null) => void
+  /** move the A/B divider; null exits compare mode. */
+  setCompareRatio: (ratio: number | null) => void
+  setMiniPlayer: (mini: boolean) => void
+
+  showOsd: (text: string, icon?: string) => void
+  clearOsd: () => void
+  /** Increment/decrement the controls visibility lock (hovered bar or open menu/popover). */
+  holdControls: (delta: 1 | -1) => void
+  setSettingsOpen: (open: boolean) => void
+  setSettingsSection: (section: string) => void
+  /** open the settings window directly on a given page. */
+  openSettingsAt: (section: string) => void
+  /**
+   * Open/close the danmaku source dialog. Pass a prefill to have it open on
+   * the online tab with the search box filled in and (optionally) an episode
+   * highlighted; pass nothing for the plain manual entry point.
+   */
+  setDanmakuDialogOpen: (
+    open: boolean,
+    prefill?: DanmakuSearchPrefill | null
+  ) => void
+
+  updateUpscale: (partial: UpscaleSettingsPatch) => void
+  updateDanmakuSettings: (partial: Partial<DanmakuSettings>) => void
+  updatePlaybackSettings: (partial: Partial<PlaybackSettings>) => void
+  updateSubtitleSettings: (partial: Partial<SubtitleSettings>) => void
+  toggleDanmakuVisible: () => void
+  toggleSubtitleVisible: () => void
+
+  // --- playlist actions ---
+  setPlaylist: (items: PlaylistItem[], startIndex?: number) => void
+  /**
+   * Open media by ADDING it to the (persistent) playlist rather than replacing
+   * it, so the list acts as a running history that survives restarts. Items
+   * already present (by path, or url for blobs) are not duplicated; the first
+   * opened item becomes the current one and starts playing.
+   */
+  openMedia: (items: PlaylistItem[]) => void
+  appendToPlaylist: (items: PlaylistItem[]) => void
+  /**
+   * Arrange the rest of the playing entry's batch around it: `before` right in
+   * front of it, `after` right behind it, each in the order given (episode
+   * order). Entries already queued are MOVED rather than duplicated, and the
+   * playing entry itself stays put. Putting everything behind it would make
+   * autoplay jump from episode 7 back to episode 1.
+   */
+  placeAroundCurrent: (before: PlaylistItem[], after: PlaylistItem[]) => void
+  playPlaylistIndex: (index: number) => void
+  removePlaylistIndex: (index: number) => void
+  clearPlaylist: () => void
+  setPlaylistOpen: (open: boolean) => void
+
+  // --- resume actions ---
+  /** record/refresh the resume point for a local file. */
+  saveProgress: (path: string, time: number, duration: number) => void
+  /** forget the resume point for a local file (e.g. watched to the end). */
+  clearProgress: (path: string) => void
+
+  // --- learned file-name rule actions ---
+  /**
+   * Store a rule learned from a manual season/episode choice. An existing rule
+   * with the same pattern is UPDATED in place (the newest pick wins) — that is
+   * how a wrong rule gets corrected: pick the right episode once more.
+   */
+  addFilenameRule: (rule: FilenameRule) => void
+  removeFilenameRule: (id: string) => void
+  clearFilenameRules: () => void
+  /** count an automatic mount that used this rule (settings list + ranking). */
+  recordFilenameRuleHit: (id: string) => void
+}
+
+let osdSeq = 0
+
+/** Upper bound on the persisted history playlist (oldest entries are dropped). */
+const PLAYLIST_MAX = 200
+/** Upper bound on persisted resume points (least recently updated are dropped). */
+const PROGRESS_MAX = 500
+/** Upper bound on learned file-name rules (least recently used are dropped). */
+const RULES_MAX = 100
+
+/** Dedup key for a playlist item: absolute path when local, else the url. */
+const playlistKey = (item: PlaylistItem): string => item.path ?? item.url
+
+/**
+ * Rebuild one persisted learned rule, dropping anything malformed. Rules come
+ * from localStorage (hand-editable, and written by older builds), so nothing
+ * here may throw — a bad entry is skipped, not fatal.
+ */
+const normalizeFilenameRule = (value: unknown): FilenameRule | null => {
+  if (!value || typeof value !== 'object') return null
+  const rule = value as Partial<FilenameRule>
+  if (typeof rule.id !== 'string' || typeof rule.pattern !== 'string') {
+    return null
+  }
+  const season = rule.season
+  if (!season || typeof season.bangumiId !== 'string') return null
+  return {
+    id: rule.id,
+    pattern: rule.pattern,
+    sample: typeof rule.sample === 'string' ? rule.sample : '',
+    folder: typeof rule.folder === 'string' ? rule.folder : '',
+    season: {
+      source:
+        season.source === 'bilibili' || season.source === 'tencent'
+          ? season.source
+          : 'ddp',
+      bangumiId: season.bangumiId,
+      title: typeof season.title === 'string' ? season.title : '',
+      episodeCount:
+        typeof season.episodeCount === 'number' ? season.episodeCount : 0,
+    },
+    episode: typeof rule.episode === 'number' ? rule.episode : 0,
+    hits: typeof rule.hits === 'number' ? rule.hits : 0,
+    updatedAt: typeof rule.updatedAt === 'number' ? rule.updatedAt : 0,
+  }
+}
+
+const normalizeFilenameRules = (values: unknown): FilenameRule[] => {
+  if (!Array.isArray(values)) return []
+  const out: FilenameRule[] = []
+  for (const value of values) {
+    const rule = normalizeFilenameRule(value)
+    if (rule) out.push(rule)
+  }
+  return out
+}
+
+/**
+ * Clamp a number between min and max (inclusive).
+ */
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
+}
+
+/** Row pitch persisted by an older build, or the default when it is missing. */
+const clampLineHeight = (value: unknown): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_LINE_HEIGHT
+  }
+  return clamp(value, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX)
+}
+
+/**
+ * localStorage for the persisted slice, minus the writes that change nothing.
+ *
+ * The persist middleware serializes and writes the whole persisted slice
+ * after EVERY store update — the <video> mirror alone updates it four times a
+ * second, and a long history makes that slice a couple of hundred kilobytes
+ * of JSON. Immer keeps untouched branches referentially equal, so when every
+ * persisted field is the very same object as last time there is nothing new
+ * to write, and the write is skipped.
+ */
+const changedOnlyStorage = <S extends object>(
+  inner: PersistStorage<S> | undefined
+): PersistStorage<S> | undefined => {
+  if (!inner) return undefined
+  let last: S | null = null
+  const same = (a: S, b: S): boolean => {
+    const keys = Object.keys(a) as Array<keyof S>
+    return (
+      keys.length === Object.keys(b).length &&
+      keys.every((key) => Object.is(a[key], b[key]))
+    )
+  }
+  return {
+    getItem: (name) => inner.getItem(name),
+    setItem: (name, value: StorageValue<S>) => {
+      if (last && same(last, value.state)) return
+      const result = inner.setItem(name, value)
+      // Remembered only once written: a failed write (quota) is retried.
+      last = value.state
+      return result
+    },
+    removeItem: (name) => {
+      last = null
+      return inner.removeItem(name)
+    },
+  }
+}
+
+/** The persisted slice; `partialize` below must return exactly this shape. */
+interface PersistedSlice {
+  upscale: UpscaleSettings
+  danmakuSettings: DanmakuSettings
+  playbackSettings: PlaybackSettings
+  subtitleSettings: SubtitleSettings
+  playlist: PlaylistItem[]
+  progress: Record<string, ResumeEntry>
+  filenameRules: FilenameRule[]
+}
+
+/**
+ * Path-backed playlist entries (blob URLs cannot be revived). Memoized on the
+ * playlist array so an unchanged list keeps its identity — the change-only
+ * storage above relies on it.
+ */
+let persistablePlaylistFor: PlaylistItem[] | null = null
+let persistablePlaylist: PlaylistItem[] = []
+const persistableItems = (playlist: PlaylistItem[]): PlaylistItem[] => {
+  if (playlist !== persistablePlaylistFor) {
+    persistablePlaylistFor = playlist
+    persistablePlaylist = playlist.filter((item) => !!item.path)
+  }
+  return persistablePlaylist
+}
+
+/**
+ * Switching media invalidates the live playback mirror and the detected HDR
+ * state; reset both the same way `setMedia` does (volume/mute are user prefs
+ * and survive the switch).
+ */
+function resetPlaybackForNewMedia(s: PlayerStore): void {
+  s.isHdr = false
+  s.hdrTransfer = null
+  s.mediaError = null
+  s.subtitleCues = []
+  s.subtitleSource = null
+  s.embeddedTracks = []
+  s.activeEmbeddedTrack = null
+  s.embeddedError = null
+  s.aiGen = null
+  s.aiError = null
+  // The prefill describes the PREVIOUS file's show; a stale one would open the
+  // picker on the wrong title after a media switch.
+  s.danmakuSearchPrefill = null
+  s.danmakuDialogOpen = false
+  s.playback = {
+    ...INITIAL_PLAYBACK,
+    volume: s.playback.volume,
+    muted: s.playback.muted,
+    playbackRate: s.playback.playbackRate,
+  }
+}
+
+export const usePlayerStore = create<PlayerStore>()(
+  persist(
+    immer((set) => ({
+      media: null,
+      mediaError: null,
+      comments: [],
+      danmakuSource: null,
+
+      subtitleCues: [],
+      subtitleSource: null,
+      embeddedTracks: [],
+      activeEmbeddedTrack: null,
+      embeddedError: null,
+
+      aiGen: null,
+      aiError: null,
+
+      isHdr: false,
+      hdrTransfer: null,
+
+      playback: INITIAL_PLAYBACK,
+
+      upscaleStatus: 'idle',
+      upscaleError: null,
+      interpolationStatus: 'off',
+      upscaleStats: null,
+      compareRatio: null,
+      miniPlayer: false,
+
+      osd: null,
+      controlsHoldCount: 0,
+      settingsOpen: false,
+      settingsSection: 'playback',
+      danmakuDialogOpen: false,
+      danmakuSearchPrefill: null,
+
+      playlist: [],
+      playlistIndex: -1,
+      playlistOpen: false,
+
+      progress: {},
+
+      filenameRules: [],
+
+      upscale: DEFAULT_UPSCALE,
+      danmakuSettings: DEFAULT_DANMAKU,
+      playbackSettings: DEFAULT_PLAYBACK,
+      subtitleSettings: DEFAULT_SUBTITLE,
+
+      setMedia: (media) =>
+        set((s) => {
+          s.media = media
+          // new source: HDR is unknown until the first frame is decoded, and
+          // any previous load failure no longer applies
+          resetPlaybackForNewMedia(s)
+        }),
+
+      setMediaError: (message) =>
+        set((s) => {
+          s.mediaError = message
+        }),
+
+      setComments: (comments, source) =>
+        set((s) => {
+          s.comments = comments
+          s.danmakuSource = source
+        }),
+
+      clearDanmaku: () =>
+        set((s) => {
+          s.comments = []
+          s.danmakuSource = null
+        }),
+
+      setSubtitles: (cues, source, embeddedTrack = null) =>
+        set((s) => {
+          s.subtitleCues = cues
+          s.subtitleSource = source
+          // Whatever is mounted now replaced any embedded track unless it IS
+          // one — set in the same write, so the picker never flickers.
+          s.activeEmbeddedTrack = embeddedTrack
+        }),
+
+      clearSubtitles: () =>
+        set((s) => {
+          s.subtitleCues = []
+          s.subtitleSource = null
+          // The embedded track list stays (the file did not change); only the
+          // "which one is mounted" highlight is dropped.
+          s.activeEmbeddedTrack = null
+        }),
+
+      setEmbeddedTracks: (tracks) =>
+        set((s) => {
+          s.embeddedTracks = tracks
+        }),
+
+      setActiveEmbeddedTrack: (index) =>
+        set((s) => {
+          s.activeEmbeddedTrack = index
+        }),
+
+      setEmbeddedError: (message) =>
+        set((s) => {
+          s.embeddedError = message
+        }),
+
+      setAiGen: (state) =>
+        set((s) => {
+          s.aiGen = state
+        }),
+
+      setAiError: (message) =>
+        set((s) => {
+          s.aiError = message
+        }),
+
+      setHdr: (transfer) =>
+        set((s) => {
+          s.hdrTransfer = transfer
+          s.isHdr = transfer !== null
+        }),
+
+      patchPlayback: (partial) =>
+        set((s) => {
+          Object.assign(s.playback, partial)
+        }),
+
+      setUpscaleStatus: (status, error = null) =>
+        set((s) => {
+          s.upscaleStatus = status
+          s.upscaleError = error
+        }),
+
+      setInterpolationStatus: (status) =>
+        set((s) => {
+          s.interpolationStatus = status
+        }),
+
+      setUpscaleStats: (stats) =>
+        set((s) => {
+          s.upscaleStats = stats
+        }),
+
+      setCompareRatio: (ratio) =>
+        set((s) => {
+          s.compareRatio = ratio
+        }),
+
+      setMiniPlayer: (mini) =>
+        set((s) => {
+          s.miniPlayer = mini
+        }),
+
+      showOsd: (text, icon) =>
+        set((s) => {
+          osdSeq += 1
+          s.osd = { id: osdSeq, text, icon }
+        }),
+
+      clearOsd: () =>
+        set((s) => {
+          s.osd = null
+        }),
+
+      holdControls: (delta) =>
+        set((s) => {
+          s.controlsHoldCount = Math.max(0, s.controlsHoldCount + delta)
+        }),
+
+      setSettingsOpen: (open) =>
+        set((s) => {
+          s.settingsOpen = open
+        }),
+
+      setSettingsSection: (section) =>
+        set((s) => {
+          s.settingsSection = section
+        }),
+
+      openSettingsAt: (section) =>
+        set((s) => {
+          s.settingsSection = section
+          s.settingsOpen = true
+        }),
+
+      setDanmakuDialogOpen: (open, prefill) =>
+        set((s) => {
+          s.danmakuDialogOpen = open
+          // An explicit `undefined` keeps whatever was there (re-opening the
+          // dialog from the toolbar shouldn't wipe an active prefill); an
+          // explicit null clears it.
+          if (prefill !== undefined) s.danmakuSearchPrefill = prefill
+          if (!open) s.danmakuSearchPrefill = null
+        }),
+
+      updateUpscale: (partial) =>
+        set((s) => {
+          s.upscale = {
+            ...s.upscale,
+            ...partial,
+            frameInterpolation: {
+              ...s.upscale.frameInterpolation,
+              ...(partial.frameInterpolation ?? {}),
+            },
+          }
+        }),
+
+      updateDanmakuSettings: (partial) =>
+        set((s) => {
+          Object.assign(s.danmakuSettings, partial)
+        }),
+
+      updatePlaybackSettings: (partial) =>
+        set((s) => {
+          Object.assign(s.playbackSettings, partial)
+        }),
+
+      updateSubtitleSettings: (partial) =>
+        set((s) => {
+          Object.assign(s.subtitleSettings, partial)
+        }),
+
+      toggleDanmakuVisible: () =>
+        set((s) => {
+          s.danmakuSettings.visible = !s.danmakuSettings.visible
+        }),
+
+      toggleSubtitleVisible: () =>
+        set((s) => {
+          s.subtitleSettings.visible = !s.subtitleSettings.visible
+        }),
+
+      setPlaylist: (items, startIndex) =>
+        set((s) => {
+          if (items.length === 0) {
+            s.playlist = []
+            s.playlistIndex = -1
+          } else {
+            s.playlist = items
+            s.playlistIndex = clamp(startIndex ?? 0, 0, items.length - 1)
+            s.media = items[s.playlistIndex]
+            s.comments = []
+            s.danmakuSource = null
+            resetPlaybackForNewMedia(s)
+          }
+        }),
+
+      openMedia: (items) =>
+        set((s) => {
+          if (items.length === 0) return
+          // Append any not-already-present items (history semantics), dedup by key.
+          const keys = new Set(s.playlist.map(playlistKey))
+          for (const item of items) {
+            const key = playlistKey(item)
+            if (!keys.has(key)) {
+              s.playlist.push(item)
+              keys.add(key)
+            }
+          }
+          const firstKey = playlistKey(items[0])
+          let idx = s.playlist.findIndex((i) => playlistKey(i) === firstKey)
+          // Cap the history by dropping the oldest entries, never the one we
+          // are about to play.
+          let over = s.playlist.length - PLAYLIST_MAX
+          if (over > 0) {
+            const fromFront = Math.min(over, idx)
+            if (fromFront > 0) {
+              s.playlist.splice(0, fromFront)
+              idx -= fromFront
+              over -= fromFront
+            }
+            // Re-opening the oldest entry leaves nothing in front of it, so the
+            // cap would never be enforced; drop the next-oldest entries instead.
+            if (over > 0) s.playlist.splice(1, over)
+          }
+          s.playlistIndex = idx
+          // Fresh object reference so re-opening the current file still re-runs
+          // the load + resume effects (which key off a media identity change).
+          s.media = { ...s.playlist[idx] }
+          s.comments = []
+          s.danmakuSource = null
+          resetPlaybackForNewMedia(s)
+        }),
+
+      appendToPlaylist: (items) =>
+        set((s) => {
+          if (items.length === 0) {
+            return
+          }
+          const keys = new Set(s.playlist.map(playlistKey))
+          const fresh = items.filter((item) => {
+            const key = playlistKey(item)
+            if (keys.has(key)) return false
+            keys.add(key)
+            return true
+          })
+          if (fresh.length === 0) return
+          const wasEmpty = s.playlist.length === 0
+          const indexOfFirst = s.playlist.length
+          s.playlist.push(...fresh)
+          if (wasEmpty && s.media === null) {
+            s.playlistIndex = indexOfFirst
+            s.media = { ...s.playlist[indexOfFirst] }
+            s.comments = []
+            s.danmakuSource = null
+            resetPlaybackForNewMedia(s)
+          }
+        }),
+
+      placeAroundCurrent: (before, after) =>
+        set((s) => {
+          if (before.length === 0 && after.length === 0) return
+          const current = s.playlist[s.playlistIndex]
+          if (!current) return
+          const currentKey = playlistKey(current)
+          // Move instead of duplicate: an episode of this batch that is already
+          // elsewhere in the list (the user played it earlier) must end up in
+          // episode order around the current file, not appear twice. The
+          // current entry is never part of either group.
+          const earlier = new Map(
+            before.map((item) => [playlistKey(item), item] as const)
+          )
+          earlier.delete(currentKey)
+          const later = new Map(
+            after.map((item) => [playlistKey(item), item] as const)
+          )
+          later.delete(currentKey)
+          for (const key of earlier.keys()) later.delete(key)
+          const kept = s.playlist.filter((item) => {
+            const key = playlistKey(item)
+            return key === currentKey || (!earlier.has(key) && !later.has(key))
+          })
+          let index = kept.findIndex((item) => playlistKey(item) === currentKey)
+          if (index < 0) return
+          kept.splice(index + 1, 0, ...later.values())
+          kept.splice(index, 0, ...earlier.values())
+          index += earlier.size
+          // Bound the persisted list; the playing entry is never dropped. The
+          // oldest history goes first, then the far end of the tail.
+          const overflow = kept.length - PLAYLIST_MAX
+          let shift = 0
+          if (overflow > 0) {
+            shift = Math.min(overflow, index)
+            if (shift > 0) kept.splice(0, shift)
+            const rest = overflow - shift
+            if (rest > 0) kept.splice(kept.length - rest, rest)
+          }
+          s.playlist = kept
+          s.playlistIndex = index - shift
+        }),
+
+      playPlaylistIndex: (index) =>
+        set((s) => {
+          if (index < 0 || index >= s.playlist.length) {
+            return
+          }
+          s.playlistIndex = index
+          // Fresh copy so re-selecting the entry that is already playing still
+          // re-runs the load + resume effects (they key off media identity).
+          s.media = { ...s.playlist[index] }
+          s.comments = []
+          s.danmakuSource = null
+          resetPlaybackForNewMedia(s)
+        }),
+
+      removePlaylistIndex: (index) =>
+        set((s) => {
+          if (index < 0 || index >= s.playlist.length) {
+            return
+          }
+          s.playlist.splice(index, 1)
+          if (index < s.playlistIndex) {
+            s.playlistIndex -= 1
+          } else if (index === s.playlistIndex) {
+            // Removing what is playing leaves it playing, but park the cursor
+            // just before the freed slot so next/auto-advance carry on with
+            // whatever moved into it instead of going dead.
+            s.playlistIndex = index - 1
+          }
+        }),
+
+      clearPlaylist: () =>
+        set((s) => {
+          s.playlist = []
+          s.playlistIndex = -1
+        }),
+
+      setPlaylistOpen: (open) =>
+        set((s) => {
+          s.playlistOpen = open
+        }),
+
+      saveProgress: (path, time, duration) =>
+        set((s) => {
+          if (!path || !Number.isFinite(time)) return
+          s.progress[path] = {
+            time,
+            duration: Number.isFinite(duration) ? duration : 0,
+            updatedAt: Date.now(),
+          }
+          // Bound the history so it cannot grow forever in localStorage.
+          const paths = Object.keys(s.progress)
+          if (paths.length > PROGRESS_MAX) {
+            const stale = paths
+              .sort((a, b) => s.progress[a].updatedAt - s.progress[b].updatedAt)
+              .slice(0, paths.length - PROGRESS_MAX)
+            for (const key of stale) delete s.progress[key]
+          }
+        }),
+
+      clearProgress: (path) =>
+        set((s) => {
+          if (path in s.progress) delete s.progress[path]
+        }),
+
+      addFilenameRule: (rule) =>
+        set((s) => {
+          // Dedupe by SHAPE, not by exact pattern: a rule stored before the
+          // marker-tail fix carries part of an episode title in its tail
+          // (` 集：欢迎加`), so matching on the full pattern would keep it as a
+          // second entry — and being higher-ranked on `hits`, it would then
+          // outrank the user's correction. Same shape ⇒ newest choice wins,
+          // and the pattern is refreshed to the newly learned (cleaner) one.
+          const shape = ruleShape(rule.pattern)
+          const existing = s.filenameRules.find(
+            (r) => ruleShape(r.pattern) === shape
+          )
+          if (existing) {
+            // The user just picked again for the same shape → newest wins.
+            existing.pattern = rule.pattern
+            existing.season = rule.season
+            existing.episode = rule.episode
+            existing.sample = rule.sample
+            existing.folder = rule.folder
+            existing.hits += 1
+            existing.updatedAt = Date.now()
+          } else {
+            s.filenameRules.push(rule)
+          }
+          // Bound the list so it cannot grow forever in localStorage.
+          if (s.filenameRules.length > RULES_MAX) {
+            s.filenameRules = [...s.filenameRules]
+              .sort((a, b) => a.updatedAt - b.updatedAt)
+              .slice(s.filenameRules.length - RULES_MAX)
+          }
+        }),
+
+      removeFilenameRule: (id) =>
+        set((s) => {
+          s.filenameRules = s.filenameRules.filter((r) => r.id !== id)
+        }),
+
+      clearFilenameRules: () =>
+        set((s) => {
+          s.filenameRules = []
+        }),
+
+      recordFilenameRuleHit: (id) =>
+        set((s) => {
+          const rule = s.filenameRules.find((r) => r.id === id)
+          if (!rule) return
+          rule.hits += 1
+          rule.updatedAt = Date.now()
+        }),
+    })),
+    {
+      name: 'danmaku-player-settings',
+      version: 1,
+      storage: changedOnlyStorage<PersistedSlice>(
+        createJSONStorage<PersistedSlice>(() => localStorage)
+      ),
+      // Persist user settings + the local-file playlist and resume history.
+      // Blob-backed items (browser File opens, no `path`) can't be revived
+      // across launches, so only path-backed items are kept.
+      partialize: (state): PersistedSlice => ({
+        upscale: state.upscale,
+        danmakuSettings: state.danmakuSettings,
+        playbackSettings: state.playbackSettings,
+        subtitleSettings: state.subtitleSettings,
+        playlist: persistableItems(state.playlist),
+        progress: state.progress,
+        filenameRules: state.filenameRules,
+      }),
+      // Deep-merge persisted settings over defaults so settings fields ADDED in
+      // newer versions (e.g. playbackSettings.autoAdvance) keep their default
+      // instead of being wiped by an older persisted object (zustand's default
+      // merge is shallow and would replace each settings object wholesale).
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as {
+          upscale?: Partial<UpscaleSettings>
+          danmakuSettings?: Partial<DanmakuSettings>
+          playbackSettings?: Partial<PlaybackSettings>
+          subtitleSettings?: Partial<SubtitleSettings>
+          playlist?: PlaylistItem[]
+          progress?: Record<string, ResumeEntry>
+          filenameRules?: FilenameRule[]
+        }
+        const mergedPlayback: PlaybackSettings = {
+          ...current.playbackSettings,
+          ...p.playbackSettings,
+          volume:
+            typeof p.playbackSettings?.volume === 'number' &&
+            Number.isFinite(p.playbackSettings.volume)
+              ? clamp(p.playbackSettings.volume, 0, 1)
+              : current.playbackSettings.volume,
+          muted:
+            typeof p.playbackSettings?.muted === 'boolean'
+              ? p.playbackSettings.muted
+              : current.playbackSettings.muted,
+          screenshotSource:
+            p.playbackSettings?.screenshotSource === 'original'
+              ? 'original'
+              : 'upscaled',
+        }
+        return {
+          ...current,
+          playback: {
+            ...current.playback,
+            volume: mergedPlayback.volume,
+            muted: mergedPlayback.muted,
+          },
+          upscale: {
+            ...current.upscale,
+            ...p.upscale,
+            frameInterpolation: {
+              ...current.upscale.frameInterpolation,
+              ...p.upscale?.frameInterpolation,
+            },
+          },
+          danmakuSettings: {
+            ...current.danmakuSettings,
+            ...p.danmakuSettings,
+            // Added after the first release: a stale persisted object either
+            // lacks the key (spread keeps the default) or holds a value the
+            // slider cannot show — clamp it so the row pitch stays sane.
+            lineHeight: clampLineHeight(p.danmakuSettings?.lineHeight),
+            sources: {
+              ...current.danmakuSettings.sources,
+              ...p.danmakuSettings?.sources,
+            },
+          },
+          playbackSettings: mergedPlayback,
+          subtitleSettings: {
+            ...current.subtitleSettings,
+            ...p.subtitleSettings,
+          },
+          // Restore the queue but start detached: nothing plays until the user
+          // clicks an item (which then resumes from `progress`). Media is never
+          // auto-loaded on launch so a moved/deleted file can't wedge startup.
+          playlist: Array.isArray(p.playlist)
+            ? p.playlist.filter((i) => i && !!i.path)
+            : current.playlist,
+          playlistIndex: -1,
+          progress:
+            p.progress && typeof p.progress === 'object'
+              ? p.progress
+              : current.progress,
+          // Learned knowledge has no defaults to merge — keep whatever is
+          // stored, minus anything malformed.
+          filenameRules: Array.isArray(p.filenameRules)
+            ? normalizeFilenameRules(p.filenameRules)
+            : current.filenameRules,
+        }
+      },
+    }
+  )
+)

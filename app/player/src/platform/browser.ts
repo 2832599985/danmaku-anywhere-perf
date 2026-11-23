@@ -1,0 +1,208 @@
+import { decodeTextBytes } from './decodeText'
+import type {
+  PickedMedia,
+  PickedText,
+  Platform,
+  PreparedMediaUrl,
+} from './types'
+import { SUBTITLE_EXTENSION_LIST } from './types'
+
+const VIDEO_EXTENSIONS = 'video/*,.mp4,.m4v,.webm,.mkv,.mov,.avi,.ts,.flv,.ogv'
+const DANMAKU_EXTENSIONS = '.xml,.json,.txt'
+const SUBTITLE_EXTENSIONS = SUBTITLE_EXTENSION_LIST.map(
+  (ext) => `.${ext}`
+).join(',')
+
+/** A picked file's text, whatever encoding it was saved in. */
+export const readFileText = async (file: Blob): Promise<string> =>
+  decodeTextBytes(await file.arrayBuffer())
+
+const pickFile = (accept: string): Promise<File | null> =>
+  new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = accept
+    input.style.display = 'none'
+    let settled = false
+    const settle = (file: File | null) => {
+      if (settled) return
+      settled = true
+      input.remove()
+      resolve(file)
+    }
+    input.addEventListener('change', () => settle(input.files?.[0] ?? null))
+    // Some browsers fire `cancel` when the dialog is dismissed.
+    input.addEventListener('cancel', () => settle(null))
+    document.body.appendChild(input)
+    input.click()
+  })
+
+const pickFiles = (accept: string): Promise<File[]> =>
+  new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = accept
+    input.multiple = true
+    input.style.display = 'none'
+    let settled = false
+    const settle = (files: File[]) => {
+      if (settled) return
+      settled = true
+      input.remove()
+      resolve(files)
+    }
+    input.addEventListener('change', () =>
+      settle(Array.from(input.files ?? []))
+    )
+    // Some browsers fire `cancel` when the dialog is dismissed.
+    input.addEventListener('cancel', () => settle([]))
+    document.body.appendChild(input)
+    input.click()
+  })
+
+/**
+ * Browser adapter used for Vite dev + Playwright verification. Blob URLs are
+ * same-origin and therefore CORS-clean, so WebGPU can read the video frames.
+ */
+export const browserPlatform: Platform = {
+  isTauri: false,
+
+  async init() {
+    // no-op; native fetch is used as-is
+  },
+
+  async pickVideoFiles(): Promise<PickedMedia[]> {
+    const files = await pickFiles(VIDEO_EXTENSIONS)
+    return files.map((file) => ({
+      url: URL.createObjectURL(file),
+      name: file.name,
+    }))
+  },
+
+  async pickDanmakuFile(): Promise<PickedText | null> {
+    const file = await pickFile(DANMAKU_EXTENSIONS)
+    if (!file) return null
+    return { text: await readFileText(file), name: file.name }
+  },
+
+  async pickSubtitleFile(): Promise<PickedText | null> {
+    const file = await pickFile(SUBTITLE_EXTENSIONS)
+    if (!file) return null
+    return { text: await readFileText(file), name: file.name }
+  },
+
+  mediaUrlForPath(path: string): string {
+    // No filesystem paths in the browser; treat as an already-usable URL.
+    return path
+  },
+
+  async prepareMediaUrl(item: {
+    url: string
+    path?: string
+  }): Promise<PreparedMediaUrl> {
+    // No ffmpeg in a page: a container the browser cannot demux stays that way.
+    // (The desktop app remuxes FLV/TS/AVI; see src-tauri/src/remux.rs.)
+    return { url: item.url, remuxed: false }
+  },
+
+  async readTextFile(): Promise<string> {
+    throw new Error('readTextFile is not available in the browser')
+  },
+
+  async listVideoFiles(): Promise<string[]> {
+    // A page cannot read a directory. The sibling-episode scan is Tauri-only;
+    // in the browser the playlist grows the way it always did (drop/pick files).
+    return []
+  },
+
+  async listSubtitleFiles(): Promise<string[]> {
+    // A page cannot read a directory; subtitles arrive by drop or picker.
+    return []
+  },
+
+  onFileDrop(): () => void {
+    // Browser drag-drop is handled with the DataTransfer API on the drop zone.
+    return () => undefined
+  },
+
+  onFileDragHover(): () => void {
+    // The stage's own dragenter/dragleave drive the hint in the browser.
+    return () => undefined
+  },
+
+  onOpenFiles(): () => void {
+    return () => undefined
+  },
+
+  // The browser tab has its own chrome; the custom window buttons never render.
+  minimizeWindow(): void {
+    // no-op outside Tauri
+  },
+  toggleMaximizeWindow(): void {
+    // no-op outside Tauri
+  },
+  closeWindow(): void {
+    // no-op outside Tauri
+  },
+  // A page cannot resize or pin its own window.
+  async enterMiniWindow(): Promise<boolean> {
+    return false
+  },
+  async exitMiniWindow(): Promise<void> {
+    // no-op outside Tauri
+  },
+  startWindowDrag(): void {
+    // no-op outside Tauri
+  },
+  async saveResumeThumb(): Promise<void> {
+    // no paths in the browser → no resume list
+  },
+  async loadResumeThumb(): Promise<Blob | null> {
+    return null
+  },
+  async deleteResumeThumb(): Promise<void> {
+    // nothing stored
+  },
+  onCloseRequested(): () => void {
+    // A tab close cannot be awaited.
+    return () => undefined
+  },
+
+  async sourceLogin(): Promise<void> {
+    // Bilibili/Tencent sources require the Tauri hidden-WebView bridge.
+  },
+
+  async copyImageToClipboard(
+    _width: number,
+    _height: number,
+    _rgba: Uint8Array,
+    png: Blob
+  ): Promise<void> {
+    if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
+      throw new Error('当前浏览器不支持写入图片剪贴板')
+    }
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+  },
+
+  async saveScreenshot(
+    fileName: string,
+    png: Uint8Array
+  ): Promise<string | null> {
+    const copy = new Uint8Array(png.byteLength)
+    copy.set(png)
+    const blob = new Blob([copy], { type: 'image/png' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName.endsWith('.png') ? fileName : `${fileName}.png`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    return a.download
+  },
+
+  async pickFolder(): Promise<string | null> {
+    return null
+  },
+}

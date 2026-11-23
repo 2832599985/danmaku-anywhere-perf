@@ -9,7 +9,6 @@ import {
   Typography,
 } from '@mui/material'
 import { useEffect, useMemo, useState } from 'react'
-import { useTranslation } from 'react-i18next'
 import { SeasonSearchResult } from '@/common/components/SearchPageCore/SeasonSearchResult'
 import { localizedDanmakuSourceType } from '@/common/danmaku/enums'
 import { ProviderConfigChip } from '@/common/options/providerConfig/ProviderConfigChip'
@@ -44,7 +43,6 @@ export const ProviderResultsList = ({
   searchTerm,
   onSeasonClick,
 }: ProviderResultsListProps) => {
-  const { t } = useTranslation()
   const { configs } = useProviderConfig()
 
   const enabledProviders = useMemo(
@@ -81,7 +79,7 @@ export const ProviderResultsList = ({
           <AccordionSummary expandIcon={<ExpandMore />}>
             <Typography mr={1}>
               {provider.isBuiltIn
-                ? t(localizedDanmakuSourceType(provider.impl))
+                ? localizedDanmakuSourceType(provider.impl)
                 : provider.name}
             </Typography>
             <ProviderConfigChip config={provider} />

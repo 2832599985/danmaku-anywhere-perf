@@ -1,0 +1,9 @@
+---
+description: Update AGENTS.md when adding conventions or gotchas to a package
+globs: "app/**/*,packages/**/*,backend/**/*"
+alwaysApply: false
+---
+
+# Update Docs After Changes
+
+When you add conventions or gotchas specific to a package or app, update its `AGENTS.md`. Don't duplicate info that's derivable from code (scripts, dependencies, directory structure) — just document what an agent couldn't figure out by reading the source.

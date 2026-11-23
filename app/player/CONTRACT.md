@@ -1,0 +1,2074 @@
+# CONTRACT — Danmaku Player (local Tauri desktop player)
+
+> Plan-first artifact. Defines architecture, module boundaries, reused packages,
+> the native command surface, data shapes and acceptance mapping **before**
+> implementation. Everything below is the source of truth for the parallel
+> implementation agents. Do not deviate without updating this file.
+
+## 1. Goal & acceptance (from `播放器要求.txt`)
+
+A local Windows video player that reproduces the extension's core capabilities and
+plays local files without depending on the network for the video itself.
+
+| # | Acceptance criterion | Where it's satisfied |
+|---|----------------------|----------------------|
+| 1a | Open video files (mainstream MP4 etc.) | Native file dialog + custom streaming protocol; browser fallback = file input / drag-drop |
+| 1b | Danmaku mounting (logic ≈ extension) | `@danmaku-anywhere/danmaku-engine` `DanmakuRenderer` over the `<video>` |
+| 1c | Super-resolution | `@danmaku-anywhere/upscale-engine` `Renderer` (Anime4K) |
+| 1d | Frame interpolation (customizable) | Same `Renderer`, Framegen N× (`480p`/`720p`/`1080p`, factor or target fps) |
+| 2a | Volume adjustment | Volume slider + `video.volume` |
+| 2b | Left/right = seek | Global keydown (`±5s`, configurable) |
+| 2c | Up/down = volume | Global keydown (`±5%`) |
+| — | "Mature product" polish | Play/pause, progress bar w/ buffered + hover preview time, time display, fullscreen, mute, playback-rate, danmaku on/off + opacity/speed, settings drawer, recent files, empty state |
+
+## 2. Feasibility verdict — GO (Tauri is a good fit)
+
+- **Toolchain present on this machine:** Rust `cargo 1.97.1` (`~/.cargo/bin`, `stable-x86_64-pc-windows-msvc`), Visual Studio 2022 (MSVC linker), WebView2 runtime `150.x` (Chromium/Edge → **WebGPU-capable**), Node 24 + pnpm 10. Tauri v2 builds and links here. Only `@tauri-apps/cli` needs adding (npm).
+- **Maximum reuse, minimum new code:** the two hard parts (Anime4K super-resolution AND Framegen frame interpolation) already live in the framework-independent `@danmaku-anywhere/upscale-engine` `Renderer`, which takes only a `<video>` + `<canvas>`. Danmaku rendering is the framework-independent `DanmakuRenderer`. Both run unchanged in a WebView2/Chromium webview. We add a thin React shell + a ~100-line Rust file-streaming layer.
+- **Why not Electron:** user asked about Tauri; Tauri gives a ~3–10 MB installer vs Electron's ~150 MB and reuses the OS WebView2 (already WebGPU-capable here). No downside for our needs.
+- **Why WebView2 works for WebGPU:** WebView2 150 == Edge 150 (WebGPU shipped in 113). `shader-f16` (needed by Framegen) depends on the GPU, and the engine already falls back to Anime4K-only when it's missing.
+
+## 3. High-level architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ Tauri shell (Rust, src-tauri/)                                │
+│  • window + menu                                              │
+│  • plugin-dialog (open file), plugin-fs (read danmaku text)   │
+│  • plugin-http (DanDanPlay fetch, no CORS)                    │
+│  • custom `stream://` URI protocol: range-capable, CORS-clean │
+│    local video streaming so WebGPU copyExternalImageToTexture │
+│    stays untainted                                            │
+└───────────────────────────────┬──────────────────────────────┘
+                                │ webview (WebView2 / Chromium)
+                                ▼
+┌──────────────────────────────────────────────────────────────┐
+│ Frontend (Vite + React 19 + TS + MUI, app/player/src)         │
+│  PlayerHost                                                   │
+│   ├─ <video> (audio + GPU texture source; hidden when upscaling)│
+│   ├─ <canvas> upscale overlay  ← upscale-engine Renderer       │
+│   ├─ danmaku overlay div       ← danmaku-engine DanmakuRenderer │
+│   └─ Controls (play/seek/volume/fullscreen/danmaku/settings)   │
+│  State: Zustand store + platform adapter (tauri | browser)     │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Platform adapter (single most important abstraction)
+All environment-specific calls go through `src/platform/` so the exact same React
+tree runs in **(a)** the Tauri webview and **(b)** a plain browser (Vite dev) for
+Playwright verification.
+
+```ts
+interface Platform {
+  isTauri: boolean
+  pickVideoFiles(): Promise<PickedMedia[]>        // dialog → [{url, name, path?}]
+  pickDanmakuFile(): Promise<PickedText | null>   // dialog → {text, name} (.xml/.json/.txt)
+  pickSubtitleFile(): Promise<PickedText | null>  // dialog → {text, name} (.srt/.ass/.vtt)
+  mediaUrlForPath(path: string): string           // stream:// URL builder
+  readTextFile(path: string): Promise<string>     // plugin-fs (Tauri only)
+  onFileDrop(cb: (paths: string[]) => void): () => void
+  minimizeWindow() / toggleMaximizeWindow() / closeWindow()
+}
+```
+- **Tauri impl:** `@tauri-apps/plugin-dialog`, `@tauri-apps/plugin-fs`, `@tauri-apps/plugin-http`, custom `stream://` protocol for `toMediaUrl`.
+- **Browser impl:** `<input type=file>` + `URL.createObjectURL` (blob URLs are CORS-clean → WebGPU works), `window.fetch`. `path` unavailable → `toMediaUrl` returns the blob URL as-is.
+
+## 4. Directory layout (new — `app/player/`, exclusive to this feature)
+
+```
+app/player/
+├── CONTRACT.md                      ← this file
+├── package.json                     ← @danmaku-anywhere/player (private)
+├── vite.config.ts                   ← react + alias @ → src, port 3060, WebGPU-friendly target
+├── tsconfig.json / tsconfig.node.json
+├── index.html
+├── biome.json (extends root) — or rely on root
+├── public/
+│   ├── assets/framegen/             ← COPY of rt_v7s.bin/.json + LICENSE + WEIGHTS_LICENSE.md
+│   └── danmaku.css                  ← .da-danmaku* styles (shipped for the engine)
+├── src/
+│   ├── main.tsx                     ← React root, theme, store bootstrap
+│   ├── App.tsx                      ← layout: PlayerHost + Controls + drawers
+│   ├── platform/                    ← Platform adapter (tauri.ts, browser.ts, index.ts, types.ts)
+│   ├── store/                       ← Zustand store (playerStore.ts, settingsStore.ts) + persistence
+│   ├── player/
+│   │   ├── PlayerHost.tsx           ← <video>+<canvas>+danmaku overlay wiring, refs
+│   │   ├── useVideoElement.ts       ← play/pause/seek/volume/rate/fullscreen imperatives + events
+│   │   ├── useKeyboardControls.ts   ← ←/→ seek, ↑/↓ volume, space, f, m, d
+│   │   ├── upscale/UpscaleController.ts  ← wraps upscale-engine Renderer + overlay canvas geometry
+│   │   └── danmaku/DanmakuController.ts  ← wraps DanmakuRenderer + overlay container
+│   ├── danmaku/
+│   │   ├── parse.ts                 ← local file → CommentEntity[] (xml/json/ass) via danmaku-converter
+│   │   └── ddp.ts                   ← online search/episodes/comments via danmaku-provider
+│   ├── ui/
+│   │   ├── Controls.tsx             ← bottom control bar
+│   │   ├── ProgressBar.tsx, VolumeControl.tsx, TimeDisplay.tsx
+│   │   ├── SettingsDrawer.tsx       ← upscale + interpolation + danmaku settings
+│   │   ├── UpscaleSettings.tsx      ← (modeled on extension UpscaleControls.tsx)
+│   │   ├── DanmakuSettings.tsx
+│   │   ├── DanmakuSourceDialog.tsx  ← local import + DDP search
+│   │   └── EmptyState.tsx           ← drag-drop / open prompt
+│   └── theme/theme.ts               ← manga ink theme (vermilion/paper, zero radius, halftone)
+└── src-tauri/
+    ├── Cargo.toml
+    ├── tauri.conf.json              ← window, security CSP, protocol allowlist, bundle
+    ├── build.rs
+    ├── capabilities/default.json    ← dialog/fs/http permissions
+    ├── icons/                       ← generated
+    └── src/
+        ├── main.rs
+        ├── lib.rs                   ← builder, plugins, register stream protocol
+        └── stream.rs               ← range-capable, CORS-clean file streamer
+```
+
+## 5. Reused workspace packages (deps of `@danmaku-anywhere/player`)
+
+| Package | Use |
+|---------|-----|
+| `@danmaku-anywhere/upscale-engine` (`workspace:*`) | `Renderer`, `resolveEffectChain`, `waitForVideoReady`, types |
+| `@danmaku-anywhere/danmaku-engine` (`workspace:*`) | `DanmakuRenderer` |
+| `@danmaku-anywhere/danmaku-converter` (`workspace:*`) | `CommentEntity`, `p`/gradient parsers, XML/format converters |
+| `@danmaku-anywhere/danmaku-provider` (`workspace:*`) | DanDanPlay search/episode/comment fetch (online, optional) |
+| `@danmaku-anywhere/result` (`workspace:*`) | `Result<T,E>` unwrapping for provider calls |
+| npm: `anime4k-webgpu`, `framegen` | transitive via upscale-engine |
+| npm: `@mr-quin/danmu` | transitive via danmaku-engine |
+
+These packages are consumed as **TypeScript source** (workspace, `main: src/index.js`
+but Vite resolves `src`). vite/tsconfig must include them for transpilation
+(mirror how the extension consumes them; add to `optimizeDeps`/`server.fs.allow` as
+needed and DO NOT rely on prebuilt `dist`).
+
+## 6. Native command / protocol surface (Rust)
+
+- **`stream://` async URI scheme** (`src-tauri/src/stream.rs`): given `stream://localhost/<url-encoded-abs-path>`, serves the file with:
+  - `Accept-Ranges: bytes`, honors `Range:` (206 partial) → enables video seeking of large files without loading into memory,
+  - `Content-Type` by extension (mp4→`video/mp4`, mkv→`video/x-matroska`, webm, etc.),
+  - `Access-Control-Allow-Origin: *` so `video.crossOrigin="anonymous"` yields CORS-clean frames for WebGPU.
+- **Plugins:** `tauri-plugin-dialog`, `tauri-plugin-fs`, `tauri-plugin-http`. No custom Rust `#[command]` strictly required beyond the protocol (keep Rust minimal).
+- **CSP** (`tauri.conf.json`): allow `media-src stream: blob:`, `connect-src` for DanDanPlay + proxy, `img-src`, `worker-src blob:` (danmu preparse worker), `script-src 'self'`.
+
+## 7. Settings / data shapes (frontend, persisted to localStorage; Tauri store optional)
+
+```ts
+// mirrors extension upscale schema 1:1 so engine glue is identical
+type UpscaleSettings = {
+  enabled: boolean
+  modeId: 'builtin-mode-a'|'-b'|'-c'|'-aa'|'-bb'|'-ca'
+  performanceTier: 'performance'|'balanced'|'quality'|'ultra'
+  targetResolution: 'x2'|'x4'|'x8'|'720p'|'1080p'|'2k'|'4k'|'native'
+  frameInterpolation: {
+    enabled: boolean
+    resolution: '480p'|'720p'|'1080p'   // model processing resolution (§17)
+    mode: 'multiplier'|'targetFps'
+    multiplier: 2|3|4
+    targetFps: 60|120|144|170
+  }
+}
+// defaults: enabled:false, modeId:'builtin-mode-a', tier:'balanced',
+//           targetResolution:'x2', frameInterpolation:{enabled:false,resolution:'720p'}
+
+type DanmakuSettings = Partial<DanmakuOptions> & {
+  visible: boolean            // maps to show/hide()
+  // opacity, fontSize, speed, area.yEnd, offset, maxOnScreen, overlap …
+}
+// defaults tuned like extension: opacity 0.7, area.yEnd 80, speed 1, offset 0
+
+type PlayerSettings = {
+  seekStepSec: number         // default 5  (←/→)   — "自定义" seek step
+  volumeStep: number          // default 0.05 (↑/↓)
+}
+```
+
+### targetDimensions math (reproduce from `Upscale.service.ts`)
+```
+src = { w: max(1, video.videoWidth), h: max(1, video.videoHeight) }
+switch targetResolution:
+  x2→src*2  x4→src*4  x8→src*8
+  720p→1280×720  1080p→1920×1080  2k→2560×1440  4k→3840×2160  native→src
+then clampToDisplayBounds(dims):
+  dpr=devicePixelRatio||1; maxW=round(screen.width*dpr); maxH=round(screen.height*dpr)
+  if !maxW||!maxH return dims; scale=min(maxW/w,maxH/h); if scale>=1 return dims
+  else round(w*scale)×round(h*scale)
+effects = resolveEffectChain(modeIdToBaseMode[modeId], performanceTier)
+frameInterpolation = { enabled, resolution,
+  weightsBinUrl:'/assets/framegen/rt_v7s.bin',
+  weightsManifestUrl:'/assets/framegen/rt_v7s.json' }
+canvas.width/height = clamped targetDimensions
+Renderer.create({ video, canvas, effects, targetDimensions, frameInterpolation,
+  presentationMode:'raf', onFirstFrameRendered:()=>{ canvas.visible=true; video.style.opacity='0' },
+  onFrameInterpolationFallback, onError })
+// settings change (same video): renderer.updateConfiguration({effects,targetDimensions,frameInterpolation})
+// teardown: renderer.destroy(); restore video opacity
+```
+
+## 8. Danmaku data flow (1b)
+
+```
+Source A (offline, primary): local file → src/danmaku/parse.ts → CommentEntity[]
+   • .xml (bilibili):  await zGenericXml.parseAsync(text)            → CommentEntity[]
+   • .json:            z.array(zCommentEntity).parse(JSON.parse(t))  (or {comments:[…]} / DDP dump)
+   (danmaku-converter re-exports zGenericXml, zCommentEntity, parsers; uses xml-js internally)
+Source B (online, optional): DanDanPlay via src/danmaku/ddp.ts (danmaku-provider/ddp)
+   • configureApiStore({ daId: <persisted uuid>, daVersion })  // default proxy API_ROOT = https://api.danmaku.weeblify.app
+   • searchSearchAnime(keyword)  → Result<SearchAnimeDetails[]>  (each has episodes[])
+   • commentGetComment(episodeId) → Result<CommentData[]>  (CommentData ≅ CommentEntity {p,m,cid})
+   • Tauri: window.fetch is swapped to @tauri-apps/plugin-http fetch at boot → provider bypasses CORS unmodified
+→ DanmakuController.mount(comments):
+     container = <div style="position:absolute; inset:0; pointer-events:none">
+     new DanmakuRenderer((node,props)=>renderInner(node,props))  // append .da-danmaku inner div
+     renderer.create(container, videoEl, comments, danmakuConfig)
+→ sync is AUTOMATIC via <video> events (bindVideo). seek = set video.currentTime.
+→ settings change: renderer.updateConfig(partial); resize: renderer.resize()
+```
+Ship `public/danmaku.css` (the `.da-danmaku*` rules) and load it globally.
+
+## 9. Keyboard / controls spec (2a/2b/2c + polish)
+
+| Key | Action |
+|-----|--------|
+| `←` / `→` | seek −/+ `seekStepSec` (default 5s) |
+| `↑` / `↓` | volume +/− `volumeStep` (default 5%), unmutes |
+| `Space` / `k` | play / pause |
+| `f` | toggle fullscreen |
+| `m` | mute toggle |
+| `d` | danmaku on/off |
+| `,` `.` | when helpful: frame step (optional) |
+
+Ignore when focus is in an input/textarea. Show a transient OSD on volume/seek.
+Bottom control bar auto-hides after 2.5s of mouse inactivity during playback.
+
+## 10. Module ownership for parallel implementation (strict file scope)
+
+| Agent | Exclusive scope | Depends on (mock until ready) |
+|-------|-----------------|-------------------------------|
+| Leader (me) | `package.json`, `vite.config.ts`, `tsconfig*`, `index.html`, `src/main.tsx`, `src/App.tsx`, `public/**`, workspace wiring, `src-tauri/**` | — |
+| A: platform+store | `src/platform/**`, `src/store/**` | Platform/types (define first) |
+| B: player core | `src/player/**` (video, keyboard, upscale, danmaku controllers) | store types, platform types |
+| C: danmaku data | `src/danmaku/**` | CommentEntity type only |
+| D: UI | `src/ui/**`, `src/theme/**` | store selectors, platform |
+
+Interfaces (`platform/types.ts`, store shape, controller class signatures) are frozen
+in this CONTRACT so B/C/D mock against them.
+
+## 11. Verification plan
+
+1. **Type-check + lint** the new package (`tsgo`/`tsc --noEmit`, biome).
+2. **Playwright (headed `channel:'chromium'`)** e2e against Vite dev (proven WebGPU path, mirrors `e2e/upscale.spec.ts`):
+   - loads app, opens a generated `captureStream` video (no external asset needed),
+   - danmaku: inject sample `CommentEntity[]`, assert `.da-danmaku` nodes appear & move; seek clears/repopulates,
+   - controls: `←/→` change currentTime; `↑/↓` change volume,
+   - upscale: enable → assert `canvas[data-danmaku-anywhere-upscale]` visible, video opacity 0, canvas size == clamped target,
+   - interpolation: enable → assert `data-danmaku-anywhere-frame-interpolation` = `active` (shader-f16) or `fallback`.
+3. **Tauri build**: `pnpm --filter @danmaku-anywhere/player tauri build` compiles Rust + bundles the exe/installer (proves desktop packaging).
+
+## 12. Interpretations / decisions (documented, not blocking)
+
+- **"自定义插帧" (custom interpolation):** ~~Framegen is architecturally 2× (midpoint) and extra multipliers are out of scope.~~ **Superseded by §16(4) and §17** — the model's `runT(t)` accepts any `t`, so the shipped knobs are on/off, factor (2×/3×/4×) or target fps, and processing resolution (`480p`/`720p`/`1080p`), plus automatic overload bypass.
+- **Danmaku source priority:** local-file import is primary (matches the "network-unreliable" motivation); DanDanPlay online search is an included convenience reusing the provider package.
+- **License:** Framegen weights are personal/non-commercial; `LICENSE` + `WEIGHTS_LICENSE.md` ship beside the model and a notice appears in the interpolation settings.
+- **No GPU benchmark:** performanceTier is a manual setting (matches extension).
+
+## 13. Verification results (2026-07-24 — DONE)
+
+All acceptance criteria pass; `tsc --noEmit` clean, `vite build` ok, Playwright e2e
+green, and `pnpm tauri build` produced `danmaku-player.exe` + MSI + NSIS installer.
+
+| Criterion | Result |
+|-----------|--------|
+| 1a open video | ✅ 640×360 loaded (blob = same as Tauri stream://) |
+| 1b danmaku | ✅ `.da-danmaku` nodes render + scroll, synced to video |
+| 1c super-resolution | ✅ WebGPU canvas 1280×720 (=640×360 ×2), video hidden behind it |
+| 1d frame interpolation | ✅ Framegen **active** at 640×352, generating midpoint frames |
+| 2a volume | ✅ slider + `video.volume` |
+| 2b seek keys | ✅ `←/→` change currentTime |
+| 2c volume keys | ✅ `↑/↓` change volume |
+
+### Two real bugs found & fixed (both also affect the upstream extension)
+1. **Corrupt Framegen manifest in the fork** — `packages/danmaku-anywhere/public/assets/framegen/rt_v7s.json` (3188 B) does not match `rt_v7s.bin`, so Framegen's weight `writeBuffer` overflows and interpolation silently falls back on real (shader-f16) GPUs. The canonical manifest ships in `node_modules/framegen/weights/rt_v7s.json` (2997 B; last layer ends exactly at the bin size). The player bundles the canonical copy.
+2. **Local web filter blocks in-browser `.bin` downloads** — on this machine, browser fetches of `*.bin` return an empty HTTP 204 (curl gets 200; `.dat`/`.weights` get 200). The player serves weights as `rt_v7s.dat` and points `weightsBinUrl` at it (bytes identical).
+
+### Packaged-exe verification (2026-07-25) — two more bugs, exe-only, fixed
+The browser e2e never exercised the real WebView2 runtime; the first packaged exe
+opened to a black screen. Diagnosed by launching the exe with
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` and
+attaching Playwright over CDP (`e2e/cdp-inspect.mjs`).
+
+3. **Tauri CSP nonce disabled `'unsafe-inline'` → invisible app.** The inline
+   `<style>` in `index.html` made Tauri append a `'nonce-…'` to `style-src`;
+   per the CSP spec a nonce makes `'unsafe-inline'` ignored, so every
+   Emotion/MUI runtime `<style>` was blocked. React mounted fine, but the root
+   `Box` (`position:fixed; inset:0` from Emotion) collapsed to 0×0 on a #000
+   page = black screen. Fix: base styles moved to `public/app.css` (no inline
+   styles anywhere) + `security.dangerousDisableAssetCspModification:
+   ["style-src"]`.
+4. **Global `window.fetch = plugin-http fetch` swap broke Tauri internals.**
+   plugin-http scope-denies anything outside the capability allowlist, which
+   broke Tauri's IPC custom-protocol probe (`IPC custom protocol failed …`
+   falling back to postMessage) and would scope-deny the relative-URL framegen
+   weight fetches. Fix: selective bridge — only `api.danmaku.weeblify.app` and
+   `*.dandanplay.net` route through plugin-http; everything else keeps native
+   fetch. `main.tsx` also paints bootstrap errors into `#root` now instead of
+   failing to a silent black screen.
+
+**Exe re-verification:** `e2e/verify-exe.mjs` (CDP attach) — 14/14 checks pass
+inside the packaged exe: CSP-clean bootstrap, layout fills window, video via
+`http://stream.localhost/<encoded path>` (640×360, 10 s, range-seekable),
+play/seek/volume keys, danmaku nodes, upscale canvas 1280×720 with video
+hidden, frame interpolation **active** with generated frames, screenshots in
+`test-results/exe-*.png`. Browser e2e suite still green after the fixes.
+
+## 14. Playlist feature (2026-07-25 — DONE, verified in exe)
+
+VLC-style queue, implemented by parallel agents (store / platform / UI) against
+this frozen contract; leader owned commands/PlayerHost/keyboard/verification.
+
+- **Store** (`playerStore.ts`): `PlaylistItem {url,name,path?}`, state
+  `playlist` / `playlistIndex` (−1 = detached) / `playlistOpen` (all
+  session-only), actions `setPlaylist(items, startIndex?)` /
+  `appendToPlaylist` / `playPlaylistIndex` / `removePlaylistIndex` /
+  `clearPlaylist` / `setPlaylistOpen`. Item switches also clear
+  comments/danmakuSource and reset the playback mirror. New setting
+  `playbackSettings.autoAdvance` (default on).
+- **Platform**: `pickVideoFile` → `pickVideoFiles(): Promise<PickedMedia[]>`
+  (multi-select dialog / `<input multiple>`; `[]` on cancel).
+- **Commands**: `openVideo` now multi-selects and replaces the playlist;
+  added `openVideosFromPaths/Files`, `addVideosToPlaylist`, `playlistPrev` /
+  `playlistNext` / `playlistPlayAt`, `togglePlaylist`. Keyboard: `[` / `]`.
+- **UI**: `PlaylistDrawer.tsx` (right drawer: count, add/clear, 自动连播
+  switch, active-highlighted list, per-item delete), prev/next buttons in
+  `Controls.tsx`, 播放列表 button (+count) in `TopBar.tsx`.
+- **PlayerHost**: `ended` → auto-advance (when enabled); multi-file drag-drop
+  builds a playlist (videos first, then danmaku files); **sibling danmaku
+  autoload** — on Tauri, opening `foo.mp4` tries `foo.xml` then `foo.json`
+  next to it and mounts it automatically unless danmaku was loaded explicitly.
+  `e2e/fixtures/test.xml` exercises this.
+
+### Two more bugs found & fixed during verification
+5. **zustand persist shallow-merge wipes newly added settings defaults** — an
+   older persisted `playbackSettings` object (without `autoAdvance`) replaced
+   the default wholesale, so `autoAdvance` was `undefined` and auto-advance
+   never fired for existing installs. Fixed with a deep `merge` option in
+   `playerStore.ts` (defaults ← persisted, per settings object incl. nested
+   `frameInterpolation`). This protects every future settings addition.
+6. **PowerShell 5.1 `Get-Content`/`Set-Content` round-trip mojibakes BOM-less
+   UTF-8** — regex-editing `verify-exe.mjs` via PowerShell corrupted its
+   Chinese string literals (read as ANSI/GBK). Rewrote the file; edit
+   non-ASCII files with proper tools only. Also fixed a latent Playwright
+   `waitForFunction(fn, arg, options)` misuse (options were being passed as
+   `arg`, so custom timeouts were silently ignored).
+
+**Final exe verification: 19/19 checks pass** (14 original + playlist
+creation, sibling-danmaku autoload, drawer UI, next-switching, auto-advance
+on ended). Screenshot: `test-results/exe-3-playlist.png`.
+
+## 15. HDR10 support (2026-07-26 — DONE, verified in exe)
+
+Scope decision: full **Dolby Vision / Dolby Atmos are NOT feasible** in the
+WebView2 `<video>` architecture (Chromium doesn't decode DV RPU or render Atmos
+objects / bitstream-passthrough, and both are Dolby-licensed). What IS feasible
+and shipped is **HDR10** — Chromium/WebView2 does the decode + tone-mapping; our
+job is detection, not breaking the pipeline, and surfacing status.
+
+Capability probe on this machine (`e2e/probe-hdr.mjs`): HEVC Main10 **HDR10
+hardware decode = supported/smooth/powerEfficient** (HEVC Video Extension
+2.4.13 installed); AV1 HDR10 = not supported (no AV1 extension); the display is
+currently in **SDR mode**, so HDR content tone-maps to SDR (true HDR output
+needs Windows HDR toggle + an HDR panel — could not be verified on this SDR
+display).
+
+Implementation:
+- **Detection** (`src/player/detectHdr.ts`): `new VideoFrame(video).colorSpace.transfer`
+  === `'pq'` (HDR10) / `'hlg'` (HLG) on the first `requestVideoFrameCallback`.
+  Chromium doesn't expose transfer on `<video>` directly; the VideoFrame does.
+  (The DOM lib's `VideoTransferCharacteristics` union predates the HDR values →
+  read `transfer` as a plain string.)
+- **Store**: session-only `isHdr` / `hdrTransfer`, `setHdr()`; reset on every
+  media switch (`setMedia` + `resetPlaybackForNewMedia`).
+- **HDR × Anime4K conflict** (the one real hazard): the upscale path renders
+  through an 8-bit sRGB WebGPU canvas, which clips/mangles PQ/BT.2020. So HDR
+  sources **suppress upscaling at runtime** — the user's `upscale.enabled`
+  setting is kept, but a dedicated decision effect in `PlayerHost` skips
+  applying it (keeps the native `<video>`, which WebView2 outputs/tone-maps
+  correctly) and shows a one-time OSD. Switching back to an SDR source resumes
+  upscaling automatically.
+- **UI**: gold `HDR10` / `HLG` chip in `TopBar` next to the filename.
+
+Verified: `e2e/verify-hdr.mjs` (5/5) using an ffmpeg-generated
+`e2e/fixtures/hdr10_test.mp4` (HEVC Main10, PQ, BT.2020) — SDR clip not flagged,
+HDR clip decodes + flagged `pq`, upscale suppressed on HDR (video stays
+visible), upscale resumes on SDR (1280×720 canvas). The 19-check acceptance and
+browser suite still pass. Screenshot: `test-results/exe-4-hdr-badge.png`.
+
+### Verification harness notes
+- e2e drives the player through `window.__player` (store + commands) with a real
+  ffmpeg-generated seekable `e2e/fixtures/test.mp4` loaded as a blob.
+- Vite `preview` also returns 204 for `.bin`; the e2e serves the prebuilt `dist/`
+  with `e2e/serve-dist.mjs` (range + CORS). Build first, then run the suite.
+- The Vite **dev** dep-optimizer chokes on the excluded/aliased workspace TS
+  packages, so `pnpm dev` currently can't load the app — irrelevant to the
+  product (Tauri packages via `vite build`). Fix later if `tauri dev` is wanted.
+
+```
+
+## 16. UX fixes + variable frame interpolation (2026-07-26 — DONE, verified in exe)
+
+Four follow-up items requested after the HDR10 pass. All verified: **24/24**
+`e2e/verify-exe.mjs` (was 19) + **5/5** `verify-hdr.mjs` + **14** engine unit
+tests + browser e2e.
+
+**(1) Danmaku position wrong after fullscreen toggle.** The `@mr-quin/danmu`
+engine caches the container width when tracks are built and nothing called
+`DanmakuRenderer.resize()` on a resize, so comments spawned from a stale
+x-position after entering/leaving fullscreen. Fix: `PlayerHost` observes the
+danmaku overlay with a `ResizeObserver` (rAF-coalesced) → `danmakuCtrl.resize()`.
+
+**(2) Settings/danmaku/playlist unreachable in fullscreen.** MUI `Drawer`/`Dialog`
+portal to `document.body`, which is hidden behind the fullscreen element (only the
+fullscreen subtree renders). Fix: `FullscreenPortalContext` (`src/player/fullscreenPortal.ts`)
+carries the stage element; the three overlays pass `slotProps={{ root: { container } }}`
+so they portal INTO the stage (which is the fullscreen root). The stage carries a
+`data-player-stage` attribute; verify-exe asserts `stage.contains(drawer)`.
+
+**(3) Persistent playlist as history + resume.** `playerStore` persists the
+`playlist` (path-backed items only — blob opens can't be revived) and a
+`progress: Record<path, {time, duration, updatedAt}>` map. Opening media now
+**adds to** the playlist instead of replacing it (dedup by path/url, capped at
+200, oldest dropped) via the `openMedia` action, so the list is a running history
+that survives restarts; the first opened item becomes current and plays. On
+launch the queue is restored **detached** (`playlistIndex: -1`, media never
+auto-loaded — a moved/deleted file can't wedge startup); clicking an item resumes
+from `progress`. `openMedia` assigns a fresh media object so re-opening the
+current file still re-runs load + resume. Resume seeks on `loadedmetadata` when
+`3 < time < duration*0.95`; progress is saved throttled on `timeupdate`, on
+`pause`, on `pagehide`, and cleared on `ended`. verify-exe/verify-hdr clear
+localStorage via `addInitScript` for determinism.
+
+**(4) Variable frame interpolation (factor / target fps).** The Framegen model's
+`runT(t)` accepts any `t`, so N-1 intermediate frames per source pair is a direct
+extension (was hard-coded `runT(0.5)`). `FrameInterpolationOptions` gained
+optional `multiplier` and `targetFps` (extension passes neither → 2×, unchanged).
+Engine (`frame-interpolator.ts`): pure `resolveInterpolationFactor` / 
+`computeMaxInterpolationFactor` (unit-tested), mid-texture pool sized to
+`(maxFactor-1)*3+2`, `processPair` loops `k/factor` and enqueues each at a
+proportional `displayAt`; overload budget is now the whole source interval
+(`intervalMs*0.85`). `takeDueFrame` already pulls at the monitor refresh via rAF,
+so output naturally caps at the refresh rate. Factor cap is 8. Player UI adds a
+mode toggle (倍率 2×/3×/4× · 目标帧率 60/120/144/170); `targetFps` adapts the live
+factor to the measured source fps. **Ceiling reality:** output ≤ display refresh;
+2× already saturates 60Hz for 24–30fps content — higher factors only pay off on
+high-refresh monitors (targeted here at a 170Hz display).
+
+### One caveat observed
+Rapidly changing the factor 3× back-to-back (verify-exe #12) logs a transient
+`getCurrentTexture: context is not configured` from the presentation loop firing
+mid-reconfigure. It is caught, non-fatal, and self-heals to `active`; it is the
+renderer's existing reconfigure path, not the multi-frame change. A single
+user-driven factor change triggers one reinit and is unaffected.
+
+
+## 17. Interpolation processing resolution up to 1080p (2026-07-26 — DONE, verified in exe)
+
+**Complaint:** "当前这个补帧的分辨率只有 720P 吗?能不能补到跟当前分辨率一样?"
+
+**What was actually true.** The *output* resolution was never capped at 720p — the
+Anime4K chain still scales to `targetResolution` (up to 4K). But with interpolation
+on, **every** frame (real ones too) is first resampled down to the interpolation
+working size (`calculateInterpolationDimensions`, height ≤ 720) before Framegen,
+and the Anime4K chain then runs on *that* texture (`createResources` sizes
+`videoFrameTexture` from `frameInterpolator.dimensions`;
+`processDueInterpolatedFrame` → `encodeInterpolationInput` → pipelines). So detail
+was genuinely capped at 720p: a 1080p source got downsampled and then guessed back
+up. The user's perception was correct even though the canvas said 4K.
+
+**Change.** `FrameInterpolationResolution` gains `'1080p'` (engine `types.ts`,
+mapped in `calculateInterpolationDimensions`), mirrored in the player's
+`InterpolationResolution` and exposed as a third toggle. Default stays `720p`; the
+extension never sets `1080p`, so its behavior is unchanged.
+
+**Why 1080p and not native/4K.** Cost scales with pixel count (1080p = 2.25× of
+720p) and multiplies with the factor from §16(4). On this machine's mid-range GPU,
+4K neural interpolation would mostly live in the overload-bypass path, which looks
+worse than not interpolating. 1080p is the honest ceiling here; raising it later is
+a one-line map change plus a UI entry.
+
+**No upsampling.** The scale is `min(1, …)`, so a 640×360 source stays 640×352 at
+any setting — choosing `1080p` for a sub-1080p source is a no-op, not a quality
+gain. 16-pixel alignment means 1080p processes as 1920×1072.
+
+**Verified:** engine unit tests 16/16 (added 1080p and 4K-source dimension
+asserts), engine + player type-check, `vite build`, `tauri build`, and in the real
+exe `verify-exe.mjs` **25/25** plus an ad-hoc CDP check that setting
+`resolution:'1080p'` stays `active` and keeps generating frames.
+
+## 18. Post-review bug sweep (2026-07-26 — DONE, verified in exe)
+
+A review of §16/§17 found one bug of the same class the user had already
+reported, plus several gaps the new persistent history exposed. All fixed and
+covered by `verify-exe.mjs` (now **30 checks**) / `verify-hdr.mjs` (**6**).
+
+**(1) Overlays were only half fixed for fullscreen.** §16(2) gave the three
+drawers/dialog an explicit portal container, but the playback-rate `Menu` and
+every `Tooltip` still went to `document.body`. Reproduced over CDP in the exe:
+the menu opened at 83x209 but `elementFromPoint` at its own centre returned the
+`<video>` — invisible, and `Menu`'s backdrop swallowed the next click, so
+fullscreen looked frozen. Fixed *systemically* instead of per call site: a
+nested `ThemeProvider` in `PlayerHost` sets `defaultProps.container` for
+`MuiModal`/`MuiPopover`/`MuiPopper` to the stage, so every present and future
+overlay portals correctly. (The explicit `slotProps.root.container` on the three
+overlays stays as belt-and-braces.)
+
+**(2) Failed loads were silent.** Nothing listened to `<video>`'s `error`. With
+a history that outlives the files it points at, a moved/deleted file just showed
+a black screen. Added an error listener in `useVideoElement`, `mediaError` in the
+store, and a dismissible `Alert` (with the offending path) over the stage.
+
+**(3) The playlist showed no watch state.** `progress` was persisted but never
+displayed. The drawer now shows `看到 mm:ss / mm:ss · 3 天前` (or `已看完`) plus a
+progress bar, and highlights the *playing* entry by path rather than by
+`playlistIndex` — the two diverge once the playing entry is removed. Order is
+deliberately still insertion order: the list doubles as the play queue, so
+re-sorting by recency would silently change what "next" means.
+
+**(4) HDR suppression lied about status.** The HDR branch called `reset()`,
+which tears the renderer down *without* firing the status callbacks, so the panel
+kept showing "已启用 / 补帧运行中". Now calls `disable()`.
+
+**(5) "Clear the resume point when finished" never ran.** Traced in the exe: the
+auto-advance `ended` listener switches media, React flushes that store update
+**synchronously inside the same event dispatch**, the media-keyed effect's
+cleanup unregisters the remaining listeners, and a listener removed mid-dispatch
+is never invoked — so the `clearProgress` that lived next to the save handlers
+was dead code. Moved into the element-keyed effect (which survives media
+changes). `save()` also now bails when `video.ended`, so the cleanup that runs
+while switching cannot write the point back at ~100%.
+
+**(6) A high target fps at 1080p would have thrashed.** Cost is
+`(factor - 1) x processing pixels`, and pools are sized for the worst case: a
+170fps target reserved 23 mid textures (~190 MB at 1080p) and then could not
+finish a pair inside one 24fps interval, so it would oscillate through the
+2-second overload bypass. Added `computeResolutionFactorCap()` — a per-pair
+megapixel budget that leaves 720p at the full 8x and settles 1080p at 4x — and a
+UI note. 480p/720p behaviour is unchanged.
+
+**(7) Smaller ones.** Removing the playing entry now parks the cursor just before
+the freed slot so next/auto-advance carry on instead of going dead;
+`playPlaylistIndex` takes a fresh media copy so re-selecting the current entry
+reloads like `openMedia` does; keyboard shortcuts are ignored inside an open
+overlay (Space no longer steals activation from a focused switch); `progress` is
+capped at 500 entries (least-recently-updated dropped); and the history cap no
+longer leaks when the re-opened item is the oldest one.
+
+**Aspect-ratio fix.** `calculateInterpolationDimensions` used to floor both sides
+onto the 16-pixel grid independently, squashing 640x360 by 2.2% (-> 640x352) and
+1080p by 0.74%. It now picks the aligned width nearest the source aspect
+(640x360 -> 624x352, 1920x1080 -> 1904x1072).
+
+## 19. Main-window redesign: frameless chrome + idle stage (2026-07-26 — DONE)
+
+User feedback: the native Windows title bar ("大黑条") and the form-like empty
+state read as a wrapped web page, and the flat two-stop purple looked cheap.
+
+**Frameless window.** `decorations: false`; the top pill bar is the title bar
+now — `data-tauri-drag-region` on the bar/pill/middle-stack (children stay
+clickable), double-click maximizes, and ─ □ ✕ render at the pill's right end via
+new `Platform.minimizeWindow/toggleMaximizeWindow/closeWindow` (no-ops in the
+browser adapter, buttons gated on `isTauri`). Capabilities add
+`core:window:allow-{minimize,toggle-maximize,close,start-dragging}`.
+
+**Idle stage (EmptyState).** Manga ink scene: halftone dot ground + conic
+speed-lines, four drifting danmaku (left:100% → ink-dm sweep), a rotated PAPER
+hero block with `弾幕プレイヤー` in Zen Antique + vermilion hard shadow, anime
+sparkles (✦), a sweep-animated open button, a continue-watching grid (3 cols,
+`minmax(0,1fr)`, fed from playlist+progress top 3 by `updatedAt`), and a
+floating mascot (`mascot-manga.png`, responsive shrink <1600px, hidden <1200px).
+Scroll-safe centering via `min-height:100%` flex centerer inside an overflow-auto
+layer. The bottom Controls bar no longer renders with no media loaded.
+
+**Verify:** 30/30 in the packaged exe; the empty-state innerText check now sees
+the ghost danmaku, which is expected.
+
+## 20. Subtitle system (2026-09-06 — stage 1 DONE; ASR stages planned)
+
+> **Superseded (2026-11-11):** the SenseVoice/sherpa-onnx generation path below
+> was removed; AI subtitles are now §34 (whisper-server + llama-server sidecars).
+> Stage 1 (external files) still applies.
+
+Local subtitle support, built in two halves. **Stage 1 (landed):** external
+subtitle files (SRT/ASS/VTT) — parse, mount, frame-exact rendering. **Stages
+2-6 (planned):** local speech-to-text generation (SenseVoice via sherpa-onnx in
+Rust, ffmpeg sidecar audio extraction, optional ja→zh translation through the
+built-in genAi proxy).
+
+**Stage 1 — what landed:**
+
+- `src/subtitle/format.ts` — `parseSubtitleText(text, name)` → sorted
+  `SubtitleCue[]` ({start, end, text}, seconds). SRT (CRLF + BOM safe, `,` or
+  `.` milliseconds), lenient WebVTT (id lines + cue settings tolerated), basic
+  ASS/SSA ([Events] Format-driven, `{\...}` overrides stripped, `\N`→newline,
+  text may contain commas). `serializeSrt(cues)` is the on-disk cache format
+  for generated subtitles. Verified roundtrip.
+- `src/player/subtitle/SubtitleController.ts` — timing engine. Binary-search
+  cue lookup over the start-sorted array; ticked by
+  `requestVideoFrameCallback` (rAF fallback, `seeked`/`play` one-shot refresh
+  for paused seeks). Reports cue CHANGES only (never per frame) through
+  `onCueChange(index)`; PlayerHost mirrors the index into the store and React
+  renders the text — store writes happen once per cue boundary. `offset` (ms,
+  danmaku sign convention: lookup time = currentTime - offset) is applied at
+  lookup time and re-checks on change.
+- Store: `subtitleCues`/`subtitleSource`/`subtitleCueIndex` (session-only,
+  reset by `resetPlaybackForNewMedia`) + persisted `subtitleSettings`
+  (visible/fontSize/offset/bottom/opacity/outline/engine/sourceLanguage/
+  displayLanguage/autoTranslate/useGpu). NOTE: `subtitleSettings` had to be
+  added to BOTH `partialize` and the deep `merge` (§ persistence notes above).
+- Mount paths: drag-drop (.srt/.ass/.vtt routed to the subtitle channel, no
+  longer misrouted to danmaku — `.ass` was accepted by the danmaku pickers but
+  never parsed, a latent bug), file picker (`Platform.pickSubtitleFile`),
+  and Tauri sibling auto-load (`<video>.zh.srt` → `.srt` → `.ass` → `.vtt`,
+  wins over nothing — explicit loads still take priority via the
+  `subtitleSource` identity recheck, same discipline as the danmaku sibling
+  effect).
+- Rendering: stage layer `zIndex: 3` (above danmaku, below error/chrome),
+  bottom-anchored PAPER text with INK text-shadow outline, lifted 7% while
+  controls are visible. `Platform` gained `pickSubtitleFile`; `PlayerCommands`
+  gained `toggleSubtitles` (S), `loadSubtitleFromFile/FromText/FromPath`;
+  keyboard `,` / `.` nudge the offset ±100ms.
+- Engine/model fields in `subtitleSettings` (`engine: sensevoice|whisper`,
+  `sourceLanguage: auto|ja|zh`, `displayLanguage: source|zh`, `autoTranslate`,
+  `useGpu`) are INERT in stage 1 — defined now so persistence stays stable;
+  wired up in stages 2-6.
+
+**Stages 2-6 — planned ASR pipeline (do not re-litigate, decisions locked):**
+
+- Rust (`src-tauri`): NEW `subtitle/` module. Commands (invoke_handler does not
+  exist yet — create it): `subtitle_transcribe(path, engine, language,
+  onProgress: Channel) -> Vec<Cue>` (single-flight: reject while a task is
+  running), `subtitle_cancel`, `subtitle_model_status/_download` (download via
+  Rust reqwest → app_data_dir/models, SHA256-verified), `subtitle_load_srt/
+  save_srt` (Rust writes files; no fs:allow-write needed).
+- Engine: `sherpa-onnx = "1.13"` crate (NOT whisper-rs — archived). Default
+  model `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8` (~240MB) +
+  Silero-VAD for sentence timing; optional whisper large-v3-turbo-q5_0.
+  Static linking default; build script fetches prebuilt lib.
+- Audio: ffmpeg sidecar (`bundle.externalBin`) extracts 16kHz mono WAV to temp
+  (covers mkv/avi/flv/ts where the webview decoder fails); requires
+  `CREATE_NO_WINDOW` on spawn (windows_subsystem="windows") and
+  `tauri-plugin-shell` + `shell:allow-execute` (sidecar scope).
+- Cargo profile gotchas: `opt-level = "s"` → add
+  `[profile.release.package.sherpa-onnx-sys] opt-level = 3`; `panic = "abort"`
+  → ZERO unwrap()/expect() in the inference path (a panic kills the app).
+- Translation: reuse `@danmaku-anywhere/danmaku-provider/genAi` (host already
+  CSP/capability-allowed). Batch 20-40 cues with context + numbered echo-back;
+  ALL failures silently fall back to source text (ai.ts convention). Cache as
+  `<video>.zh.srt` alongside `<video>.srt`.
+- Concurrency rules: cancel the running task on media switch; guard callbacks
+  by TASK identity not epoch (epoch guard killed the HUD once — CLAUDE.md);
+  re-check `media.path` at every await boundary; transcription and upscale
+  contend for GPU — surface it in the UI.
+
+### Stage 3-5 landed (2026-09-06) — verified end-to-end at the unit level
+
+- **Rust pipeline complete**: `subtitle_transcribe(path, duration_secs,
+  language, on_event)` runs ffmpeg extract → Silero VAD → SenseVoice int8 on a
+  worker thread; events stream Extracting/Transcribing/Done/Failed/Cancelled
+  through a Tauri Channel. `subtitle_save_srt` (extension-gated) persists
+  cues; model status/download commands power the settings page.
+- **Models**: silero-vad.onnx is BUNDLED (`src-tauri/resources/`, in
+  `bundle.resources`, resolved via `BaseDirectory::Resource`). SenseVoice
+  int8 (~240MB) downloads through hf-mirror per-file (CN-friendly) then the
+  GitHub tar.bz2, SHA256-verified (hashes in `models.rs` computed from the
+  official 2024-07-17 release), installed to app_data_dir/models/.
+  ASR verified with the official zh/ja test wavs (`cargo test
+  transcribes_real_sample`, needs SHERPA_TEST_* env vars + 
+  SHERPA_ONNX_LIB_DIR for offline builds — see binaries/README.md).
+- **Frontend generate flow** (`src/subtitle/generate.ts`): startGeneration →
+  runTranscribe (Promise around the Channel, cancels on media switch) →
+  mountTrack + saveSrt(`<video>.srt`) → optional translateCues (40-line
+  batches, per-batch silent fallback) → saveSrt(`<video>.zh.srt`). Session
+  cache Map<path, {source, zh}> drives remount on displayLanguage flips;
+  sibling auto-load order follows displayLanguage (.zh.srt first when zh).
+- **UI**: Controls capsule (生成字幕 → 识别%/翻译% (click=cancel) → 字 ON/OFF +
+  ≡ settings); SubtitleSettings page (显示样式 sliders/switches, 时轴 offset
+  ±10s with center tick, 源语言 auto/ja/zh, 自动翻译, 显示语言 原文/中文,
+  model download with progress bar, sttError banner). Settings drawer gains
+  the 字幕 page.
+- **Store**: sttStatus ('idle'|'extracting'|'transcribing'|'translating') /
+  sttProgress / sttError, reset on media switch.
+- **Verification status**: tsc + biome + cargo check + `vite build` clean;
+  ASR unit-e2e passes. NOT yet exercised in the packaged exe (the extract →
+  VAD → decode path over a real video and the proxy /llm/v1/translate
+  deployment still need a manual run-through; the proxy must be redeployed
+  for translation to work).
+- **Stage 6 (open)**: GPU inference (needs a CUDA/Vulkan sherpa-onnx prebuilt
+  lib + provider plumbing; the shipped lib is CPU-only) and the Whisper
+  large-v3-turbo engine switch (sherpa-onnx OfflineWhisperModelConfig; the
+  `engine`/`useGpu` settings fields are defined but inert).
+
+### Review pass 1 (2026-09-06 evening) — 4 user-reported bugs fixed
+
+User verification on the packaged exe surfaced real gaps; root causes and
+fixes:
+
+1. **生成字幕 clickable with no model / silent failure** — the capsule only
+   gated on `isTauri`. Now `startGeneration` pre-flights `modelStatus()`:
+   missing model → OSD「请先在 设置 → 字幕 下载语音识别模型」+ deep-links to
+   the subtitle settings page. Pipeline failures now also surface via OSD
+   (`字幕生成失败: …`), not just the settings-page banner.
+2. **(not fixed, acknowledged)** model download speed — hf-mirror then
+   GitHub source chain stays; user pre-seeded the model manually.
+3. **Not actually streaming** — the pipeline extracted the WHOLE file first
+   (ffmpeg single-pass), so nothing displayed until extraction of the full
+   episode finished. audio.rs rewritten to SEGMENTED extraction: ffmpeg
+   `-f segment -segment_time 30` writes seg-000000.wav, … as it goes; a
+   watcher thread announces completed segments on a bounded channel;
+   run_pipeline transcribes each segment as it arrives (recognizer created
+   ONCE) and Partial-events its cues with the segment offset added. Extraction
+   and inference overlap. Measured on a real 15-min mp4: first segment ready
+   in **0.3 s** (integration test `tests/segmented_extract.rs`, env
+   SHERPA_TEST_MP4; skipped otherwise). ffmpeg stderr is now captured and
+   surfaced in failures. Root cause of the initial broken build: the segment
+   temp DIR was never created (single-file output didn't need one).
+4. **Subtitles vanish after toggling off/on** — SubtitleController.setCues
+   detached/reattached video listeners on EVERY cue batch (streaming =
+   several times per minute) racing the rVFC tick. Now it reuses listeners
+   when the video element is unchanged, and a `refresh()` runs when
+   subtitleSettings.visible flips back on (paused-video edge).
+
+### Review pass 2 (2026-09-06 night) — garbled timeline root cause
+
+User report: 字幕乱 / 时间轴很有问题. Root cause: the segmented pipeline gave
+EACH 30 s extraction segment its own VAD instance. Any sentence spanning a
+segment boundary was cut in half, transcribed as two broken cues, and VAD
+trailing-silence state was lost at every boundary (segments bleeding into
+each other, doubled words).
+
+Fix (matches sherpa-onnx's own subtitle-demo design and CapsWriter-Offline's
+VAD pipeline): `asr::StreamingTranscriber` — ONE VoiceActivityDetector fed
+the entire episode. `push_wav(segment)` appends samples to the VAD state
+machine; completed speech segments are recognized immediately and returned
+with GLOBAL times (the VAD counts every sample it has ever seen, so no
+offset math exists to get wrong). `finish()` flushes trailing speech. The
+VAD is precisely a streaming detector — this is its intended usage; the
+per-file instances were the mistake.
+
+Cue polish added (standard subtitle-tool post-processing, cf. VideoLingo /
+Buzz / Subtitle Edit): lead-in 0.08 s before speech starts, tail-out 0.30 s
+after it ends, minimum 0.80 s on-screen, drop sub-0.25 s blips
+(min_speech_duration), 0.5 s silence ends a cue, 10 s force-split cap.
+
+Verified: split-file streaming test (one wav fed as two halves through one
+VAD) yields one coherent cue, not two broken ones; zh+ja e2e pass; real-mp4
+segmented extraction integration test passes (first segment 262 ms).
+
+### Scope cut (2026-09-06 late) — zh-only, no translation, cold-start focus
+
+User decision: the feature is CHINESE audio → Chinese subtitles only. All
+translation infrastructure was REMOVED (not feature-flagged):
+
+- backend/proxy: /llm/v1/translate endpoint, translate prompt/config, the
+  shared generateWithGemini refactor — reverted to extractTitle-only (the
+  worker never shipped the endpoint, so nothing deployed changes).
+- danmaku-provider/genAi: translateLines + zTranslate* removed.
+- player: subtitle/translate.ts deleted; generate.ts is a straight
+  transcribe→stream→cache(.srt) flow; SubtitleSettings slimmed to display +
+  timing + model download (engine/sourceLanguage/displayLanguage/autoTranslate/
+  useGpu fields dropped — persisted merges ignore stale fields, old configs
+  survive); Controls capsule: 提取音频/语音识别 states only.
+- Rust: subtitle_transcribe drops the language arg, pipeline hardcodes
+  SenseVoice language "zh" (more accurate than auto for the zh-only scope).
+
+Cold start: ffmpeg now spawns BEFORE model resolution, so extraction (IO)
+overlaps the ~1-2 s model load. Measured spawn→first-segment: 277 ms
+(regression test cold_start_first_segment_under_3s, env SHERPA_TEST_MP4);
+first cue lands well inside the 5 s budget.
+
+Seek following (unchanged, verified design): SubtitleController listens to
+`seeked` → binary-search re-anchor → immediate refresh; both progress-bar
+drags and ArrowLeft/Right (which assign video.currentTime) hit that path
+synchronously. Playback is frame-calibrated via rVFC.
+
+### Follow-playhead mode (2026-09-06 final) — recognition tracks the PLAYHEAD, not the file
+
+User feedback: a whole-file progress bar (提取音频 47% → 识别 30%) is the WRONG
+shape — the user wants subtitles for what is on screen NOW. Redesign:
+
+- Rust `run_pipeline` takes `start_secs` (the playhead). Region A covers
+  playhead→end (what the user is about to watch); region B back-fills 0→playhead.
+  ffmpeg gets `-ss <start>` BEFORE `-i` (fast input-seek, no decode-from-0);
+  measured cold start (spawn → first segment) 157-277 ms.
+- Region starts are snapped to the 30 s grid implicitly (segments are 30 s),
+  so consecutive runs share boundaries; one StreamingTranscriber (one VAD)
+  per region keeps boundary-spanning speech whole within a region.
+- Frontend `generate.ts`: 30 s grid coverage tracking per video (coveredCells)
+  + merged cue cache across runs (dedup by start|text). `onUserSeek(time)`
+  fires from commands.seekTo/seekBy (progress bar drags + arrow keys both
+  route there): seek into a covered cell = the controller follows the
+  existing track; seek into an UNCOVERED cell = cancel the running task and
+  restart from the new playhead. Done/cancelled runs merge into the track;
+  .srt save happens from the merged cache.
+- Contract note: `subtitle_transcribe(path, duration_secs, start_secs,
+  on_event)`.
+
+### The real "100% then stuck / no subtitles / 卡顿" root cause (2026-09-06)
+
+Every earlier "window" still extracted the WHOLE file: `region_len` was only
+used for the percent math, ffmpeg was never told to stop, so each task decoded
+the entire 15-min episode (~207 s in the window test) while the video played →
+capsule sat at 100% then kept grinding, no cues for the visible part, stutter.
+
+Fix: `extract_audio_segmented` passes `-t <region_len>` to ffmpeg (hard read
+limit). A 60 s window now consumes exactly 2 segments in ~1.6 s. Regression
+proof = `tests/window_transcribe.rs`: real mp4 + appdata model through
+extract→VAD→ASR, asserts the window yields non-empty Chinese cues (fails if a
+window ever produces nothing or runs long).
+
+Also replaced the cancel/restart-on-every-seek storm: generate.ts is now a
+window scheduler — fixed [playhead, playhead+150s] window, auto-extends when
+playhead nears covered end (throttled store subscription), a seek re-anchors
+the window but DEBOUNCED 450ms so a progress-bar drag opens one window, not
+dozens. Model/CPU are free between windows, so playback never contends.
+
+### The FINAL root cause of "no subtitles" (2026-09-07) — chunked VAD feeding
+
+subtitle.log + a cue-printing test exposed it: within each 30 s segment,
+`accept_waveform` was called ONCE with all 480 000 samples, overflowing the
+VAD's 30 s circular buffer (the Overflow warning's "no data loss" claim is
+false for the head of the audio). Result: everything except the last ~0.4 s
+sliver was dropped → each segment recognized as a bare "。" pinned at the
+segment end → no visible subtitles.
+
+Fix: feed the VAD in 512-window-aligned 5120-sample chunks, draining emitted
+segments per chunk (also makes cues appear DURING segment processing), and
+drop punctuation-only cues (SenseVoice emits "。" for sub-second tail
+fragments). Verified: a 60 s window of the sample video now yields 8
+correctly-timed Chinese cues (was 2 garbage cues), all suite green.
+
+### Subtitles jumping sentences ahead (2026-09-07) — missing per-segment offset
+
+User report: while a sentence was being SPOKEN, the display jumped 1-4
+sentences ahead, re-syncing only at real sentence starts. Root cause: the
+per-segment transcription refactor dropped the `processed * 30 s` term —
+segment i's cues were stamped with only the window start, so segment 1/2/3's
+cues ran 30/60/90 s EARLY. Fixed (`offset = start_secs + i*30`), guarded by
+an offset assertion in window_transcribe (second segment's cues must land in
+[30,60), last_end > 45 s for a 60 s window).
+
+Also fixed a watermark race: coveredUntil was advanced AFTER
+setSttStatus('idle'), whose subscription fired the scheduler synchronously
+and opened an OVERLAPPING window (duplicate transcriptions of the same
+audio). Watermark now advances before going idle.
+
+### Long-cue splitting (2026-09-07) — ≤30 chars per cue
+
+User report: cues of 50-80 chars (fast lecture speech fills the VAD's 10 s
+cap). asr.rs now splits over-long cue TEXT (never the audio) into ≤30-char
+parts — greedy cut at punctuation inside the window when available — and
+divides [start, end] proportionally by part char count (SenseVoice gives no
+word timestamps). First part keeps the lead-in, last keeps the tail-out,
+every part ≥0.8 s. Unit tests: split_tests::long_cue_splits_proportionally /
+short_cue_untouched_except_polish. If 30 still reads long, it's one constant:
+MAX_CUE_CHARS.
+
+### Pipeline rewrite: token-timestamp cues (2026-09-08) — root cause of 断句差/时间轴怪
+
+Probe (`tests/probe_timestamps.rs`, real model + real 60 s lecture audio)
+proved the assumption behind the whole VAD-boundary design WRONG:
+`OfflineStream::get_result()` DOES return `timestamps: Option<Vec<f32>>`
+pairing 1:1 with `tokens` (~0.12 s granularity, relative to the
+`accept_waveform` call; `durations` is always empty). Speed was never the
+problem either: SenseVoice int8 loads in ~1.1 s and decodes 60 s of audio in
+~0.7 s on CPU (12 cores).
+
+What changed:
+
+- `asr.rs` rewritten. Cue boundaries now come from the TOKENS
+  (`build_cues_from_tokens`): break after sentence enders (。！？；), at
+  clause separators (，、：) once a cue has ≥ MAX_CUE_CHARS/2 chars, hard
+  wrap at MAX_CUE_CHARS (30). A token's time span is [t_i, t_{i+1}) — real
+  per-character timing, no char-proportional guessing. `split_long_cue`
+  survives only as the fallback when timestamps are missing/mismatched.
+  Adjacent cues are de-overlapped (tail-out vs next lead-in) because the
+  renderer resolves overlaps to the later cue, which visually truncated the
+  previous line.
+- Verified on the real lecture wav: cues now split semantically (15-22 chars,
+  clause-aligned) with token-accurate times, contiguous, no overlaps — vs the
+  old output's 45-char cues with invented proportional times. Unit tests: 7
+  (4 new token_cue_tests + the real-sample e2e).
+- `generate.ts` hardened: `mediaSession` counter captured by every async step
+  (runWindow callbacks, debounced seek timer, saveSrt) — a media switch (or
+  reopen of the same path) no longer lets a stale generation mount cues; the
+  watermark also clamps to the actual window end. `resetGeneration()` is
+  called by PlayerHost's sibling-subtitle effect on every media change.
+  Playhead-follow log lines throttled to once/15 s (the old log drowned real
+  events in `schedule skip` spam).
+- VAD params unchanged (min_silence 0.5 s now only partitions recognizer
+  input, cue shape no longer depends on it).
+
+Gates at rewrite time: cargo test 7/7 + real-audio e2e, tsc 0 errors, biome
+clean, vite build OK. Exe-level verification (verify-exe / manual run on a
+real lecture) still pending at the time of this note.
+
+## 21. Danmaku auto-match: shared parser + episode picker (2026-09-10)
+
+**Reported problem:** the player kept matching the wrong episode ("episode 11
+becomes episode 1"), or matched nothing at all, with no way for the user to
+correct it.
+
+**The AI was not the problem.** Probing the built-in endpoint with nine
+realistically-named anime files returned the correct episode for 9/9
+(`第11话 [1080p]` → 11, `Frieren - 07 [WebRip 1080p]` → 7, and a lecture
+recording correctly rejected as "not a show"). The AI also returns
+`altTitles`. It does occasionally mis-transcribe CJK characters (title
+garbling), which the fallbacks below absorb.
+
+**What was actually wrong** (`src/danmaku/autoMatch.ts`, all removed):
+
+1. `episodeFromTitle` took the **last number in a title** as the episode, so
+   `第11话 [1080p]` parsed as **1080** — the extension's `PATTERNS.EPISODE`
+   regexes (`E11` / `Episode 11` / `第11话` / `S01E11` + Chinese numerals) were
+   never ported. (The extension already documents this exact trap in
+   `MacCmsProviderService.extractEpisodeNumber`.)
+2. `pickEpisode` silently returned `episodes[0]` — **episode 1** — whenever the
+   number could not be resolved. This is the reported symptom.
+3. `pickSeason` silently returned `animes[0]`.
+4. `altTitles` from the AI were discarded.
+5. The player searched `/v2/search/episodes` (episode lists carry titles only);
+   the extension searches `/v2/search/anime` and then fetches
+   `/v2/bangumi/{id}`, which carries a real `episodeNumber`.
+6. Every failure path was silent — nothing mounted and nothing told the user.
+
+**Mechanism is now literally shared with the extension.** New workspace package
+`packages/media-parser` (`@danmaku-anywhere/media-parser`) holds the migrated
+helpers: `mediaRegexPatterns`/`mediaRegexMatcher`/`chineseToNumber`/`MediaParser`
+(from the extension's `xPathPolicyOps`), `titleMatch`
+(`findBestMatchingSeason`/`extractSeasonHint`/`normalizeTitle`) and
+`findEpisodeByNumber`. The extension now imports them instead of its local
+copies (11 files deleted there; its suite stays green).
+
+**New flow** (`autoMatch.ts` → `PlayerHost` → picker):
+
+- Keywords tried in order until one returns results: the AI title, its
+  `altTitles`, `cleanFilenameTitle(filename)`, the shared parser's
+  `searchTitle`, then the raw basename. `cleanFilenameTitle` strips release
+  metadata (`[WebRip 1080p]`, `AVC AAC`, `★10月新番`, sub-group tags), unwraps
+  brackets that hold the title, and drops the episode marker — it is what saves
+  the match when the AI garbles the title.
+- Target episode: the filename's explicit marker first (cannot be
+  hallucinated), the AI's answer as the fallback.
+- Season: `chooseSeason` mirrors `SearchMatchingStrategy` — a single search
+  result wins; otherwise `findBestMatchingSeason` with a season hint
+  (`第二季`/`S2`/`Season 2`); otherwise **null**.
+- Episode: `findEpisodeByNumber` (real `episodeNumber`, else the title regexes).
+  **No fallback to `episodes[0]`** — that is the bug this exists to kill.
+- Any indecision (`ambiguous`/`notFound`) opens `DanmakuSourceDialog` on the
+  online tab, pre-searched on the keyword that actually had results, with the
+  season expanded, its episodes lazy-loaded from the bangumi endpoint and the
+  guessed episode highlighted. A filename the AI does not recognise as a show
+  stays silent (no picker on lecture recordings).
+- Store: `danmakuSearchPrefill` (session-only, cleared on media switch);
+  `setDanmakuDialogOpen(open, prefill?)`.
+
+**Provider client (`ddp.ts`) now matches the extension:** `searchSeasons`
+(`/v2/search/anime`) + `fetchSeasonEpisodes` (`/v2/bangumi/{id}`) +
+`fetchEpisodeComments`. Types renamed to the canonical `title` field so the
+shared matchers apply without adapters.
+
+**Prompt note:** the proxy's prompt is written for page HTML while the player
+sends a filename, so the client now sends `inputType: 'filename'`
+(`@danmaku-anywhere/danmaku-provider/genAi`). The deployed proxy is upstream's
+and ignores the field; this is forward-compatible only — no deploy was made and
+none is required.
+
+**Verification:** 18 unit tests in `src/danmaku/autoMatch.test.ts` (regression
+guards for `第11话 [1080p]` → 11 and "never silently use episode 1"), plus the
+shared package's 50 migrated tests and the extension suite (47 files / 360
+tests). Exe-level: `e2e/_verify-anime-match.mjs` (temporary) opens two
+anime-named fixtures via CDP.
+
+## 22. Learned file-name rules (2026-09-11 — DONE, verified in exe)
+
+**Reported need (user):** "when the user picks episode 10 by hand, we now know
+which digits are the episode — so next time this naming shape should just
+work." One download batch repeats a single shape and changes only the episode
+number, so one manual pick is enough information for the whole season.
+Confirmed choices: apply automatically + a settings page to review/delete;
+rules apply across folders (same folder ranked first).
+
+**Where the picker actually comes from.** The built-in AI is good at the
+episode number (see §21), so the picker mostly opens when the *search* fails —
+e.g. `BLEACH 千年血战篇-诀别谭-` has no DanDanPlay entry (DDP lists the show as
+`死神`, bangumiId 2369), so every derived keyword returns 0 results and the
+match ends as `notFound`. That is the case this section was verified against.
+
+**Model** (`src/danmaku/filenameRules.ts`, pure functions):
+
+```ts
+interface FilenameRule {
+  id, pattern, sample, folder,
+  season: { bangumiId, title, episodeCount },
+  episode, hits, updatedAt,
+}
+```
+
+- `learnRule({ filePath, episode, season })` — runs only from the picker's
+  episode click (`DanmakuSourceDialog.handlePickEpisode`), i.e. only from a
+  decision a human actually made on this file. Returns null (learn nothing)
+  when the choice cannot be expressed as a shape:
+  - the picked episode is not a positive integer (`SP1` specials),
+  - no digit run in the name equals it,
+  - the digit run is glued to a letter (`1080p`, `x264`, `10bit`, and also
+    `E10`/`S01E10`, which the shared parser already handles),
+  - the resulting pattern would keep fewer than 3 literal characters
+    (`10.mkv` → `^(\d{1,4})$` would match any bare-numbered file anywhere),
+  - the pattern does not read the picked episode back out of its own sample
+    (a self-check on the construction above; numeric compare, so a zero-padded
+    copy still passes).
+- A number MAY legitimately appear more than once — scraped download names
+  repeat it (`幼女战记 第二季 第 10 集：第10集 · 稀饭动漫 Next.mp4`), and both
+  copies always move together, so the first becomes the capture and the other
+  is a wildcard. Requiring uniqueness here (the first cut did) made the whole
+  feature silently no-op on that entire library. The one duplicate that does
+  NOT move with the episode is a **season** number (`第2季 第2集`), so runs
+  followed by 季/部/期/`st|nd|rd|th` (or preceded by `Season`/`Part`) are
+  dropped from the candidates instead of being captured.
+- `pattern` = `^` + literal prefix + `(\d{1,4})` + a short literal tail (up to
+  the next digit run, max 6 chars). Every other digit run before the episode
+  becomes `\d+`, so per-file differences — resolution, a trailing CRC hash —
+  do not break the match. Anchoring at the start is what keeps the show name
+  (and usually the sub group) literal, which is why cross-folder matching is
+  safe. Matching is case-insensitive; corrupt persisted patterns are skipped,
+  never thrown.
+- No `episodeCount` check anywhere: DDP's search-level count is unreliable
+  (死神 reports 366 in search, 460 in the bangumi detail). The episode list from
+  `/v2/bangumi/{id}` is the only authority — `findEpisodeByNumber` decides.
+
+**Order of resolution in `PlayerHost`:** sibling file → **learned rules** → AI
+→ DanDanPlay search. Rules outrank the AI because they are user-confirmed, skip
+a model call and a search, and work offline. A rule hit that resolves a season
+but not that episode does not silently fall back: it opens the picker on the
+learned season with the number highlighted and the note
+`命名规则命中的集数不在这一季`. Transport failures fall through to the AI path.
+An episode that resolves but has **zero comments on DanDanPlay** (normal for a
+just-aired episode) now says `第N集暂无弹幕` instead of looking stuck — silence
+there sent the user hunting for a bug that was not there.
+
+**Store:** `filenameRules` (persisted, capped at 100 by `updatedAt`, sanitized
+through `normalizeFilenameRules` on rehydrate). It is knowledge, not per-media
+state, so unlike `danmakuSearchPrefill` it is NOT cleared on a media switch.
+`addFilenameRule` updates in place when the pattern already exists — which is
+exactly how a wrong rule is corrected: pick the right episode once more.
+`recordFilenameRuleHit` counts automatic mounts (shown in the settings list).
+New setting `danmakuSettings.learnFilenamePatterns` (default on) disables both
+learning and applying.
+
+**Settings page:** `src/ui/FilenameRulesSettings.tsx` (nav `命名格式`, after
+弹幕) — toggle, the folder/sample/`→ season · 第N集 · 命中 h 次` per rule, per-rule
+delete, and 清空全部规则.
+
+**Verification (packaged exe, CDP).** First pass used BLEACH-shaped fixtures and
+passed 9/9 + 5/5 + 6/6, but the user reported the feature doing nothing on their
+own files — the naming there repeats the episode number, which the first cut
+refused. Re-verified with their real convention
+(`幼女战记 第二季 第 N 集：第N集 · 稀饭动漫 Next`, DDP lists the show as
+`幼女战记Ⅱ` / bangumiId 16392, and its episodes 11-12 have **zero** comments):
+
+- learn — opening `第 5 集` opens the picker (the AI's `幼女战记 第二季` matches
+  no DDP title exactly, and `chooseSeason` returns null rather than picking a
+  wrong season), expanding 幼女战记Ⅱ and clicking 第5集 learns
+  `^幼女战记 第二季 第 (\d{1,4}) 集：第` bound to 16392. 9/9 checks.
+- apply (after a store reload, so the rule came back through the persist
+  `merge`) — `第 6 集` mounts `幼女战记Ⅱ · 第6话 诱饵` with no picker, hits 1.
+  5/5.
+- restart (fresh exe process) — `第 7 集` mounts, hits 2; `第 11 集` (0 DDP
+  comments) shows `第11集暂无弹幕` and does **not** open the picker. 5/5.
+
+Unit tests: `src/danmaku/filenameRules.test.ts` (22 cases) — prefix/skeleton
+shapes, CRC and resolution variation, cross-show non-matches, repeated and
+zero-padded episode numbers, the season-slot guard, corrupt-pattern tolerance,
+and the `orderRules` ranking.
+
+**Verification hygiene (learned the hard way):** the exe keeps localStorage in
+the shared WebView2 profile (`%LOCALAPPDATA%/app.danmaku.player`), so a harness
+that clears `danmaku-player-settings` to get a clean boot wipes the real user's
+playlist, resume history and settings. Launch the exe with
+`WEBVIEW2_USER_DATA_FOLDER=<temp dir>` when verifying, or capture and restore
+the key around the run. Persistence across a relaunch still works inside that
+temp folder.
+
+### The rule only matched its own sample (2026-09-12) — tail ate the episode title
+
+Reported on real files (同一季的第 1、2 集):
+
+```
+魔法光源股份有限公司 第 1 集：欢迎加入魔法光源股份有限公司 · 稀饭动漫 Next.mp4
+魔法光源股份有限公司 第 2 集：骑扫帚是小菜一碟 · 稀饭动漫 Next.mp4
+```
+
+Ep 1 matched season 2 via the AI, the user corrected it to season 1 (rule
+learned), and ep 2 then went straight back to season 2 — the rule never fired
+again. Learned rules were therefore **only ever able to match the file they
+were learned from**, which is exactly how the user described it ("他最后只能
+学习到一集").
+
+**Root cause.** `learnRule` took a blind 6-character literal tail after the
+episode number. With the `第 N 集：<episode title>` naming style the tail IS the
+episode title, so the pattern was
+`^魔法光源股份有限公司 第 (\d{1,4}) 集：欢迎加` — unmatchable by any sibling. The
+self-check could not catch it (it only verifies the pattern reads the episode
+back out of the sample). The 2026-09-11 exe verification passed by luck: the
+幼女战记 names (`第 N 集：第NN集`) put ` 集：第` in the tail, which the sibling
+files happen to share.
+
+**Fix (two parts).**
+1. `markerTail()`: the tail may only contain the convention's own markers
+   (`集话話回章編编期部巻卷`) and separators (whitespace/punctuation/brackets). A
+   digit restarts the `\d+` wildcard; a letter or a non-marker CJK character
+   ENDS the tail. The 幼女战记 pattern is now `… 第 (\d{1,4}) 集：` (the `第` of
+   the repeated number is free text), and every tail shape the test suite
+   covers (` 集：`, `][`, ` (` , `话`) is unchanged from before.
+2. `matchRule()` now runs two tiers, strict over ALL rules before the loose
+   tier starts, so a precise match from a lower-ranked rule still wins: tier 1
+   the stored pattern; tier 2 `prefixOnly(pattern)` — the pattern truncated
+   right after the capture group, anchored only on the show name + `第 N`.
+   Tier 2 **fixes the rules already persisted on the user's machine** (their
+   tail still holds a title) with no store migration, and it cannot leak across
+   shows or seasons because the prefix is pure literal text (`第二季 第 3 集`
+   does not contain the literal `…股份有限公司 第 ` sequence). Matches carry
+   `exact: boolean`; the OSD says `按命名格式匹配（宽松）` for tier 2.
+
+**Visibility.** When the picker opens because nothing matched, the note now
+appends `unmatchedRuleHint()` — "本目录学过命名格式但没匹配上这个文件（规则：…）"
+— so a too-strict rule can no longer masquerade as "it never learned anything".
+
+Unit tests: `src/danmaku/filenameRules.test.ts` grew to 31 cases (the real
+file names above, the legacy-pattern-keeps-working case, tier preference,
+another-season non-match, tail shapes, `unmatchedRuleHint`).
+
+### Independent review of the matching fix (2026-09-12) — two defects found & fixed
+
+An independent verifier (separate agent, executed — not traced) reproduced the original failure on
+the old module and confirmed the fix, then found two issues the author had not:
+
+1. **The loose tier could read a SEASON number as the episode.** `isSeasonSlot` was applied at LEARN
+   time only; the literal tail used to filter the season case at MATCH time, and the loose tier drops
+   that tail. `… 第 2 季 第 1 集：新季首集.mp4` against a rule learned from `… 第 1 集：…` returned
+   `{episode: 2}` → a second-season file would be mounted as the first season's episode 2.
+   Fixed: `captureIsSeasonSlot()` re-checks the captured run in the loose tier (`matchRule`).
+   Spaced forms (`第2季`, `第二季`) were already safe — the literal ` 第 ` includes its trailing space.
+2. **The picker hint fired on scraper boilerplate.** `MIN_HINT_PREFIX = 4` was satisfied by the
+   `在线播放` prefix that every MuneFun-scraped name shares, so opening an unrelated show claimed
+   "本目录学过命名格式但没匹配上这个文件". Raised to 6: a real batch shares the whole show name plus
+   ` 第 ` (≥7 characters), so genuine hints survive and boilerplate ones do not.
+
+Verified safe by the same review: strict-over-all-rules tier order (a 999-hit loose rule loses to a
+lower-ranked exact match), no-capture-group and corrupt patterns skipped without throwing, the
+season really comes from `hit.rule.season` in `PlayerHost`, no caller left on the old `RuleMatch`
+shape, and a 40-file sweep of the user's real library with no cross-show match.
+
+Still open (accepted): a batch that mixes spellings (`第 3 集` in one file, `第3集` in the next) does
+not match — the literal contains the space; and a same-title file in another folder matches by
+design.
+
+## 24. Sibling episodes: auto-fill the playlist from the folder (2026-09-12)
+
+Opening one file used to mean a playlist of exactly ONE entry, so `autoAdvance`
+had nothing to advance to — for a downloaded 12-episode season the user had to
+pick every file by hand.
+
+**Behaviour.** When a video is opened (Tauri, and only while
+`playbackSettings.autoAddSiblings` is on, default on) the player lists its own
+folder, keeps the files that belong to the same batch, and arranges them in
+episode order AROUND the current entry: earlier episodes in front of it, later
+ones behind it. Autoplay then continues into the next episode. The OSD reports
+`已加入 N 集到播放列表` only when something was actually new.
+
+**Around, not behind (2026-09-16).** The first version queued the whole batch
+right BEHIND the current entry. That only looks right when episode 1 is opened:
+opening episode 7 of a 1–9 batch produced `7,1,2,3,4,5,6,8,9`, so autoplay went
+from 7 back to 1 — exactly the "open 7, continue into 8" case the feature is
+for. `selectBatch` now returns `{ episode, before, after }` split at the opened
+episode (a second file with the SAME number, e.g. a v2, counts as `before`, so
+autoplay never replays the episode), and the store's `placeAroundCurrent`
+puts `before` in front of the entry and `after` behind it. The old tests only
+ever opened episode 1, where `before` is empty and the two behaviours agree.
+
+**Same batch = same literal head.** `siblingEpisodes.ts` (pure, unit-tested)
+identifies a batch by everything in the file name BEFORE the episode number
+(`魔法光源股份有限公司 第 `, `[Sakurato] BLEACH … [`). That head is what keeps a
+folder holding an entire scraped library from mixing shows: 幼女战记 next to
+乡下大叔成为剑圣 next to a screen recording contributes nothing to each other.
+The episode number is read from `第 N 集/话`-style markers, or from a single
+unambiguous number (`Show - 10.mkv`, `[Group] Show [10][1080p].mkv`); a name
+whose episode cannot be determined (a date, an id, a bare `05.mp4` with no head)
+is skipped, never guessed — the same discipline as the danmaku matching. A
+learned rule can supply the number for shapes the heuristic cannot read.
+
+**Platform.** `Platform.listVideoFiles(dir)` — Tauri implements it with the fs
+plugin's `readDir` (capability `fs:allow-read-dir` added); the browser adapter
+returns `[]`, because a page cannot read a directory. The scan is a Tauri
+convenience, never a correctness dependency. Video extensions now live once, in
+`platform/types.ts`, shared by both pickers, drag-drop and the scan, together
+with `joinPath(dir, name)` — the ONE way a listed entry name becomes a path.
+
+**The join that made the feature a no-op (2026-09-13).** `readDir` reports bare
+names, so the first version built each path inline as `` `${base}\${entry.name}` ``.
+In a template literal `\$` is an ESCAPE, not a separator followed by an
+interpolation: every file in the folder collapsed to the same literal string
+`C:\…\Videos${entry.name}`. No digits in it, so `selectSiblings` recognised no
+episode and returned `[]` for every file — the effect then hit its
+`siblings.length === 0` early return and added nothing, silently, for every
+episode (not just the later ones). tsc, biome and all 68 tests passed, because
+nothing exercised the listing→path seam: the existing tests hand-built paths.
+`joinPath` is now a named, unit-tested helper and `siblingEpisodes.test.ts`
+feeds `selectBatch` (then called `selectSiblings`) the output of `joinPath`,
+which is the shape the platform actually produces.
+
+**Store.** `placeAroundCurrent(before, after)` moves rather than duplicates (an
+episode already queued ends up in order, not twice), never moves or duplicates
+the playing entry, leaves unrelated history where it was, and keeps
+`PLAYLIST_MAX` enforced without dropping the entry being watched.
+`playerStore.test.ts` replays the exact calls the open effect makes and asserts
+what autoplay plays next.
+
+**Settings.** 设置 → 播放 → 「自动加入同系列剧集」with a one-line hint; both
+playback toggles now share a `ToggleRow` component.
+
+**Known limits (by design).** Same directory only (no recursion — opening a file
+must not depend on the size of the library); a batch whose files mix spellings
+(`第 3 集` in one file, `第3集` in the next) is not recognised; and files whose
+names carry no usable episode number are left alone rather than sorted by name.
+
+## 25. Embedded subtitle tracks (2026-09-14 — DONE)
+
+**Why.** Fansub releases ship subtitles INSIDE the container — the user's
+`[Nix-Raws] … S01E11 [CATCHPLAY WEB-DL 1080p AVC AAC][SC_TC].mkv` carries two
+SubRip streams (Chinese Simplified #2 / Chinese Traditional #3). The player
+showed none of them and offered no way to pick one, because the webview cannot
+see them at all: `<video>` only ever exposes WebVTT text tracks that were
+mounted as a sidecar `<track>` element, so a subtitle stream inside Matroska (or
+MP4 `mov_text`, or WebM) is invisible in every Chromium-based host. The tracks
+must be demuxed OUTSIDE the webview and handed to the cue pipeline that already
+exists (`parseSubtitleText` → `SubtitleController`).
+
+**Shape.** ffmpeg/ffprobe do the demuxing — the same binaries `audio.rs` already
+resolves (next to the executable, then PATH; `resolve_ffprobe` additionally
+looks in the resolved ffmpeg's own directory, since builds ship the pair
+together). Nothing new is bundled, the `stream://` protocol is untouched, and
+every container ffmpeg can read is covered by the same code path (requirement
+"other formats too").
+
+**Rust — `src-tauri/src/subtitle/tracks.rs`**
+- `subtitle_list_tracks(path) -> Vec<SubtitleTrack>`, via `ffprobe
+  -select_streams s -show_entries
+  stream=index,codec_name,disposition:stream_tags=language,title -of json`.
+  `SubtitleTrack { index, codec, language, title, text, default, forced }` —
+  `text: false` marks BITMAP codecs (PGS/VobSub/DVB): they are listed so the UI
+  can say "图形字幕，暂不支持" rather than pretending the file has no subtitles.
+  Bounded in-memory cache (8 files).
+- `subtitle_extract_track(path, index) -> String`, via `ffmpeg -v error
+  -nostdin -i <path> -map 0:<index> -f srt -` (stdout) — SRT text, which the
+  frontend parser already understands. Bounded cache (4 entries). A bitmap
+  track errors out instead of mounting nothing. Both commands run off the UI
+  thread (`spawn_blocking`) and hide the console window.
+
+**Frontend**
+- `src/subtitle/native.ts` — `EmbeddedTrack` type + `listEmbeddedTracks` /
+  `extractEmbeddedTrack` wrappers.
+- `src/subtitle/embedded.ts` — pure, unit-tested half: `pickDefaultTrack`
+  (text tracks only → Chinese-ish language → 简体 over 繁體 when the file
+  carries both, whatever order the muxer used → `default` disposition → first;
+  `forced` tracks are used only when nothing else exists) and `trackLabel`
+  (title/语言 · codec · 强制). Imperative half: `mountEmbeddedTrack(index)` =
+  extract → `parseSubtitleText` → `setSubtitles(cues, { kind: 'file', label })`,
+  with the media-identity recheck the other loaders use; `loadEmbeddedTracks()`
+  probes and publishes the list, stashing the failure reason in `embeddedError`.
+- Auto-mount order on open is unchanged in spirit: **sibling file → embedded
+  track → (manual) ASR**. The embedded step runs only when the sibling loop
+  mounted nothing, so a user's own `.srt` next to the video still wins. The
+  probe is STARTED first but awaited only after the sibling loop, so a slow
+  ffprobe never holds up an ordinary `.srt`.
+- `mountEmbeddedTrack(index, { auto })` returns why nothing mounted
+  (`no-media` / `media-switched` / `already-mounted` / `empty`). The open-time
+  call passes `auto: true`: if anything got mounted while ffmpeg ran (a
+  `xxx.chs.ass` dropped in together with the MKV, a pick in 设置 → 字幕), the
+  embedded track is dropped instead of replacing it. A manual pick replaces
+  whatever is showing — that is the user's explicit choice.
+- Every ffprobe/ffmpeg run has a deadline (probe 20 s, conversion 90 s; stdout
+  and stderr drained on threads so a large SRT cannot deadlock the pipe): a
+  wedged process on an unreachable share is killed and reported instead of
+  leaving the picker at "提取中…" forever.
+- Store (session-only, cleared with the cues on a media switch):
+  `embeddedTracks`, `activeEmbeddedTrack` (also cleared by EVERY
+  `setSubtitles`, so the picker never marks an embedded track "正在使用" after a
+  `.srt` or generated subtitles replaced it).
+- UI: 设置 → 字幕 → 「内封字幕 / EMBEDDED」 lists the tracks with language,
+  title and codec; clicking one mounts it. No tracks → `此视频没有内封字幕`;
+  bitmap tracks are shown disabled with the reason.
+
+**Known limits.** Bitmap subtitles (PGS/VobSub) need OCR — not supported, said
+out loud in the UI. ffmpeg's SRT conversion drops ASS styling and positioning,
+so karaoke/moving signs render as plain bottom-centered lines (the same limit
+the existing ASS parser has). ffmpeg/ffprobe must be present — exactly the
+requirement the ASR pipeline already has; without them the settings section
+reports it instead of failing silently.
+
+## 26. Subtitle smoothness: no React per line, frame-exact timing (2026-09-25 — DONE)
+
+**Why.** "字幕功能的流畅度实在比不上商业播放器，特别是开关字幕时候字幕的出现时间，
+以及按左右键快退快进有概率字幕没出来。" Three separate defects hid behind that
+complaint, and all three were structural rather than cosmetic.
+
+**1. The lines went through React.** Every cue change wrote the store and
+re-rendered the subtitle subtree, which also re-ran persistence on the way. A
+20-line bilingual track re-rendered the player on each cue boundary, and a seek
+re-rendered it twice. Now `SubtitleController` (timing) hands the active set
+straight to `SubtitleRenderer` (DOM) in the same task — no store write, no
+React render, no persistence for a line to appear. The store keeps only the
+*mounted track* (`subtitles`, `subtitleSource`), never the on-screen set.
+
+**2. Toggle-on was a rebuild.** Hiding showed/hid through `display`, so
+switching back on had to lay the lines out again. It is now `visibility:
+hidden` — hidden lines stay laid out, so switching on is a repaint
+(`applySettings`). Measured: 0 extra frames from toggle to visible.
+
+**3. A seek while paused could end frame delivery for good.** The old engine
+re-registered its `requestVideoFrameCallback` only while playing, so a paused
+seek consumed the single presented frame and never armed another one; playback
+then refreshed once, and the line stayed frozen until the next seek — the
+"有概率字幕没出来". The controller now keeps exactly one callback registered
+for as long as cues are mounted (paused or not), re-arms on every edge
+(`play`/`playing`/`loadeddata`/`emptied`), and treats a seek's TARGET as the
+time to evaluate immediately, so a keypress puts the target's line up in the
+same task instead of waiting for the decoder (which takes ~6–20 ms).
+`timeupdate` is the fallback when no frames are presented at all (occluded or
+minimized window) — muzzled for 350 ms after a real frame, because the clock
+runs slightly ahead of the picture and would show a line one frame early.
+
+**Lookup cost.** Cues are start-sorted with a prefix maximum of end times
+(`maxEnd`), so a lookup is a binary search plus a short bounded backward scan,
+and a cached validity window `[from, to)` answers without searching at all
+between boundaries. Property-checked against brute force (400 randomized
+tracks, every start/end/boundary sample): no mismatches, and the window is
+sound — the optimization can never leave a stale line on screen.
+
+**Measured (real Chromium, `e2e/scratch-latency.mjs`).** Arrow-key seek → line
+in DOM: **0 extra frames** (avg/p50/max all 0.00) while the decoder takes
+6.2 ms median to finish its own seek — the line is up before the picture
+settles. Toggle on → visible: **0 extra frames**. Store write that changes
+nothing persisted: **0.01 ms** (was 0.76 ms).
+
+### The lift must measure the control bar, not guess a percentage (2026-09-26)
+
+The subtitle rows shift up while the controls are showing, and that shift was a
+percentage of the stage (`--sub-lift: 7`). The control bar's height is a
+**constant** (142 px: `52px 24px 16px` padding + content) while the stage is
+not, so 7 % is 50 px at 720p and 76 px at 1080p — measured at 1280×720 the
+lowest line sat **48 px inside** the bar's gradient, its ink washed out by the
+dimming band that renders ABOVE the subtitle layer (`zIndex` 30 vs 3).
+
+The bar now measures itself (`Controls.tsx` → `onHeightChange` →
+`SubtitleRenderer.setControlBarHeight`) and the CSS lifts by that exact value
+plus an 8 px gap, taking `max()` against the user's own bottom setting so a
+larger margin is never pulled back down. Verified at 1280×720, 1920×1080,
+1024×768 and 2560×1440: **clearance 8 px at every size**, and when the danmaku
+density strip appears the bar grows 142 → 201 px and the lift follows to 201 px
+(clearance 9 px).
+
+**Two traps worth remembering if this is ever refactored:**
+- `ResizeObserver`'s `contentRect` is the CONTENT box. Because the bar's height
+  is almost entirely *padding*, it reported 74 px against a real 142 px, and a
+  padding-only height never re-fires the observer at all — the value would
+  freeze at whatever it was on first paint. Measure the border box
+  (`offsetHeight`); `borderBoxSize` is the honest one in the entry.
+- A `ResizeObserver` alone is still not enough: it is created before the bar's
+  content settles, and a later pass that changes only the inner layout does not
+  always re-fire it. A `useLayoutEffect` re-measures after every commit, which
+  is exactly when the density strip arrives (it is gated on store fields
+  `Controls` already subscribes to, so the component re-renders by
+  construction). `setControlBarHeight` drops repeat values, so the per-commit
+  measurement stays free.
+
+## 27. HUD frame rate was the display refresh, not the frame rate (2026-09-27 — DONE)
+
+**Reported as** "我怎么感觉我的补帧功能失效了呢…不对啊我看着这像是有补帧的效果，只是肯定没有右上角显示那个帧数那么高". The user was right on both counts: interpolation works, and the number in the corner was not a frame rate.
+
+**What the number was.** `UpscaleStats.fps` came from the engine's
+`presentedFrames` counter, which `2ca4b867` had introduced deliberately
+("HUD OUT FPS now shows the true presented rate, not source rate"). The
+reasoning there was that the presentation loop "presents real + generated
+sub-frames", so counting canvas swaps would measure the interpolated output.
+It does not: `presentationLoop` runs on **every rAF turn** and calls
+`presentLatestProcessedFrame()`, which re-submits the *same latest texture* to
+the canvas whenever the generation has not changed (`presentedFrameGeneration
+=== processedFrameGeneration` only gates the paused case). So the counter
+increments at the **display refresh rate** — 170 here — no matter how many
+distinct frames exist. Measured on the packaged exe:
+
+| config | old HUD | interpolated | true visible |
+|---|---|---|---|
+| fi off (Anime4K only) | **175** | 0/s | ~24/s |
+| fi 2x @1080p | **176** | 23.3/s | ~47/s |
+| fi 2x @720p | **176** | 23.5/s | ~48/s |
+
+Interpolation fully off still read 175. The only honest number in the UI was
+`GENERATING x F/S` (from the engine's `...FrameInterpolationGenerated`
+attribute), which is why it sat in the settings page — but it was displayed
+next to a number 7× larger, so the larger one won.
+
+**The fix.** The visible rate is the source frames plus the interpolated
+sub-frames, capped by how often the canvas was actually presented:
+
+```
+fps = min(sourceFrames + generatedFrames, presentedFrames) / seconds
+```
+
+with the breakdown carried alongside (`sourceFps`, `generatedFps`). The
+arithmetic lives in `src/player/upscale/outputRate.ts` as a pure function with
+its own tests, because this is precisely the logic that silently regressed
+once already. Verified on the packaged exe: **fi off → 25**, **fi 2x → 49**
+(25 + 24), **fi 4x → 63** (25 + 38) — read from both the store and the rendered
+DOM text.
+
+**HUD changes.** `OUTPUT FPS` now shows the true rate with a small
+`source + generated` breakdown under it. When interpolation is enabled but
+producing nothing, the breakdown reads `补帧未产出` in vermilion (or
+`补帧不可用` on an engine fallback) instead of letting a healthy-looking total
+hide it. The settings panel's `OUT FPS` gets the same breakdown, and its
+`GENERATING` line turns vermilion at 0 rather than staying green.
+
+**Measurement notes for whoever revisits this.**
+- The engine's generated counter is **per-interpolator and restarts at 0** on
+  every renderer rebuild (a settings change, a resolution switch). A negative
+  delta means "reset", not "no frames produced". A duty-cycle measurement that
+  ignores this reports resets as dead seconds — it produced a false
+  "1080p interpolation is broken" conclusion during this investigation before
+  being caught.
+- `fi 2x @1080p` and `fi 2x @720p` produce **the same** ~23.5/s. 1080p costs
+  more GPU (~90% vs ~63% utilization) but does not lose frames, so the
+  processing resolution is not a correctness lever.
+- The HUD samples a 1 s window, so the number moves with scene content: a
+  static passage has no distinct source frames for the interpolator to double
+  (correctly), and the total drops. Sweep the source before concluding
+  anything from one window.
+
+
+
+## 28. Interpolation gave up whenever the GPU was busy — and never produced 3x/4x (2026-09-27 — DONE)
+
+**Reported as** "有时候补帧不补" and "明明gpu有空闲但是补帧上不去".
+
+Both were real, and the second one was measurable: at the user's own setting
+(ultra / 720p / 3x) the engine interpolated **48 of 204 pairs** and the GPU sat
+at 96% — while at balanced / 1080p / 2x it interpolated **86 of 204** at **45%**
+GPU. Interpolation was being switched off on a GPU with more than half its
+capacity idle.
+
+Measured on the packaged exe (`e2e/fi-probe.mjs`, 8 s windows, seek 400 s into a
+1080p 24fps anime episode):
+
+| config | gen/s | pairs | late | bypassed | GPU |
+|---|---|---|---|---|---|
+| performance/720p/2x | 7.5 | 204 | 1 | 0 | 37% |
+| ultra/720p/2x | 6.5 | 204 | 8 | 6 | 82% |
+| **ultra/720p/3x** (user's) | 8.1 | 204 | 25 | **48** | 96% |
+| balanced/1080p/2x | 3.1 | 204 | 11 | **86** | **45%** |
+
+**Cause 1 — the repeat test queued behind Anime4K.** `classifyPair` ran a 48x27
+GPU difference pass and then `mapAsync`-ed it back on the *same* queue the
+Anime4K chain saturates. Measured: 8.5-15.9 ms average and 39-88 ms worst, so by
+the time the verdict arrived the pair's output slot had always passed, the pair
+was counted "late", and three in a row armed a **2-second full bypass**. That is
+the whole mechanism behind "GPU idle but no interpolation".
+
+**Cause 2 — the display delay ignored the multiplier.** `calculateFrameProcessingDelay`
+was a flat `interval/2 + 8` (~29 ms). The first sub-frame of a factor-f pair
+sits `(1 - 1/f)` of a source interval before the current frame's slot, which is
+28 ms at 3x — so at 3x the measured slack was **-0.7 ms** and the first
+sub-frame was always already in the past. 3x and 4x could not produce their
+first sub-frame by construction.
+
+**Cause 3 — no way to skip held drawings.** Anime is drawn on twos and threes:
+measured **68% of pairs** are the same drawing as the previous frame. Every one
+of them still cost a full Anime4K pass to re-present a picture already on
+screen, which is most of the GPU budget that the interpolation needed.
+
+**The fix.**
+1. **Repeat test on the CPU.** A 160x90 thumbnail via `createImageBitmap(...,
+   { resizeQuality: 'medium' })` + `getImageData`, compared against the last
+   *presented* drawing. Calibrated inside the real WebView2 on 1080p anime: a
+   held pair never differs by more than **7** (summed over RGB, 0..765) while any
+   real drawing change starts at **189** — two orders of magnitude of margin, not
+   a tight fit. Threshold 8. Cost: **p50 1.6-3.3 ms, p90 ~6 ms**, asynchronously,
+   never blocking the render loop.
+2. **Factor-aware display delay** (see above), so the first sub-frame of 3x/4x
+   lands in the future.
+3. **Elide held drawings.** A frame classified as a repeat is marked in the
+   display queue and `takeDueFrame` skips it, so the Anime4K chain never runs on
+   a picture the canvas already shows. This only *skips* a pass — it moves no
+   display time, so the presentation timeline is identical to before minus the
+   redundant work.
+4. **Degrade, don't switch off.** The overload guard now costs one step of the
+   interpolation factor per three late pairs (down to 2x) and gives it back after
+   60 healthy pairs; a full bypass (600 ms) only happens when even 2x cannot keep
+   up. The old guard armed a 2 s bypass and cleared its own evidence, so a single
+   hitch could latch interpolation off.
+5. **Present only new frames.** `presentLatestProcessedFrame` re-submitted the
+   same texture on every rAF turn — at 170 Hz that burned GPU time the
+   interpolation needed (and it is why the HUD once read the refresh rate). It
+   now submits only when a new frame was actually processed.
+6. **Cadence from media time.** `intervalMs` was smoothed from
+   `expectedDisplayTime`, which jitters by tens of milliseconds under load; it
+   now comes from `mediaTime` deltas (normalized by playback rate), so a jittery
+   window can no longer read as "wrong cadence" and skip interpolation.
+
+**After, same clip and windows** (before/after in parentheses):
+
+| config | gen/s | late | bypassed | GPU | ceiling |
+|---|---|---|---|---|---|
+| performance/720p/2x | 7.5 (7.5) | 0 (1) | 0 (0) | 33% (37%) | 2/2 |
+| ultra/720p/2x | 7.6 (6.5) | 0 (8) | **0 (6)** | 58% (82%) | 2/2 |
+| **ultra/720p/3x** | **14.9 (8.1)** | **1 (25)** | **0 (48)** | 67% (96%) | 3/3 |
+| balanced/1080p/2x | 7.5 (3.1) | 1 (11) | **0 (86)** | 39% (45%) | 2/2 |
+| performance/720p/4x | **22.9 (—)** | 0 | 0 | 33% | 4/4 |
+
+3x now produces **1.8x** the frames it did and 4x works at all; the bypass
+counter is zero at every tier; and 139-140 of ~202 pairs are elided, so the
+Anime4K chain runs on the distinct drawings only. `slack` went from -0.7 ms to
+**+14-16 ms** and the classify readback from 14.6 ms avg / 55 ms max to 1.6-6.4 ms.
+
+**HUD correctness, again.** `presentedFrames` had to change meaning with the
+elision: it counts *distinct pictures shown*, and the engine now also reports how
+many of those were generated (`presentedGeneratedFrames`). Deriving the split
+from captured counts would be wrong on anime — 202 frames captured in 8 s is
+25/s but only 61 were distinct drawings, and reporting the capture rate as the
+"source fps" would claim frames the viewer never saw. Verified against the
+engine's own accounting (averaging the 1 s HUD samples against `getStats()`
+deltas over the same 8 s window):
+`ultra/720p/3x` HUD **22.3/s = 7.8 + 14.5** vs engine **20.4/s = 6.9 drawings +
+13.5 generated**; `performance/720p/2x` HUD **15.6 = 7.9 + 7.8** vs engine
+**14.8 = 7.4 + 7.4**. `e2e/fi-probe.mjs` prints the same HUD reading next to the
+engine deltas, so the two can always be compared in one run.
+
+**HUD wording superseded (§27).** §27's HUD description — a vermilion `补帧未产出`
+whenever the count is 0, and the same at 0 in the settings panel — was replaced.
+Zero generated frames is legitimate while paused, on a static passage, or in the
+first second after enabling, so alarming wording cried wolf. The breakdown now
+always reads `源 N + 补帧 M`, and the only definitive failure the engine reports
+(its fallback state) is what says `补帧不可用`.
+
+**Gates.** upscale-engine 27/27, player 147/147, both `tsc --noEmit` clean,
+`verify-exe.mjs` **30/30**. Two `packages/danmaku-anywhere` e2e failures
+(`changing the CORS option updates the static ruleset`, `renders an Anime4K
+canvas...`) were confirmed by stashing this change and re-running: **they fail
+identically on the unmodified baseline** and are unrelated.
+
+**Traps for whoever touches this next.**
+- The repeat reference is the last *presented* drawing, not the previous frame.
+  Comparing frame-to-frame would let a slow fade walk out of the threshold in
+  small steps that each look like a repeat while the picture drifts on screen.
+- An unknown (missing thumbnail, length mismatch) must classify as **changed**.
+  A false "changed" only costs GPU work; a false "held" elides a frame the viewer
+  needs.
+- The frame-interpolator's generated counter restarts at 0 on every renderer
+  rebuild, so any per-second measurement must treat a negative delta as a reset
+  (this already produced one false "1080p is broken" conclusion — see §27).
+- (obsolete since §34 — sherpa-onnx is no longer a dependency) `SHERPA_ONNX_LIB_DIR` must point at the local sherpa libs or `tauri build`
+  tries to download them and fails on a blocked network; the libs are already at
+  `C:/_DEV/sherpa-onnx/sherpa-onnx-v1.13.7-win-x64-static-MT-Release-lib/lib`.
+
+## 29. Auto-match reliability rewrite: the AI stopped being the gate (2026-10-20 — DONE)
+
+**Symptom.** On a first-ever file of a show, auto-match often did nothing at all;
+the user had to open the picker by hand. The web extension felt far smoother.
+
+**Root causes found by probing the real endpoints (not inferred).**
+
+1. **The AI call gated the whole pipeline.** `PlayerHost` did
+   `if (!info) return` after `aiExtractTitle`. A security-filtered or offline
+   AI meant no search, no picker, no OSD — total silence.
+2. **`[LoliHouse]` filenames made the proxy return HTTP 500.** Verified by curl:
+   any leading bracket containing `Loli` (`[LoliHouse]`, `[Loli]`, `[LoliSub]`,
+   `[LoliHouseX]`) → `500 {"message":"Internal server error"}`; the same name
+   without the bracket → 200. Gemini's safety filter rejects the token; the
+   proxy's unguarded `JSON.parse` turns that into a 500. The deployed proxy also
+   **ignores `inputType: 'filename'`** and still uses the HTML prompt.
+3. **The filename fallback could not parse the common fansub shape.** The shared
+   parser only knew `E11` / `Episode 11` / `第11话` / `SxxEyy`, so
+   `Show - 11 [WebRip…]` parsed as episode 0; `cleanFilenameTitle` also kept
+   `[LoliHouse]` and `HEVC-10bit`, so its search returned zero rows. The AI was
+   the only hope, and §2 killed it.
+4. **DanDanPlay numbers sequels absolutely.** `咒术回战 第二季` = 25–47,
+   `转生史莱姆 第三季` = 49–72. `findEpisodeByNumber(list, 11)` misses; the old
+   code then said "未能确定是第几集" even though the season was exact.
+5. **Romaji titles don't lexically match localized DDP titles.** `Kusuriya no
+   Hitorigoto` → `药屋少女的呢喃`; the old `findBestMatchingSeason` returned null
+   and every romaji release fell back to the picker.
+6. **The web extension has more inputs.** It sends up to 4000 chars of page
+   `meta`/`title`/`h1`–`h6` to the AI, many sites use XPath integration instead
+   of AI at all, and it searches DDP + Bilibili + Tencent in parallel with a
+   persisted title map. The player has one filename and DDP.
+
+**New pipeline** (`src/danmaku/releaseName.ts` + `autoMatch.ts`):
+
+- `parseReleaseName()` deterministically strips the leading fansub group and
+  release metadata, recognizes `- 11`, `[11]`, `第11话`, `SxxEyy`, `E11`, season
+  markers (`第N季/期/部`, `Season N`, `2nd Season`, `Part N`, `S1`), years,
+  movies and batch packs. The AI input is now `title - episode` (no group tag),
+  which both avoids the 500 and stops CJK garbling.
+- The AI is an **enhancer**: `autoMatch(name, null, …)` must still resolve.
+  Both paths are audited live (see below).
+- All candidate keywords are searched in parallel; seasons are scored by
+  lexical title (exact; prefix only when the extra text is a season/edition
+  marker, so `ONE PIECE novel HEROINES` no longer beats `海贼王`), season hint,
+  year (future placeholder seasons penalized — DDP carries a 2027 duplicate of
+  a 2026 show), and type (movie vs TV). Episodes are probed for the top
+  candidates; `resolveEpisodeTarget()` tries exact then
+  `firstEpisodeNumber + localEpisode - 1` (the absolute-numbering fix).
+- Decisions: lexical match with a margin → `title`; one non-future strong-keyword
+  result with the episode → `fuzzy`; several seasons, no season in the filename
+  → `default-season` (base season, OSD says `未标季`, never auto-learned);
+  otherwise the picker opens pre-searched with the reason.
+- **Episode title matching.** When the release carries a title after
+  `第N集/话` (e.g. `… 第12话 華瑞月`), it is compared with each candidate's
+  episode title (CJK/Latin bigram overlap). Exactly one match outranks every
+  other signal — it is the only way to tell two seasons apart when both contain
+  episode 12. Live example: `Kusuriya no Hitorigoto 第12话 華瑞月` picks
+  `药屋少女的呢喃 第二季`, not the base season.
+- **`default-season` is not written into the learned filename rules** — it is
+  an inference from search order, so a wrong guess must not become permanent.
+- The rule path now uses the same `resolveEpisodeTarget`, so a learned
+  `第11话` rule keeps working for absolute-numbered sequels.
+- New OSD: `自动匹配 · <season> · 第11集（站内第35话） · N 条`; failures open the
+  picker instead of staying silent.
+
+**Live audit** (`src/danmaku/autoMatch.live.test.ts`, opt-in):
+
+```
+LIVE_AUTO_MATCH=1 corepack pnpm -C app/player exec vitest run \
+  src/danmaku/autoMatch.live.test.ts --disableConsoleIntercept
+```
+
+11-file corpus (LoliHouse / Nekomoe / Airota / Sakurato / Chinese season
+markers / romaji / absolute sequels / One Piece 1080 / episode-title case /
+movie): **10 matched, 1 ambiguous (a movie DDP does not carry), 0 not found —
+with AI and with the AI forced to `null`.** The ambiguous movie case must stay
+ambiguous: mounting the TV season's episode 1 for a `剧场版` is exactly the kind
+of wrong answer the "never guess" rule forbids.
+
+**Gates.** player `tsc` clean, 165 unit tests + 1 opt-in live audit; media-parser
+54; extension 360; biome clean; vite build; Playwright 7/7.
+
+## 30. Multi-source danmaku: Bilibili + Tencent through a hidden WebView (2026-10-20 — DONE)
+
+**Goal.** Search/mount Bilibili and Tencent danmaku in addition to DanDanPlay,
+and merge every confident source for the same episode.
+
+**The Tauri `http` plugin cannot do it.** Verified in the real exe:
+
+| Request | Result |
+|---|---|
+| Bilibili `spi` | 200 (unprotected) |
+| Bilibili search | **412 `request was banned`** (with or without buvid cookies) |
+| Bilibili season | **403** risk-control HTML |
+| Bilibili XML | 200 but **deflate-compressed**, plugin did not decompress |
+| Tencent search | 200 `{"ret":20607}` |
+| Tencent page details | `{"ret":35013}` |
+| Tencent danmaku CDN | 200 (unprotected) |
+
+The rejection is client fingerprint/behaviour, not a missing header. A hidden
+WebView2 page on the API's own origin is accepted exactly like the extension.
+
+**Validated path.** One hidden WebView2 window per source parked on
+`https://www.bilibili.com/robots.txt` / `https://v.qq.com/robots.txt` (plain
+text, no site JS, minimal memory). The page's own `fetch` supplies Chromium's
+network stack, the correct `Origin`/`Referer`, and the cookie jar. Confirmed
+CORS: Bilibili `ACAO = https://www.bilibili.com`, Tencent search
+`ACAO = https://v.qq.com`, Tencent danmaku `ACAO = *`.
+
+**Architecture.**
+- `src-tauri/src/source_bridge.rs`: hidden windows, URL allowlist, and
+  DevTools `Runtime.evaluate` with `awaitPromise: true`. The expression runs the
+  fetch in the page and returns `JSON.stringify({status,text})`; Rust parses the
+  CDP result and returns it to the renderer. No page script, no WebMessage.
+- Bilibili bootstrap: the expression calls `/x/frontend/finger/spi` once per
+  page (`window.__DA_BILI_READY`), sets `buvid3/buvid4` via `document.cookie`
+  (`domain=.bilibili.com`), and resets the flag on a 412 so the next call retries.
+- Tencent danmaku uses `credentials: 'omit'`: its CDN answers `ACAO: *`, which
+  the browser rejects for credentialed requests. Everything else uses `include`.
+- `src/platform/tauri.ts`: `window.fetch` routes `api.bilibili.com` and
+  `*.video.qq.com` to `invoke('source_fetch')` and reconstructs a `Response`;
+  the existing provider functions (`searchMedia`, `getBangumiInfo`,
+  `getDanmakuXml`, `listEpisodes`, `getDanmakuSegments`, `zTencentComment`) run
+  unchanged.
+- `src/danmaku/sources.ts`: one `SourceSeason`/`SourceEpisode` shape for DDP /
+  Bilibili / Tencent, adapters, bounded search (external sources only for the
+  first 3 keywords — Tencent search is ~316 KB), parallel Tencent segment fetch
+  (4 at a time), cross-source dedupe by `p+m`.
+- `autoMatch.ts`: sources are scored together; `collectExtras` merges another
+  source only when it is the same show AND same season (unmarked base ≡
+  `第1季`, never `Show` vs `Show 第二季`) and the episode resolves. The matched
+  outcome carries `extraMatches`; `PlayerHost` fetches them in parallel, merges,
+  and the OSD names the sources.
+- Settings: `sources.{ddp,bilibili,tencent}` (default all on), `mergeSources`
+  (default on), and 登录 B站/腾讯 buttons (`source_login` opens a real WebView2
+  login window; cookies persist in the app profile). The picker badges every
+  result with its source and searches all enabled sources.
+- Learned filename rules now carry `source`; old persisted rules default to
+  `ddp` in `normalizeFilenameRule`.
+- `vite.config.ts` needs the `danmaku-provider/bilibili` and `/tencent` aliases
+  **before** the bare package alias (same trap as `/ddp` and `/genAi`).
+
+**Verification (real exe, temp WebView2 profile).**
+- Bridge: Bilibili spi/search/season/XML and Tencent search/danmaku all 200 with
+  the expected payloads (XML 322,334 bytes; Tencent search 316,612 bytes).
+- End-to-end, opening a fixture named `葬送的芙莉莲 - 11.mp4`:
+  `自动匹配 · 哔哩哔哩 + 腾讯视频 + DanDanPlay · 葬送的芙莉莲 · 第11集 ·
+  5795 条` in 6.1 s.
+- `咒术回战 第二季 第11话.mp4`: `哔哩哔哩 + DanDanPlay · 咒术回战 第二季 ·
+  第11集 · 3608 条`; Bilibili uses local numbering, DDP resolves the absolute
+  episode 35 as an extra.
+- Gates: player `tsc` clean, 166 unit tests + 1 opt-in live audit; media-parser
+  54; extension 360; biome clean; vite build; Playwright 7/7.
+
+**Traps.**
+- Page→host `WebMessage` never fired on the remote `robots.txt` document in this
+  WebView2 build (host→page did). CDP `Runtime.evaluate` is the reliable path.
+- `CallDevToolsProtocolMethod` returns the method's **result object**, not the
+  `{id, result}` envelope: `Runtime.evaluate` is at `/result/value`.
+- Registering the WebMessage handler right after `build()` can run before
+  CoreWebView2 is ready; the CDP path waits for `PageLoadEvent::Finished`
+  instead.
+- The hidden pages must be on the site origin, not `api.*`/`dm.*`; only then do
+  the CORS allowlists and the cookie jar match.
+- Never forward `Cookie`/`Origin`/`Referer`/`User-Agent` from the app fetch;
+  they are forbidden headers in the page. The page supplies them.
+- `dm.video.qq.com` with `credentials: 'include'` fails (`ACAO: *`); use `omit`.
+- Bilibili `第1季` means the base season; treating it as "season 1 ≠ unmarked"
+  made Tencent silently drop out of every merge.
+- Old learned rules have no `source`; normalizing them to `ddp` is required or
+  every existing rule becomes unusable.
+
+## 31. Upscale chain wasted work: fixed 4x/8x templates vs a 1.33x target (2026-11-06 — DONE)
+
+**Reported as** "看看现状" about compute acceleration. The investigation started
+as "should Anime4K use fp16?" and ended somewhere else entirely.
+
+### fp16 was measured and rejected
+
+Converted the real `Restore-CNN-(VL)-Conv-4x3x3x16` layer to f16 (f16 weight
+matrices + f16 MAC, sampled textures staying `texture_2d<f32>` because WGSL
+forbids f16 texel types) and timed it against the f32 original with
+`timestamp-query`, interleaved 24 rounds × 40 dispatches at 1920x1080:
+
+| variant | p10 | p50 | mean |
+|---|---|---|---|
+| f32 (current) | 0.275 ms | 0.305 ms | 0.379 ms |
+| f16 weights + MAC | 0.283 ms | 0.311 ms | 0.368 ms |
+
+**0.98× — no gain.** A synthetic probe isolated why: 36 `mat4x4` MACs with no
+texture traffic went 0.187 ms → 0.170 ms (**1.10×**), while 4 texture loads +
+1 store ran at **1808 GB/s**. So the layer is ALU-dominated, but Tint does not
+pack these `mat4x4 * vec4` ops into `f16x2` pairs — scalar f16 runs on the same
+pipe as f32. Reaching the real 2× would mean rewriting all 270 inlined WGSL
+layers into a packed `vec2<f16>` layout, i.e. maintaining a private Anime4K port.
+Not worth it, and the GPU was never the bottleneck (see below).
+
+### The real waste: the chain upscaled past the target, then undid it
+
+The built-in templates are fixed multiples — A/B/C reach 4× (two 2× upscalers),
+the doubled modes 8× (three). That only fits a target that is exactly 4×/8× the
+source. A 1080p file on a 2560x1440 display (x2 setting, clamped to the screen)
+asks for **1.33×**, so `buildEffectChain` ran every upscaler anyway and inserted
+its intermediate `Downscale`:
+
+```
+CNNx2VL    1920x1080 -> 3840x2160   upscale to 4K
+Downscale  3840x2160 -> 1280x720    ...then drop BELOW the source
+CNNx2M     1280x720  -> 2560x1440   ...and upscale the blur back up
+```
+
+The intermediate landed **below the source resolution**, so the file's own
+detail was discarded and re-guessed. Measured in the packaged exe on a 1080p
+24fps source, before the fix:
+
+| config | passes | fps | GPU |
+|---|---|---|---|
+| A/balanced | 5 | 24 | **100%** |
+| A/ultra | 5 | 22 | 100% |
+| A+A/ultra | 8 | **20** | 100% |
+
+### Fix
+
+`packages/upscale-engine/src/utils/effect-chain-prune.ts` keeps only the
+upscalers the target actually needs (fewest 2× steps whose product reaches it;
+none when the target is not larger than the source). Overshoot is free — the
+presentation pass already samples the final texture into the canvas with a
+bilinear sampler. `renderer.ts` prunes before building and additionally floors
+any intermediate `Downscale` at the chain's real input size (which is the
+interpolator's working texture when interpolation is on, not `sourceDimensions`).
+
+**After, same exe and same source:**
+
+| config | passes | fps | GPU |
+|---|---|---|---|
+| A/balanced | **3** | 25 | **52%** |
+| A/ultra | **3** | 24 | 68% |
+| A+A/ultra | **3** | 25 | **57%** |
+
+Image quality improved rather than degraded: Laplacian detail energy over a
+face/glasses crop is **1.6×** the old path's (5.69 vs 3.57), because the final
+frame is now built from the 1080p source instead of a 720p intermediate.
+
+Engine tests **37/37** (9 new prune tests), type-check + biome clean, packaged
+exe acceptance **30/30**. Note the 640x360 fixture still builds 5 passes for a
+1280x720 target — that is a genuine 2× target, so no pruning applies; pruning
+only engages when the requested factor is not a whole 2× step.
+
+## 32. FLV (and TS/AVI) files: remux the container, keep the file (2026-11-07 — DONE)
+
+**Reported as** `01.flv` from an AnimeDownloader batch would not play.
+
+### The container, not the codec
+
+The file is H.264 + AAC, 1920x1080, 24 fps, 1326 s, 202 MB — exactly what
+WebView2 decodes. Measured with a real `<video>` element through `stream://`:
+
+| container | result |
+|---|---|
+| MP4 | ✓ |
+| MKV | ✓ (`1920x1080 dur 8.26`) |
+| WebM / MOV | ✓ |
+| **FLV / TS / AVI** | ✗ `PipelineStatus::DEMUXER_ERROR_COULD_NOT_OPEN: FFmpegDemuxer: open context failed` |
+
+So only the demuxer is missing. `ffmpeg -c copy` rewrites the container with
+every packet copied bit-for-bit: **1.4 s cold / 0.35 s warm for the 202 MB
+episode**, `h264` + `aac` and `duration 1326.42` preserved. No re-encode, no
+quality change.
+
+### Where it happens
+
+`src-tauri/src/remux.rs` — command `media_prepare(path)`:
+* containers not in `NEEDS_REMUX` (`flv`/`ts`/`avi`) return the path unchanged;
+* otherwise `-map 0:v:0 -map 0:a:0? -c copy -movflags +faststart` into
+  `<app cache dir>/media/<sha256(path|size|mtime)>.mp4`, falling back to
+  Matroska (`-f matroska`) when a codec cannot live in MP4;
+* cache entries are keyed on the source's size + mtime, so an edited file can
+  never be served a stale copy, and the directory is pruned to 2 GiB (oldest
+  first; an evicted entry simply remuxes again);
+* one global mutex, so the `<video>` element and the progress-bar thumbnail
+  decoder asking for the same file at once produce ONE copy.
+
+`Platform.prepareMediaUrl(item)` is the frontend entry point (browser: returns
+`item.url`, a page has no ffmpeg). The playlist item keeps the **original**
+`path`; only the URL handed to `<video>` points at the copy. That is deliberate:
+resume history, the sibling `01.xml` danmaku, embedded-subtitle probing and the
+learned filename rules all keep operating on the real file.
+
+### The async gap it introduces
+
+Resolving the source is now asynchronous, so `PlayerHost` holds `sourceKey` —
+the key (`path`, else `url`) of the media the element actually holds. It is
+cleared when the media changes and set only after `video.src` is assigned.
+Every effect that binds something to a source (HDR detection, danmaku mount,
+subtitle mount, upscale apply, resume restore) is gated on `sourceReady`.
+Without this, the resume effect would see the OUTGOING file's
+`readyState >= 1`, seek it to the new episode's resume point, mark itself done,
+and the new file would never resume. `ProgressBar` decodes the prepared URL too
+(`preparedUrlForPath`), otherwise hover thumbnails would keep trying the FLV.
+
+### Verification
+
+Rust unit tests cover the extension list, cache-key invalidation, the
+missing-file pass-through, the no-op for playable containers and the prune
+order. Frontend: `REMUX_EXTENSIONS` test, 167 vitest tests, tsc + biome clean.
+
+End-to-end on the packaged exe (temp `WEBVIEW2_USER_DATA_FOLDER`), opening the
+user's real `01.flv` through `__player.commands.openVideoFromPath`:
+
+| check | result |
+|---|---|
+| first open (remux runs) | **780 ms** → `duration 1326.42`, 1920x1080, `readyState 4` |
+| reopen (cache hit) | **12 ms** |
+| seek to 600 s + play | `currentTime 601.6`, still playing, no error |
+| resume after reopen | restored to the saved 632.6 s |
+| upscale on the remuxed file | `active`, 24 fps in / 24 fps out |
+| `media.path` | still the original `.flv` (resume / siblings / subtitles intact) |
+| `e2e/verify-exe.mjs` | **30/30** |
+
+Note the packaged exe can only be replaced while the player is closed; a build
+made during a session lands in `target/release/deps/danmaku_player.exe`.
+
+## 33. Danmaku rows overlapped as soon as the font grew (2026-11-07 — DONE)
+
+### The bug
+
+Two lines of danmaku touched (and at 36px+ visibly overlapped). The engine
+sizes every row from a fixed `trackHeight`, which the player never passed, so
+every track was the library default **32px**. The row pitch was therefore
+constant while the text box was not: `.da-danmaku` set no `line-height`, and
+the browser's line box for the CJK system font is ~1.5em.
+
+Measured in Chromium (`e2e/danmaku-rows.spec.ts`, before the fix):
+
+| font | text box | row pitch | verdict |
+|---|---|---|---|
+| 12px | 18px | 32px | fits |
+| 26px (default) | **39px** | 32px | overlaps 7px |
+| 36px | **54px** | 32px | overlaps 22px |
+| 48px | **72px** | 32px | pitch collapsed to 11.5px |
+
+So this was never "no line-spacing control" — the box was taller than the track
+it was placed in, and got worse as the font grew.
+
+### The fix
+
+The height has to be predictable before the pitch can be derived from it:
+
+- `packages/danmaku-engine` gained an optional `style.lineHeight` (unitless),
+  applied in `$createNode` (before the size is measured) and in
+  `updateOptions`. The extension passes nothing, so its rendering is unchanged.
+- The player pins it to `TEXT_BOX_RATIO` (1.15), so a node is exactly
+  `fontSize * 1.15` tall at every size.
+- The track pitch is `ceil(fontSize * lineHeight)`, rounded **up** so the box
+  can never be taller than the track that holds it. Overlap is now impossible
+  by construction, not by tuning.
+
+`lineHeight` is the new 行距 setting (1.25×–2.2×, default 1.45× — 26px → 38px
+rows, airier than the old fixed 32px). It lives in
+`src/player/danmaku/trackHeight.ts` together with the constants, is exposed in
+both the settings page and the quick panel, and the persist merge clamps a
+stale persisted value (`DanmakuSettings.lineHeight` did not exist in older
+builds).
+
+Measured after the fix:
+
+| font | text box | row pitch |
+|---|---|---|
+| 26px | 29.9px | 38px |
+| 36px | 41.4px | 53px |
+| 48px | 55.2px | 70px |
+
+### Verification
+
+`src/player/danmaku/trackHeight.test.ts` covers the ceiling, the
+never-below-the-box floor, monotonicity across the whole 12–48px range and
+degenerate input. `e2e/danmaku-rows.spec.ts` reads the REAL laid-out boxes in
+Chromium at 12/26/36/48px and asserts both the pinned line box and the
+row-to-row distance. It was checked against the unfixed code: it fails at 12px
+(18px box vs the pinned 13.8px), so it is a genuine regression test, not a
+tautology.
+
+## 34. AI bilingual subtitles v2: whisper + Murasaki sidecars (2026-11-11 — DONE, awaiting user check)
+
+Plan and measurements: `PLAN-subtitle-v2.md`. Japanese audio → Chinese (and
+bilingual) subtitles, all local. Replaces the §20 SenseVoice path (sherpa-onnx,
+hound, tar, bzip2 removed from Cargo.toml).
+
+**Engines (separate processes, `src-tauri/src/subtitle/sidecar.rs`).**
+- Recognition: whisper.cpp b5454 `whisper-server` + `ggml-large-v3-turbo-q5_0`,
+  `-l ja -mc 0 --vad -vm <resources/ggml-silero-v5.1.2.bin>`; CPU build or
+  optional CUDA build (NVIDIA only). **No `-dtw`**: it forces flash-attn off,
+  2-5× slower, no accuracy gain (measured).
+- Translation: llama.cpp b10909 **Vulkan** build `llama-server` + Murasaki-4B
+  IQ4_XS, `-c 1024 -np 1 --no-jinja --chat-template chatml`. GPU = `-ngl 99`;
+  CPU = `-ngl 0 -dev none` (the same Vulkan binary, measured to touch no VRAM).
+- Killing a sidecar frees its VRAM. Only one engine is on the GPU at a time
+  (`Engines::ensure` kills the other GPU one first; GPU spawn failure → CPU).
+  A kill-on-close Job Object reaps children if the player dies.
+
+**Data dir (`storage.rs`), never C: unless nothing else exists.** env
+`DANMAKU_PLAYER_DATA_DIR` → `app_config_dir/subtitle-data-dir.txt` → default
+(exe's drive if not C, else the fixed non-C drive with most free space >8 GB,
+else app data) `<X>:\DanmakuPlayerData`, persisted on first use. Layout:
+`models/`, `runtime/{whisper-cpu,whisper-cuda,llama}/`, `downloads/*.part`,
+`subs/<fnv(path)+size+mtime>.json` (per-video track cache), `logs/`.
+Assets (`assets.rs`): resumable Range download, sha256-verified, zip
+flatten-extract; models from hf-mirror→huggingface, runtimes ghfast→github.
+
+**Recognition chunking (`whisper.rs`).** 120 s clips (30 s clips on CPU pay a
+~5.4 s encode each: 176 s vs 63 s for 300 s of audio). Boundary rule: on a
+non-final clip drop cues ending within 0.5 s of the clip end; the next clip
+starts at the last kept cue's end (nothing kept → advance clip_end − 2 s).
+Segments with `no_speech_prob ≥ 0.8` dropped; hallucination cleanup in `clean`.
+
+**Translation (`translator.rs`).** Batches of 8 as `N|line`, temperature 0.3;
+missing lines → one retry; only the leading run of numbered lines is trusted;
+echoes / >50% kana rejected → `null` (shown as Japanese, never retried).
+
+**Scheduler (`src/subtitle/generate.ts`, pure track logic in `aiTrack.ts`).**
+- *Burst*: 「AI 生成中文字幕」 → auto-pause → recognize [t, t+300) on the GPU
+  (CPU: 60 s) → release the recognizer → translate until the Chinese frontier
+  ≥ t+60 (CPU: 25) → release → auto-resume. 直接播放 (`skipBurst`) or the user
+  pressing play ends it at once (no resume on top of the user). The video is
+  only resumed if it was playing when the burst began.
+- GPU plan: `aiGpu` setting; GPU recognition needs the CUDA package and ≥1300 MB
+  free (nvidia-smi); GPU translation needs ≥2800 MB or unknown VRAM.
+- A burst that wants the GPU cancels a CPU follow run still recognizing (a seek
+  starts one before the burst decision — that run once stood in for the burst).
+- *Follow*: CPU only; recognize 240 s spans when the lead < 150 s, translate to
+  keep 120 s of Chinese ahead. Seek into unrecognized audio (debounced 450 ms)
+  → new burst.
+- `watchStore` tracks play state even between sessions — otherwise the burst's
+  own auto-pause reads as "no change" and a later user play is never seen.
+- Mounting any other subtitle stops generation. Priority on open: sibling file
+  > embedded track > cached AI track (`restoreGeneratedTrack`, CPU follow, no
+  pause).
+- Display `aiDisplay` dual/zh/ja (key T, AI track only); dual = Chinese above,
+  Japanese at 0.62× below. Export .srt (双语/中文/日文) from 设置 → 字幕.
+
+**Measured (300 s segment, this machine).** GPU+VAD recognition 3.7 s (Rust path
+4.5 s, first clip 0.9 s); CPU+VAD 63 s. Murasaki Vulkan 2.6 s/batch, 76 tok/s,
++2.46 GB VRAM; CPU mode 18 tok/s. whisper GPU ≈ 0.9-1.1 GB, back to baseline on
+kill.
+
+**Verification.** 37 Rust unit tests; `tests/real_pipeline.rs` (env-gated real
+servers: 82 cues, 24/24 translated on GPU); vitest `aiTrack.test.ts` +
+`generate.test.ts` (mock backend: burst order/GPU handover/resume, user-play,
+skip, low VRAM, no CUDA, GPU off, seek bursts, follow lead, media-switch
+staleness). Rust tests MUST use `--target-dir D:/tmp/cargo-test-target` (the
+default dir overwrites the release exe with a dev build).
+
+## 35. Explorer 「打开方式」 / file association opens the file (2026-11-11 — DONE)
+
+Before: the exe ignored its command line, so 「打开方式 → Danmaku Player」 only
+started an empty player. Now (`src-tauri/src/launch.rs`):
+
+- First launch: existing files in argv (relative ones resolved against the
+  cwd, `-flags` dropped) are parked in `LaunchFiles`; the page takes them once
+  via `launch_files_take` (emitting at setup would beat the page's listener).
+- Player already running: `tauri-plugin-single-instance` (first plugin
+  registered) makes the second launch exit and hands its argv to `forward`,
+  which unminimizes/focuses `main` and emits `open-files`.
+- Frontend: `Platform.onOpenFiles` (Tauri: subscribe to `open-files` first,
+  then take the launch files; browser: noop). `PlayerHost` routes both it and
+  OS drag-drop through the same handler — videos → `openVideosFromPaths`
+  (playlist reset), `.xml/.json` → danmaku, subtitle files → subtitles.
+
+Verified: `cargo test launch` (arg filtering); exe with a temp
+`WEBVIEW2_USER_DATA_FOLDER`: `exe <video>` played it (resume thumb written on
+close, then deleted), a second `exe <video>` exited at once with one process
+left.
+
+## 36. AI subtitles: cue times snapped to the voice (2026-11-12 — DONE)
+
+Symptom: the next line was on screen through the whole pause before it was
+spoken — subtitles looked continuous. Cause: whisper (no word timestamps)
+starts a segment where the previous one ENDED, folding the pause into it.
+Transub-Player uses whisper's segment times as-is, so it has the same issue.
+
+Fix (`src-tauri/src/subtitle/speech.rs`): after each clip, run silero VAD
+(`whisper-vad-speech-segments.exe`, shipped in the same whisper.cpp b5454 CPU
+zip, bundled model) on the clip's WAV and shrink every kept cue to the speech
+inside it — start = voice start − 0.3 s, end = voice end + 0.5 s, never
+outside whisper's span, ≥ 0.8 s shown; cues without speech inside unchanged.
+Applied AFTER the clip-boundary rule. VAD failure only logs `vad:` and keeps
+whisper timing. Cost ~0.5 s per 300 s of audio. Cache format `v: 2`.
+
+Result on the A/B segment vs the official track: starts > 0.5 s early 23 → 8,
+pairs with a gap ≥ 0.3 s 21 → 43 of 82, on-screen 262 s → 230 s (official
+232 s).
+
+Tried and REVERTED by the user (2026-11-12, "不如第一版"): Netflix/BBC
+display rules on top (0.5 s linger, closing gaps < 0.5 s, 5/6 s minimum,
+9 chars/s), sentence splits at 「。」+pause, ffmpeg scdet shot-change
+alignment and a 0.25 s speech-overlap rule. They scored better against the
+official track but looked worse to the user — the metric is not the goal.

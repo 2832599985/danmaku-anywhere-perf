@@ -18,6 +18,7 @@ import { useActiveConfig } from '@/content/controller/common/context/useActiveCo
 import { usePopup } from '@/content/controller/store/popupStore'
 import { useStore } from '@/content/controller/store/store'
 import { WindowToolbar } from '@/content/controller/ui/floatingPanel/layout/WindowToolbar'
+import { UpscaleControls } from './UpscaleControls'
 
 export const ControllerToolbar = () => {
   const { t } = useTranslation()
@@ -59,6 +60,7 @@ export const ControllerToolbar = () => {
             <LinearProgress sx={{ height: '1px' }} />
           </Box>
         </Fade>
+        <UpscaleControls />
         {activeConfig.mode === 'manual' ? (
           episode && (
             <Typography noWrap title={episodeToString(episode)}>

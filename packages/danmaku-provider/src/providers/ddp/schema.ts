@@ -152,9 +152,11 @@ export const zGetExtCommentQuery = z.object({
 
 export type GetExtCommentQuery = z.input<typeof zGetExtCommentQuery>
 
-export const zSendCommentResponseV2 = zResponseSuccess.extend({
-  cid: z.number(),
-})
+export const zSendCommentResponseV2 = createResponseType(
+  zResponseSuccess.extend({
+    cid: z.number(),
+  })
+)
 
 export type SendCommentResponse = z.infer<typeof zSendCommentResponseV2>
 

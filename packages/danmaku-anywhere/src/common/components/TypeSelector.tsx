@@ -101,7 +101,7 @@ export const TypeSelector = ({
                       }
                     />
                   }
-                  label={t(localizedDanmakuSourceType(type))}
+                  label={localizedDanmakuSourceType(type)}
                 />
               )
             })}

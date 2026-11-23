@@ -1,3 +1,4 @@
+import { DanmakuSourceType } from '@danmaku-anywhere/danmaku-converter'
 import { z } from 'zod'
 
 import type { Options } from '@/common/options/OptionsService/types'
@@ -65,6 +66,15 @@ export const mountConfigInputSchema = z.object({
    */
   integration: z.string().optional(),
   ai: zMountConfigAiConfig.optional(),
+  /**
+   * Preferred provider order for automatic matching.
+   * When set, SearchMatchingStrategy will use only these providers in this order.
+   * Empty array means use all enabled automatic providers (default behavior).
+   */
+  preferredProviders: z
+    .array(z.enum(DanmakuSourceType))
+    .optional()
+    .prefault(() => []),
 })
 
 export const mountConfigInputListSchema = z.array(mountConfigInputSchema)

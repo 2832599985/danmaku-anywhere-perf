@@ -35,6 +35,23 @@ export type SettingConfig<S> = ToggleSettingConfig<S>
 
 const advancedSettings: SettingConfig<ExtensionOptions>[] = [
   {
+    id: 'toggle.player.enableFullscreenInteraction',
+    label: () =>
+      i18n.t(
+        'optionsPage.enableFullscreenInteraction',
+        'Enable fullscreen interaction'
+      ),
+    category: 'advanced',
+    type: 'toggle',
+    getValue: (options) => options.playerOptions.enableFullscreenInteraction,
+    createUpdate: (options, newValue) => ({
+      playerOptions: {
+        ...options.playerOptions,
+        enableFullscreenInteraction: newValue,
+      },
+    }),
+  },
+  {
     id: 'toggle.analytics',
     label: () =>
       i18n.t('optionsPage.enableAnalytics', 'Enable anonymous analytics'),
@@ -84,6 +101,28 @@ const advancedSettings: SettingConfig<ExtensionOptions>[] = [
     getValue: (options) => options.restrictInitiatorDomain,
     createUpdate: (_, newValue) => ({ restrictInitiatorDomain: newValue }),
   },
+  {
+    id: 'toggle.enableMultiSourceMerge',
+    label: () =>
+      i18n.t(
+        'optionsPage.enableMultiSourceMerge',
+        'Enable multi-source danmaku merge'
+      ),
+    descriptionKey: 'optionsPage.enableMultiSourceMergeDescription',
+    category: 'advanced',
+    type: 'toggle',
+    getValue: (options) => options.enableMultiSourceMerge,
+    createUpdate: (_, newValue) => ({ enableMultiSourceMerge: newValue }),
+  },
+  {
+    id: 'toggle.showFloatingButton',
+    label: () =>
+      i18n.t('optionsPage.showFloatingButton', 'Show floating button'),
+    category: 'advanced',
+    type: 'toggle',
+    getValue: (options) => options.showFloatingButton,
+    createUpdate: (_, newValue) => ({ showFloatingButton: newValue }),
+  },
 ]
 
 const playerSettings: SettingConfig<ExtensionOptions>[] = [
@@ -102,6 +141,20 @@ const playerSettings: SettingConfig<ExtensionOptions>[] = [
     }),
   },
   {
+    id: 'toggle.player.autoSkipOp',
+    label: () =>
+      i18n.t('optionsPage.player.autoSkipOp', 'Auto skip opening (OP)'),
+    category: 'player',
+    type: 'toggle',
+    getValue: (options) => options.playerOptions.autoSkipOp,
+    createUpdate: (options, newValue) => ({
+      playerOptions: {
+        ...options.playerOptions,
+        autoSkipOp: newValue,
+      },
+    }),
+  },
+  {
     id: 'toggle.player.showDanmakuTimeline',
     label: () =>
       i18n.t('optionsPage.player.showDanmakuTimeline', 'Show danmaku density'),
@@ -112,6 +165,67 @@ const playerSettings: SettingConfig<ExtensionOptions>[] = [
       playerOptions: {
         ...options.playerOptions,
         showDanmakuTimeline: newValue,
+      },
+    }),
+  },
+  {
+    id: 'toggle.player.enableFixedSkip',
+    label: () =>
+      i18n.t(
+        'optionsPage.player.enableFixedSkip',
+        'Show fixed time skip button'
+      ),
+    category: 'player',
+    type: 'toggle',
+    getValue: (options) => options.playerOptions.enableFixedSkip,
+    createUpdate: (options, newValue) => ({
+      playerOptions: {
+        ...options.playerOptions,
+        enableFixedSkip: newValue,
+      },
+    }),
+  },
+  {
+    id: 'toggle.player.autoDensity',
+    label: () =>
+      i18n.t('optionsPage.player.autoDensity', 'Auto-adjust danmaku density'),
+    category: 'player',
+    type: 'toggle',
+    getValue: (options) => options.playerOptions.autoDensity,
+    createUpdate: (options, newValue) => ({
+      playerOptions: {
+        ...options.playerOptions,
+        autoDensity: newValue,
+      },
+    }),
+  },
+  {
+    id: 'toggle.player.autoNextEpisode',
+    label: () =>
+      i18n.t(
+        'optionsPage.player.autoNextEpisode',
+        'Auto load next episode danmaku'
+      ),
+    category: 'player',
+    type: 'toggle',
+    getValue: (options) => options.playerOptions.autoNextEpisode,
+    createUpdate: (options, newValue) => ({
+      playerOptions: {
+        ...options.playerOptions,
+        autoNextEpisode: newValue,
+      },
+    }),
+  },
+  {
+    id: 'toggle.player.enableTranslation',
+    label: () => i18n.t('translation.enable', 'Enable danmaku translation'),
+    category: 'player',
+    type: 'toggle',
+    getValue: (options) => options.playerOptions.enableTranslation,
+    createUpdate: (options, newValue) => ({
+      playerOptions: {
+        ...options.playerOptions,
+        enableTranslation: newValue,
       },
     }),
   },

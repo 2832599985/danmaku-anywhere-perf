@@ -1,0 +1,280 @@
+/**
+ * Settings shapes + defaults (FROZEN — see CONTRACT.md §7).
+ * The upscale block mirrors the extension's schema 1:1 so the engine glue is
+ * identical. Danmaku settings are a flat, UI-friendly view that the
+ * DanmakuController translates into the engine's nested DanmakuOptions.
+ */
+
+import { DEFAULT_LINE_HEIGHT } from '@/player/danmaku/trackHeight'
+
+export type UpscaleModeId =
+  | 'builtin-mode-a'
+  | 'builtin-mode-b'
+  | 'builtin-mode-c'
+  | 'builtin-mode-aa'
+  | 'builtin-mode-bb'
+  | 'builtin-mode-ca'
+
+export type PerformanceTier = 'performance' | 'balanced' | 'quality' | 'ultra'
+
+export type TargetResolution =
+  | 'x2'
+  | 'x4'
+  | 'x8'
+  | '720p'
+  | '1080p'
+  | '2k'
+  | '4k'
+  | 'native'
+
+export type InterpolationResolution = '480p' | '720p' | '1080p'
+
+/** How the interpolation factor is chosen. */
+export type InterpolationMode = 'multiplier' | 'targetFps'
+/** Explicit integer factors offered in the UI. */
+export type InterpolationMultiplier = 2 | 3 | 4
+/** Target output frame rates offered in the UI (matches common refresh rates). */
+export type InterpolationTargetFps = 60 | 120 | 144 | 170
+
+export interface UpscaleSettings {
+  enabled: boolean
+  modeId: UpscaleModeId
+  performanceTier: PerformanceTier
+  targetResolution: TargetResolution
+  frameInterpolation: {
+    enabled: boolean
+    resolution: InterpolationResolution
+    /** 'multiplier' = fixed N×; 'targetFps' = adapt N× to reach a target fps. */
+    mode: InterpolationMode
+    /** used when mode === 'multiplier'. */
+    multiplier: InterpolationMultiplier
+    /** used when mode === 'targetFps'. */
+    targetFps: InterpolationTargetFps
+  }
+}
+
+/** A patch for UpscaleSettings that allows a partial nested frameInterpolation. */
+export type UpscaleSettingsPatch = Partial<
+  Omit<UpscaleSettings, 'frameInterpolation'>
+> & {
+  frameInterpolation?: Partial<UpscaleSettings['frameInterpolation']>
+}
+
+/** A blocked-word rule: plain substring or (when isRegex) a RegExp source. */
+export interface DanmakuFilter {
+  pattern: string
+  isRegex: boolean
+}
+
+export interface DanmakuSettings {
+  /** Whether danmaku are shown (maps to renderer show()/hide()). */
+  visible: boolean
+  /** 0..1 */
+  opacity: number
+  /** px */
+  fontSize: number
+  /**
+   * Row pitch as a multiple of the font size (行距). The engine's track height
+   * is derived from it, so lines can never overlap whatever the font size —
+   * see `danmakuTrackHeight` in `player/danmaku/trackHeight.ts`.
+   */
+  lineHeight: number
+  /** engine scroll speed multiplier (1 = default). */
+  speed: number
+  /** display area as a percentage of height, measured from the top (yEnd). */
+  area: number
+  /** timing offset in milliseconds (danmaku shifted vs. video time). */
+  offset: number
+  /** maximum simultaneous on-screen danmaku. */
+  maxOnScreen: number
+  /** 0..100 overlap tolerance. */
+  overlap: number
+  /** drop all but the first of comments with identical text (降重). */
+  mergeDuplicates: boolean
+  /** blocked words applied before comments reach the renderer. */
+  filters: DanmakuFilter[]
+  /**
+   * When no sibling danmaku file exists, parse the filename with the free
+   * built-in AI (proxy-hosted Gemini) and auto search+mount DanDanPlay
+   * danmaku. Tauri only; silent no-op on network/parse failure.
+   */
+  autoOnlineMatch: boolean
+  /**
+   * Remember the file-name shape behind a manual season/episode choice and
+   * replay it for later files of the same batch (learned rules run before the
+   * AI). Off = neither learn nor apply; rules already learned are kept.
+   */
+  learnFilenamePatterns: boolean
+  /**
+   * Online sources searched by auto-match. DanDanPlay is the plain HTTP API;
+   * Bilibili/Tencent go through the hidden-WebView bridge (Tauri only).
+   */
+  sources: { ddp: boolean; bilibili: boolean; tencent: boolean }
+  /** Merge comments from every confident source for the matched episode. */
+  mergeSources: boolean
+  /**
+   * When auto-match fails to find or disambiguate a show, automatically open
+   * the manual danmaku search dialog instead of staying silent.
+   */
+  autoOpenPickerOnMiss: boolean
+}
+
+/** How the player handles detected OP/ED segments. */
+export type SkipOpEdMode = 'auto' | 'ask' | 'off'
+
+/** Which picture source screenshots capture when super-resolution is active. */
+export type ScreenshotSource = 'upscaled' | 'original'
+
+export interface SubtitleSettings {
+  /** master switch; hides the layer without dropping mounted cues. */
+  visible: boolean
+  /** px */
+  fontSize: number
+  /** timing offset in ms (positive = cues shown later, danmaku convention). */
+  offset: number
+  /** distance of the cue block from the stage bottom, % of stage height. */
+  bottom: number
+  /** 0..1 */
+  opacity: number
+  /** ink outline + hard shadow behind the paper-colored text. */
+  outline: boolean
+  /**
+   * AI subtitles: what is shown — 'dual' (Chinese above, small Japanese
+   * below), 'zh' or 'ja'. A line without a translation shows its Japanese.
+   */
+  aiDisplay: 'dual' | 'zh' | 'ja'
+  /**
+   * AI subtitles may borrow the GPU while the player auto-pauses (burst).
+   * Off = everything on the CPU, no auto-pause on seeks.
+   */
+  aiGpu: boolean
+}
+
+export interface PlaybackSettings {
+  /** seconds moved by ArrowLeft / ArrowRight. */
+  seekStepSec: number
+  /**
+   * When a video is opened, scan its own folder for the other episodes of the
+   * same batch (same literal file-name head) and queue them right after it, so
+   * autoplay can carry on into the next episode. Tauri only — a page cannot
+   * read a directory.
+   */
+  autoAddSiblings: boolean
+  /** volume delta (0..1) moved by ArrowUp / ArrowDown. */
+  volumeStep: number
+  /** when the current video ends, automatically play the next playlist item. */
+  autoAdvance: boolean
+  /** OP/ED skip behavior: auto-skip, ask first, or disabled. */
+  skipOpEd: SkipOpEdMode
+  /**
+   * Temporary playback rate while the right arrow is HELD (long press). A
+   * short tap still seeks; only an auto-repeated press engages this rate, and
+   * releasing the key restores whatever the global rate was before the hold
+   * (snapshotted on engage, so a 1.5× global rate resumes after a 3× hold).
+   */
+  holdSpeed: number
+  /** Persisted audio volume (0..1). */
+  volume: number
+  /** Persisted mute state. */
+  muted: boolean
+  /** Show the top-right real-time FPS / CPU HUD while upscaling (off by default). */
+  showPerformanceHud: boolean
+  /** Prefer the upscaled WebGPU frame when available, or always capture raw <video>. */
+  screenshotSource: ScreenshotSource
+  /** Composite live on-screen danmaku into screenshots. */
+  screenshotIncludeDanmaku: boolean
+  /** Composite active subtitles (at resting margin, unlifted) into screenshots. */
+  screenshotIncludeSubtitles: boolean
+  /** Save screenshots to disk as PNG in addition to copying to clipboard. */
+  saveScreenshotToFile: boolean
+  /** Custom folder for saved screenshots (empty = Pictures/DanmakuPlayer). */
+  screenshotDir: string
+}
+
+export interface Settings {
+  upscale: UpscaleSettings
+  danmaku: DanmakuSettings
+  playback: PlaybackSettings
+  subtitle: SubtitleSettings
+}
+
+export const DEFAULT_UPSCALE: UpscaleSettings = {
+  enabled: false,
+  modeId: 'builtin-mode-a',
+  performanceTier: 'balanced',
+  targetResolution: 'x2',
+  frameInterpolation: {
+    enabled: false,
+    resolution: '720p',
+    mode: 'multiplier',
+    multiplier: 2,
+    targetFps: 60,
+  },
+}
+
+export const DEFAULT_DANMAKU: DanmakuSettings = {
+  visible: true,
+  opacity: 0.75,
+  fontSize: 26,
+  lineHeight: DEFAULT_LINE_HEIGHT,
+  speed: 1,
+  area: 100,
+  offset: 0,
+  maxOnScreen: 200,
+  overlap: 0,
+  mergeDuplicates: false,
+  filters: [],
+  autoOnlineMatch: true,
+  learnFilenamePatterns: true,
+  sources: { ddp: true, bilibili: true, tencent: true },
+  mergeSources: true,
+  autoOpenPickerOnMiss: true,
+}
+
+export const DEFAULT_PLAYBACK: PlaybackSettings = {
+  seekStepSec: 5,
+  autoAddSiblings: true,
+  volumeStep: 0.05,
+  autoAdvance: true,
+  skipOpEd: 'ask',
+  holdSpeed: 3,
+  volume: 1,
+  muted: false,
+  showPerformanceHud: false,
+  screenshotSource: 'upscaled',
+  screenshotIncludeDanmaku: false,
+  screenshotIncludeSubtitles: false,
+  saveScreenshotToFile: false,
+  screenshotDir: '',
+}
+
+export const DEFAULT_SUBTITLE: SubtitleSettings = {
+  visible: true,
+  fontSize: 30,
+  offset: 0,
+  bottom: 6,
+  opacity: 1,
+  outline: true,
+  aiDisplay: 'dual',
+  aiGpu: true,
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  upscale: DEFAULT_UPSCALE,
+  danmaku: DEFAULT_DANMAKU,
+  playback: DEFAULT_PLAYBACK,
+  subtitle: DEFAULT_SUBTITLE,
+}
+
+/** Anime4K base-mode letter for each built-in mode id. */
+export const MODE_ID_TO_BASE_MODE: Record<
+  UpscaleModeId,
+  'A' | 'B' | 'C' | 'A+A' | 'B+B' | 'C+A'
+> = {
+  'builtin-mode-a': 'A',
+  'builtin-mode-b': 'B',
+  'builtin-mode-c': 'C',
+  'builtin-mode-aa': 'A+A',
+  'builtin-mode-bb': 'B+B',
+  'builtin-mode-ca': 'C+A',
+}

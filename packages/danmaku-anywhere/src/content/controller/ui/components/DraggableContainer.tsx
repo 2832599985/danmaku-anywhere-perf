@@ -35,7 +35,9 @@ type RefOf<T> = T extends RefObject<infer U> ? U : never
 
 type PopperInstance = RefOf<Exclude<PopperProps['popperRef'], undefined>>
 
-const popperModifiers = [
+// Built per instance: `updatePosition` mutates the offset in place, so a shared
+// array would let every DraggableContainer overwrite the others' position.
+const createPopperModifiers = () => [
   {
     name: 'offset',
     options: {
@@ -75,8 +77,10 @@ export const DraggableContainer = ({
 }: DraggableContainerProps) => {
   const [isDragging, setIsDragging] = useState(false)
   const [popperInst, setPopperInst] = useState<PopperInstance | null>(null)
-  const translate = useRef(initialOffset)
-  const modifierRef = useRef(popperModifiers)
+  // Copy, never alias: `initialOffset` is state owned by the caller, and
+  // `updatePosition` mutates this ref on every drag frame.
+  const translate = useRef({ ...initialOffset })
+  const modifierRef = useRef(createPopperModifiers())
 
   const updatePosition = async (x: number, y: number) => {
     if (!popperInst) return

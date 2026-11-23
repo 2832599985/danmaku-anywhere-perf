@@ -1,6 +1,5 @@
 import type { Routes } from '@angular/router'
 import { hasExtension } from './core/extension/extension.guard'
-import { developmentOnly } from './features/kazumi/guards/development.guard'
 import { validateKazumiPolicy } from './features/kazumi/guards/kazumi-policy-validation.guard'
 import {
   noOnboarding,
@@ -94,7 +93,6 @@ export const routes: Routes = [
               import('./features/debug/video-debug-page.component').then(
                 (m) => m.VideoDebugPageComponent
               ),
-            canActivate: [developmentOnly],
             title: `Debug Video | ${PAGE_TITLE}`,
           },
           {
@@ -103,8 +101,15 @@ export const routes: Routes = [
               import('./features/debug/component-debug.component').then(
                 (m) => m.ComponentDebugComponent
               ),
-            canActivate: [developmentOnly],
             title: `Debug Components | ${PAGE_TITLE}`,
+          },
+          {
+            path: 'playground',
+            loadComponent: () =>
+              import(
+                './features/debug/playground/playground-page.component'
+              ).then((m) => m.PlaygroundPageComponent),
+            title: `Playground | ${PAGE_TITLE}`,
           },
         ],
       },

@@ -49,12 +49,33 @@
     "matchingStrategy": {
       "local": "Local",
       "mapping": "Mapping",
+      "mediaServer": "Media Server",
       "search": "Search"
     },
     "numericEpisode": "Episode {{episode}}",
     "numericSeason": "Season {{season}}",
     "refreshMetadata": "Refresh Metadata",
     "title": "Title"
+  },
+  "autoOffset": {
+    "applied": "Auto offset applied: {{offset}}ms",
+    "calibrateTooltip": "Auto-calibrate danmaku offset",
+    "error": "Auto calibration failed",
+    "noCalibrationNeeded": "No offset calibration needed"
+  },
+  "bookmark": {
+    "add": "Bookmark",
+    "refreshEpisodes": "Refresh Episodes",
+    "remove": "Remove Bookmark"
+  },
+  "cheatSheet": {
+    "group": {
+      "danmaku": "Danmaku Controls",
+      "panel": "Panel Controls",
+      "video": "Video Controls"
+    },
+    "hint": "Hold ? to show, release to dismiss",
+    "title": "Keyboard Shortcuts"
   },
   "common": {
     "acknowledge": "Ok",
@@ -63,6 +84,7 @@
     "apply": "Apply",
     "autoSave": "Auto-save",
     "cancel": "Cancel",
+    "clear": "Clear",
     "close": "Close",
     "confirm": "Confirm",
     "confirmDeleteMessage": "Are you sure you want to delete \"{{name}}\"?",
@@ -74,6 +96,7 @@
     "delete": "Delete",
     "deleted": "Deleted",
     "docs": "Documentation",
+    "done": "Done",
     "duration": {
       "day_one": "{{count}} day",
       "day_other": "{{count}} days"
@@ -91,10 +114,12 @@
     "pip": "Picture-in-Picture",
     "regexShort": "Regex",
     "reset": "Reset",
+    "restore": "Restore",
     "save": "Save",
     "saved": "Saved",
     "saving": "Saving...",
     "search": "Search",
+    "selectAll": "Select all",
     "success": "Success",
     "test": "Test",
     "time": "Time",
@@ -102,6 +127,10 @@
     "value": "Value",
     "valueJson": "Value (JSON)",
     "viewDocs": "View Docs"
+  },
+  "community": {
+    "inputPlaceholder": "Type a danmaku...",
+    "title": "Community"
   },
   "configPage": {
     "copyShareCode": "Copy Share Code",
@@ -124,6 +153,11 @@
       "mediaQuery": "Video Node",
       "name": "Name",
       "pattern": "Pattern",
+      "preferredProviders": {
+        "description": "Click to add providers in preferred order. When set, only these providers will be used for automatic matching.",
+        "reset": "Reset to Default",
+        "title": "Preferred Providers"
+      },
       "step": {
         "ai": "AI Configuration",
         "automation": "Automation",
@@ -136,6 +170,10 @@
       "tooPermissive": "The match patterns are too permissive, it's recommended to use narrower patterns.",
       "urlPatterns": "URL Patterns"
     },
+    "exportConfig": {
+      "error": "Failed to export config",
+      "success": "Config exported"
+    },
     "goCreate": "Go create one",
     "import": {
       "error": "Import failed: {{message}}",
@@ -145,10 +183,25 @@
       "presets": "Presets",
       "success": "Config imported"
     },
+    "importConfig": {
+      "error": "Failed to import config",
+      "success": "Config imported"
+    },
     "importShareCode": "Import Share Code",
     "importShareCodePlaceholder": "Paste code here",
     "name": "Configs",
-    "noConfigs": "No configs configured"
+    "noConfigs": "No configs configured",
+    "templates": {
+      "alreadyImported": "Already imported",
+      "browse": "Browse Templates",
+      "categoryChinese": "Chinese Sites",
+      "categoryInternational": "International Sites",
+      "categorySelfHosted": "Self-hosted",
+      "description": "Import pre-configured templates for popular video sites. Self-hosted sites require manual URL pattern setup after import.",
+      "imported": "Template imported: {{name}}",
+      "importError": "Failed to import template",
+      "title": "Site Templates"
+    }
   },
   "configs": {
     "alert": {
@@ -160,18 +213,25 @@
   },
   "danmaku": {
     "alert": {
+      "assExported": "Export ASS successful",
+      "assExportError": "Failed to export ASS: {{message}}",
       "deleted": "Danmaku Deleted",
       "deleteError": "Failed to delete danmaku: {{message}}",
       "exported": "Export successful",
       "exportError": "Export failed: {{message}}",
       "fetchError": "Failed to fetch danmaku: {{message}}",
-      "frameListEmpty": "Browser returned an empty frame list, this likely indicates a bug in the browser.",
+      "merged_one": "Danmaku Merged: {{name}} (total: {{count}})",
+      "merged_other": "Danmaku Merged: {{name}} (total: {{count}})",
+      "mergedMultiple_one": "Merged {{count}} source (total: {{total}})",
+      "mergedMultiple_other": "Merged {{count}} sources (total: {{total}})",
       "mounted_one": "Danmaku Mounted: {{name}} ({{count}})",
       "mounted_other": "Danmaku Mounted: {{name}} ({{count}})",
       "mountedMultiple_one": "Mounted {{count}} selected danmaku",
       "mountedMultiple_other": "Mounted {{count}} selected danmaku",
       "mountError": "Failed to mount danmaku: {{message}}",
-      "multipleFrames": "Multiple frames with video detected",
+      "multiSourceMerged": "Merged danmaku from {{sources}}",
+      "nextEpisodePreloaded": "Next episode danmaku preloaded",
+      "nextEpisodeReady": "Next episode danmaku is ready",
       "refreshed_one": "Danmaku Refreshed: {{name}} ({{count}})",
       "refreshed_other": "Danmaku Refreshed: {{name}} ({{count}})",
       "refreshingDanmaku": "Refreshing danmaku",
@@ -183,16 +243,28 @@
     "commentContent": "Comment",
     "commentCounted_one": "{{count}} comment",
     "commentCounted_other": "{{count}} comments",
+    "commentCountedEpisodes_one": "{{count}} episode",
+    "commentCountedEpisodes_other": "{{count}} episodes",
     "disable": "Hide Danmaku",
     "enable": "Show Danmaku",
+    "exportAss": "Export ASS",
     "exportBackup": "Export Backup",
     "exportXml": "Export XML",
     "local": "Local Danmaku",
+    "merge": {
+      "mergeWithCurrent": "Merge with current",
+      "sourceCount_one": "{{count}} danmaku source loaded",
+      "sourceCount_other": "{{count}} danmaku sources loaded",
+      "sources": "Merged Sources",
+      "totalMerged_one": "Total: {{count}} comment",
+      "totalMerged_other": "Total: {{count}} comments"
+    },
     "mountShort": "Mount",
     "noComments": "No comments",
     "refresh": "Refresh Danmaku",
     "type": {
       "bilibili": "Bilibili",
+      "custom": "Custom",
       "danDanPlay": "DanDanPlay",
       "macCms": "MacCMS",
       "tencent": "Tencent"
@@ -203,16 +275,33 @@
   "danmakuFilter": {
     "activeFilters": "Active Filters",
     "addFilterPattern": "Add Filter Pattern",
-    "description": "Filter out unwanted danmaku by keywords or regex patterns",
+    "colorFilter": {
+      "addColor": "Add",
+      "blacklistColors": "Blacklisted Colors",
+      "enabled": "Enable Color Filter",
+      "noColors": "No blacklisted colors",
+      "onlyWhite": "Show Only White Danmaku",
+      "title": "Color Filter"
+    },
+    "description": "Filter out unwanted danmaku by keywords, regex patterns, modes, or colors",
     "enterFilterPattern": "Enter filter pattern, regex starts and ends with '/'",
     "enterFilterPatternPlaceholder": "Enter Filter Pattern",
     "enterTestText": "Enter test text",
+    "modeFilter": {
+      "bottom": "Bottom",
+      "ltr": "Left to Right",
+      "rtl": "Right to Left (Scroll)",
+      "title": "Mode Filter",
+      "top": "Top"
+    },
     "noActiveFilters": "No active filters",
     "testFilterPatterns": "Test Filter Patterns",
     "testResultExclude": "This text will be filtered out",
     "testResultInclude": "This text will not be filtered out",
+    "textFilter": "Text Filter",
     "validation": {
       "duplicate": "Pattern already exists",
+      "invalidColor": "Invalid color format, use hex like #ff0000",
       "invalidRegex": "Invalid regex {{message}}",
       "patternEmpty": "Pattern cannot be empty"
     }
@@ -221,6 +310,7 @@
     "animeList": "Anime List",
     "backupAll": "Export All as Backup",
     "confirmDeleteMessage": "Are you sure to delete the selected Danmaku?",
+    "exportAllAss": "Export All as ASS",
     "exportAllXml": "Export All as XML",
     "noAnime": "No anime available",
     "noResult": "No anime found with title '{{filter}}'"
@@ -233,6 +323,22 @@
   },
   "error": {
     "unknown": "Something went wrong."
+  },
+  "form": {
+    "precision": {
+      "alt": "Alt",
+      "drag": "Drag / Wheel",
+      "shift": "Shift"
+    },
+    "resetToZero": "Reset to 0"
+  },
+  "highlights": {
+    "copied": "Copied to clipboard",
+    "count_one": "{{count}} comment",
+    "count_other": "{{count}} comments",
+    "noData": "Mount danmaku to see highlights",
+    "share": "Copy to share",
+    "title": "Highlights"
   },
   "importPage": {
     "confirm": "Confirm Import",
@@ -248,8 +354,8 @@
     "importSuccess_one": "Successfully imported {{count}} file",
     "importSuccess_other": "Successfully imported {{count}} files",
     "parseError": "Failed to parse file",
-    "skipped_one": "Skpped {{count}} file",
-    "skipped_other": "Skpped {{count}} files",
+    "skipped_one": "Skipped {{count}} file",
+    "skipped_other": "Skipped {{count}} files",
     "willImport_one": "Will import {{count}} file",
     "willImport_other": "Will import {{count}} files"
   },
@@ -265,11 +371,8 @@
     "alert": {
       "aiDisabledTooPermissive": "AI is disabled because the match pattern is too permissive",
       "AIResult": "AI Parsing Result: {{title}}",
-      "matchedLocalDanmaku": "Matched local danmaku",
       "matchError": "Failed to match episode: {{message}}",
-      "noEpisodeMatched": "No episode matched for {{title}}: {{cause}}",
       "noIntegration": "Integration policy not configured",
-      "openSearch": "Open search page",
       "search": "Searching for anime: {{title}}",
       "usingAI": "Using AI to parse show information",
       "usingMode": "Using Mode: {{mode}}"
@@ -285,6 +388,18 @@
       }
     },
     "manualModeEnabled": "Manual mode is enabled, switch to a different mode to enable automation.",
+    "matchResult": {
+      "cause": "Reason",
+      "createMapping": "Title Mapping",
+      "detectedMedia": "Detected media",
+      "manualSearch": "Manual Search",
+      "matched": "Episode matched successfully",
+      "noMatch": "No match",
+      "retry": "Retry",
+      "skipped": "Skipped",
+      "strategiesTried": "Strategies tried",
+      "title": "Episode matching failed"
+    },
     "mode": {
       "ai": {
         "description": "Let AI detect video info automatically",
@@ -312,6 +427,9 @@
       "configAvailablePass": "Integration is available",
       "enableAi": "Enable AI",
       "enableAiPass": "AI is enabled",
+      "episodeMatch": "Episode Match",
+      "episodeMatchFail": "Episode matching failed",
+      "episodeMatchPass": "Episode matched successfully",
       "integrationEnabled": "Integration Enabled",
       "integrationEnabledFail": "Integration is disabled",
       "integrationEnabledPass": "Integration is enabled",
@@ -347,10 +465,21 @@
     },
     "name": "Integration Policy"
   },
+  "matching": {
+    "allStrategiesExhausted": "All matching strategies exhausted, no match found",
+    "episodeNumberUndefined": "Episode number could not be determined",
+    "noSeasonsAllProviders": "No seasons found across all providers",
+    "passedToNext": "No match found, passed to next strategy",
+    "previousStrategyTerminal": "Skipped: previous strategy returned a terminal result"
+  },
   "mountPage": {
     "alert": {
-      "checkMountConfig": "Check Mount config",
-      "mountingDisabled": "Cannot mount danmaku on this page"
+      "createMountConfig": "Create mount config",
+      "disabledMountConfig": "Mount config \"{{name}}\" is disabled",
+      "enableMountConfig": "Enable config",
+      "extensionDisabled": "Danmaku Anywhere is disabled",
+      "noMountConfig": "No mount config for this site",
+      "pageUnsupported": "This page cannot host danmaku"
     },
     "confirmDeleteMultiple_one": "Are you sure you want to delete {{count}} item?",
     "confirmDeleteMultiple_other": "Are you sure you want to delete {{count}} items?",
@@ -362,17 +491,63 @@
     "selectedCount_one": "{{count}} selected",
     "selectedCount_other": "{{count}} selected"
   },
+  "namingRule": {
+    "create": "Create Naming Rule",
+    "deleteConfirm": "Are you sure you want to delete this naming rule?",
+    "duplicateTitle": "A naming rule with this title already exists",
+    "edit": "Edit Naming Rule",
+    "episodeLabel": "Episode {{number}}",
+    "filesInFolder": "Files in folder",
+    "folder": "Folder",
+    "local": "Local",
+    "matchCount": "{{matched}} / {{total}} matched",
+    "noRules": "No naming rules defined",
+    "rootFolder": "(root)",
+    "ruleCreated": "Naming rule saved",
+    "ruleCreateFailed": "Failed to save naming rule",
+    "ruleDeleted": "Naming rule deleted",
+    "template": "Filename Template",
+    "templateHelp": "Use {episode} for episode number, {episode:02d} for zero-padded",
+    "title": "Title"
+  },
   "optionsPage": {
+    "auth": {
+      "confirmPassword": "Confirm Password",
+      "email": "Email",
+      "emailHelper": "Your email is only used to recover your account",
+      "name": "Name",
+      "nameHelper": "The user name is public and does not need to be unique",
+      "password": "Password",
+      "passwordHelper": "Must be at least 6 characters",
+      "signedInAs": "Signed in as",
+      "signIn": "Sign In",
+      "signOut": "Sign Out",
+      "signUp": "Sign Up",
+      "signUpSuccess": "Sign up successful"
+    },
     "backup": {
       "alert": {
         "exportSuccess": "Export success",
         "importSuccess": "Import success"
       },
-      "export": "Export Backup",
-      "exportDescription": "Export all settings to a JSON file.",
-      "import": "Import Backup",
-      "importDescription": "Restore settings from a JSON file.",
-      "importError": "Import failed"
+      "cloudBackup": "Cloud Backup",
+      "cloudBackupCreate": "Create Cloud Backup",
+      "cloudCreateError": "Cloud backup failed: {{message}}",
+      "cloudCreateSuccess": "Cloud backup created",
+      "cloudDescription": "Sync your settings to the cloud. Up to 3 revisions are kept.",
+      "cloudDownloadError": "Failed to download cloud backup: {{message}}",
+      "cloudListError": "Failed to load cloud backups.",
+      "cloudSignInRequired": "Sign in to use cloud backup.",
+      "exportToFile": "Save to File",
+      "goToSignIn": "Go to Sign In",
+      "importError": "Import failed",
+      "importFromFile": "Restore from File",
+      "latestRevision": "Latest",
+      "localBackup": "Local Backup",
+      "localDescription": "Save and restore your settings as a JSON file.",
+      "noCloudBackups": "No cloud backups yet. Create one to get started.",
+      "restoreConfirmDesc": "Restoring this backup will overwrite your current settings. Are you sure you want to proceed?",
+      "restoreConfirmTitle": "Restore Settings?"
     },
     "chConvert": {
       "name": "Simplified/Traditional Conversion",
@@ -384,8 +559,8 @@
       "bilibili": {
         "danmakuTypePreference": "Danmaku Type Preference",
         "help": {
-          "danmakuTypePreferenceProtobuf": "optionsPage.danmakuSource.bilibili.help.danmakuTypePreferenceProtobuf",
-          "danmakuTypePreferenceXML": "optionsPage.danmakuSource.bilibili.help.danmakuTypePreferenceXML"
+          "danmakuTypePreferenceProtobuf": "Protobuf: Slower to fetch, but returns more comments, up to 1000 per minute. Longer videos take longer to fetch.",
+          "danmakuTypePreferenceXML": "XML: Fast to fetch, but returns fewer comments. Depending on the video type, between 500 and 10000 comments."
         }
       },
       "dandanplay": {
@@ -401,17 +576,50 @@
         "stripColor": "Remove danmaku color"
       }
     },
+    "dataManagement": {
+      "wipeDanmakuData": "Wipe Danmaku Data",
+      "wipeData": {
+        "confirm1": "Are you sure you want to wipe all danmaku, seasons, and mapping data? This action cannot be undone.",
+        "confirm2": "Are you sure? This action cannot be undone.",
+        "includeCustomEpisodes": "Include custom episodes"
+      }
+    },
     "enableAnalytics": "Enable anonymous analytics",
+    "enableFullscreenInteraction": "Enable fullscreen interaction",
+    "enableMultiSourceMerge": "Enable multi-source danmaku merge",
+    "enableMultiSourceMergeDescription": "After matching an episode, also search other enabled providers and merge all danmaku together with deduplication.",
     "help": {
       "feedback": "Provide feedback",
       "reportBug": "Report Bug"
     },
     "hotkeys": {
       "addHotkey": "Add Hotkey",
+      "conflict": "Conflict with: {{actions}}",
+      "danmakuDensityToggle": "Toggle danmaku density",
+      "danmakuSpeedToggle": "Toggle danmaku speed",
+      "danmakuTimeOffsetDecrease": "Danmaku time offset -0.5s",
+      "danmakuTimeOffsetIncrease": "Danmaku time offset +0.5s",
+      "decreaseFontSize": "Decrease font size (-2px)",
+      "decreaseOffset": "Danmaku time offset -1s",
+      "decreaseOpacity": "Decrease opacity (-10%)",
+      "decreaseSpeed": "Decrease speed (-0.25)",
+      "densityChanged": "Max on screen: {{value}}",
+      "densityPlotChanged": "Density plot: {{value}}",
       "enterKey": "Enter key",
+      "fontSizeChanged": "Font size: {{value}}px",
+      "increaseFontSize": "Increase font size (+2px)",
+      "increaseOffset": "Danmaku time offset +1s",
+      "increaseOpacity": "Increase opacity (+10%)",
+      "increaseSpeed": "Increase speed (+0.25)",
+      "opacityChanged": "Opacity: {{value}}%",
       "refreshComments": "Refresh comments",
+      "skipOp": "Skip OP",
+      "speedChanged": "Speed: {{value}}x",
+      "timeOffsetChanged": "Time offset: {{value}}s",
+      "toggleDensityPlot": "Toggle danmaku density plot",
       "toggleEnableDanmaku": "Show/Hide danmaku",
       "togglePip": "Picture-in-picture",
+      "toggleStylePanel": "Toggle style panel",
       "unmountComments": "Unmount comments"
     },
     "language": "Language",
@@ -419,15 +627,28 @@
     "name": "Options",
     "pages": {
       "advanced": "Advanced",
+      "auth": "Account",
       "backup": "Backup & Restore",
-      "help": "关于",
+      "dataManagement": "Data Management",
+      "help": "About",
       "hotkeys": "Hotkeys",
       "player": "Player Settings",
-      "retentionPolicy": "Retention Policy"
+      "storage": "Storage"
     },
     "player": {
+      "autoDensity": "Auto-adjust danmaku density",
+      "autoNextEpisode": "Auto load next episode danmaku",
+      "autoSkipOp": "Auto skip opening (OP)",
+      "enableFixedSkip": "Show fixed time skip button",
+      "fixedSkip": "Skip {{seconds}}s",
+      "fixedSkipSeconds": "Skip duration (seconds)",
       "showDanmakuTimeline": "Show danmaku density",
-      "showSkipButton": "Show skip button (OP/ED)"
+      "showSkipButton": "Show skip button (OP/ED)",
+      "upscale": {
+        "crossOriginFix": "Enable cross-origin video compatibility fix",
+        "description": "Enhance the active video with WebGPU while keeping danmaku above the processed image.",
+        "title": "Video super resolution (Anime4K)"
+      }
     },
     "restrictInitiatorDomain": "Limit DNR initiator domains to this extension",
     "retentionPolicy": {
@@ -439,11 +660,17 @@
       "enabled": "Enable Retention Policy",
       "purgeNow": "Purge Now",
       "tooltip": {
-        "deleteCommentsAfter": "optionsPage.retentionPolicy.tooltip.deleteCommentsAfter",
+        "deleteCommentsAfter": "Comments older than the specified number of days will be deleted. Set to 0 to never delete.",
         "nextPurge": "Next purge at {{time}}"
       }
     },
     "searchUsingSimplified": "Search using simplified Chinese",
+    "showFloatingButton": "Show floating button",
+    "storage": {
+      "overview": "Storage Overview",
+      "seasonBreakdown": "Data by Season",
+      "warningHigh": "Storage usage is high. Consider cleaning up unused data."
+    },
     "theme": {
       "colorMode": {
         "dark": "Dark",
@@ -491,9 +718,24 @@
       "mappingFailed": "Failed to save mapping：{{message}}",
       "mappingSuccess": "Mapping saved successfully"
     },
+    "batchDownload": {
+      "cancelled": "Batch download stopped: {{done}}/{{total}} completed",
+      "done": "Batch download completed",
+      "download_one": "Download ({{count}})",
+      "download_other": "Download ({{count}})",
+      "enable": "Batch download",
+      "failed": "Batch download failed: {{message}}",
+      "partial": "Batch download finished: {{done}}/{{total}} downloaded, {{failed}} failed ({{message}})",
+      "progress": "Download progress: {{done}}/{{total}}",
+      "start_one": "Start batch download: {{count}} episode",
+      "start_other": "Start batch download: {{count}} episodes"
+    },
     "error": {
       "noProviders": "No danmaku sources enabled, please enable in settings",
       "noResultFound": "No results found, try a different search term"
+    },
+    "favorites": {
+      "title": "Favorites"
     },
     "name": "Search Anime",
     "parse": {
@@ -529,6 +771,23 @@
     "noAnimeFound": "Nothing to select from",
     "selectAnime": "Multiple matches found for {{name}}, please select"
   },
+  "statsPage": {
+    "avgLength": "Avg Length",
+    "chars": "chars",
+    "densityTimeline": "Density Timeline",
+    "episodeCount": "Episodes",
+    "modeBottom": "Bottom",
+    "modeLtr": "Reverse",
+    "modeRtl": "Scroll",
+    "modeTop": "Top",
+    "noData": "Mount danmaku to see statistics",
+    "peakTime": "Peak Time",
+    "seasonCount": "Seasons",
+    "title": "Statistics",
+    "topKeywords": "Top Keywords",
+    "totalCount": "Total",
+    "typeDistribution": "Type Distribution"
+  },
   "stylePage": {
     "customCssDescription": "Custom CSS rules applied to every danmaku. These override other style settings.",
     "distribution": "Distribution",
@@ -536,10 +795,23 @@
     "interval": "Emission Interval",
     "maxOnScreen": "Maximum Limit",
     "name": "Danmaku Settings",
-    "offset": "Time Offset (milliseconds)",
+    "offset": "Time Offset",
     "opacity": "Opacity",
     "orderDistribution": "Order",
     "overlap": "Overlap",
+    "preset": {
+      "balanced": "Balanced",
+      "custom": "Custom",
+      "eyeCare": "Eye-Care",
+      "immersive": "Immersive",
+      "label": "Presets",
+      "minimal": "Minimal"
+    },
+    "preview": {
+      "hide": "Hide",
+      "label": "Preview",
+      "show": "Show"
+    },
     "randomDistribution": "Random",
     "safeZone": {
       "y": "Y-axis display range"
@@ -553,12 +825,20 @@
     },
     "speed": "Speed",
     "speedSettings": "Speed Settings",
+    "strokePreset": "Stroke / Shadow",
+    "strokePresets": {
+      "3d": "3D Shadow",
+      "glow": "Glow",
+      "none": "Default",
+      "thick": "Thick Stroke",
+      "thin": "Thin Stroke"
+    },
     "style": "Style",
     "tooltip": {
       "distribution": "Random: danmaku will be distributed uniformly. Order: danmaku will fill the screen from top to bottom.",
       "interval": "Lower value means more densely packed danmaku. May cause performance issues if set too low.",
       "maxOnScreen": "The maximum number of danmaku that can be displayed on the screen at the same time.",
-      "offset": "How earlier danmaku appears. Positive values make danmaku appear later, negative values make danmaku appear earlier.",
+      "offsetScrubber": "Drag horizontally or use scroll wheel to adjust, double-click to manual entry. Positive values make danmaku appear later, negative values make danmaku appear earlier.",
       "overlap": "Higher values reduce the distance between danmaku, allowing more danmaku to be displayed on the screen at the same time, at the cost of overlapping. Set to 0 to disable overlap.",
       "safeZone": {
         "y": "Y-axis (up and down) display range"
@@ -568,6 +848,12 @@
     },
     "trackHeight": "Track Height",
     "useCustomCss": "Use Custom CSS"
+  },
+  "tabGroups": {
+    "content": "Content",
+    "debug": "Debug",
+    "display": "Display",
+    "system": "System"
   },
   "tabs": {
     "aiProviders": "AI Providers",
@@ -580,13 +866,69 @@
     "providers": "Providers",
     "search": "Search",
     "selector": "Selector",
+    "stats": "Stats",
     "style": "Danmaku Settings",
     "titleMapping": "Title Mapping"
   },
+  "theme": {
+    "emberGlow": "Ember Glow",
+    "neonViolet": "Neon Violet",
+    "oceanDepth": "Ocean Depth",
+    "sakuraNoir": "Sakura Noir",
+    "selectTheme": "Select Theme"
+  },
   "titleMapping": {
+    "deleteConfirm_one": "Are you sure you want to delete {{count}} title mapping?",
+    "deleteConfirm_other": "Are you sure you want to delete {{count}} title mappings?",
+    "deleteConfirmOne": "Are you sure you want to delete this title mapping?",
     "empty": "No title mappings found.",
     "noSeasons": "No options for the selected provider",
     "title": "Title Mappings",
     "unmapped": "Unmapped"
+  },
+  "translation": {
+    "enable": "Enable danmaku translation"
+  },
+  "upscale": {
+    "alert": {
+      "crossOriginBlocked": "This video source blocks cross-origin access, upscaling is unavailable here",
+      "failed": "Upscaling hit an error and was turned off",
+      "frameInterpolationUnavailable": "Frame interpolation is unavailable on this video or GPU; Anime4K remains enabled"
+    },
+    "corsFix": "CORS fix",
+    "enable": "Super resolution",
+    "frameInterpolation": {
+      "description": "Generate one intermediate frame with Framegen before Anime4K. Adds a small playback delay and falls back automatically when the GPU is overloaded.",
+      "enable": "Frame interpolation",
+      "licenseNotice": "Bundled model weights are for personal and non-commercial use.",
+      "shortDescription": "Framegen before Anime4K; auto-bypasses on overload.",
+      "title": "2× frame interpolation"
+    },
+    "mode": "Mode",
+    "native": "Native",
+    "performanceTier": "Performance tier",
+    "resolution": "Scale",
+    "settings": "Super resolution settings",
+    "settingsHint": "Changes apply immediately to the active video.",
+    "shortLabel": "Upscale",
+    "tiers": {
+      "balanced": "Balanced",
+      "performance": "Fast",
+      "quality": "Quality",
+      "ultra": "Ultra"
+    },
+    "unsupported": "WebGPU is not supported by this browser"
+  },
+  "watchParty": {
+    "connected": "Connected",
+    "copied": "Copied",
+    "create": "Create Room",
+    "invite": "Copy Invite Link",
+    "join": "Join Room",
+    "leave": "Leave Room",
+    "members_one": "{{count}} online",
+    "members_other": "{{count}} online",
+    "roomId": "Room ID",
+    "title": "Watch Party"
   }
 }

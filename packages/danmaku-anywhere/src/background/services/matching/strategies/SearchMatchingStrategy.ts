@@ -1,14 +1,14 @@
+import type { Season } from '@danmaku-anywhere/danmaku-converter'
 import {
-  DanmakuSourceType,
-  type Season,
-  type SeasonInsert,
-} from '@danmaku-anywhere/danmaku-converter'
+  extractSeasonHint,
+  findBestMatchingSeason,
+} from '@danmaku-anywhere/media-parser'
 import { inject, injectable } from 'inversify'
 import { SeasonService } from '@/background/services/persistence/SeasonService'
 import { TitleMappingService } from '@/background/services/persistence/TitleMappingService'
 import type { MatchEpisodeInput, MatchEpisodeResult } from '@/common/anime/dto'
-import { isNotCustom, isProvider } from '@/common/danmaku/utils'
 import { type ILogger, LoggerSymbol } from '@/common/Logger'
+import type { ProviderConfig } from '@/common/options/providerConfig/schema'
 import { ProviderConfigService } from '@/common/options/providerConfig/service'
 import { SeasonMap } from '@/common/seasonMap/SeasonMap'
 import { serializeError } from '@/common/utils/serializeError'
@@ -41,61 +41,147 @@ export class SearchMatchingStrategy implements IMatchingStrategy {
   }
 
   async match(input: MatchEpisodeInput): Promise<MatchEpisodeResult | null> {
-    const { title, mapKey, episodeNumber } = input
+    const { title, mapKey, episodeNumber, preferredProviders } = input
 
-    const autoProvider =
-      await this.providerConfigService.getFirstAutomaticProvider()
+    const allAutoProviders =
+      await this.providerConfigService.getAutomaticProviders()
 
-    if (!autoProvider) {
+    if (allAutoProviders.length === 0) {
       return null
     }
 
-    const service = this.danmakuProviderFactory(autoProvider)
-
-    this.logger.debug(`Searching for season: ${title}`)
-    const foundSeasonInserts = (await service.search({
-      keyword: title,
-    })) as SeasonInsert[] // TODO: technically unsafe, fix by folding custom season into season
-
-    if (
-      foundSeasonInserts[0] &&
-      isProvider(foundSeasonInserts[0], DanmakuSourceType.MacCMS)
-    ) {
-      // should not be reached
-      throw new Error('Custom season found, but not supported')
+    // If preferredProviders is set and non-empty, filter and reorder providers
+    let autoProviders = allAutoProviders
+    if (preferredProviders && preferredProviders.length > 0) {
+      const ordered: typeof allAutoProviders = []
+      for (const impl of preferredProviders) {
+        const matching = allAutoProviders.filter((p) => p.impl === impl)
+        ordered.push(...matching)
+      }
+      // Only use providers that match the preferred list
+      if (ordered.length > 0) {
+        autoProviders = ordered
+        this.logger.debug(
+          `Using preferred providers: ${autoProviders.map((p) => p.name).join(', ')}`
+        )
+      }
     }
 
-    const foundSeasons = await this.seasonService.bulkUpsert(foundSeasonInserts)
+    // Extract season hint from title for season-aware matching
+    const seasonHint = extractSeasonHint(title)
 
-    if (foundSeasons.length === 0) {
-      return { status: 'notFound', data: null, cause: 'No seasons found' }
+    // Parallel search across all providers
+    const searchResults = await Promise.allSettled(
+      autoProviders.map(async (autoProvider) => {
+        const service = this.danmakuProviderFactory(autoProvider)
+        this.logger.debug(
+          `Searching for season with provider ${autoProvider.name}: ${title}`
+        )
+        const foundSeasonInserts = await service.search({ keyword: title })
+        const foundSeasons =
+          await this.seasonService.bulkUpsert(foundSeasonInserts)
+        return { autoProvider, foundSeasons }
+      })
+    )
+
+    // Merge and deduplicate results across all providers
+    const allSeasons: Season[] = []
+    const seenIndexedIds = new Set<string>()
+    const seenSeasonIds = new Set<number>()
+    let firstSuccessfulProvider: ProviderConfig | undefined
+    // Which provider contributed each season, so the result can name the one
+    // that actually owns the season we pick rather than whichever provider
+    // happened to answer first.
+    const providerBySeasonId = new Map<number, ProviderConfig>()
+
+    for (let i = 0; i < searchResults.length; i++) {
+      const result = searchResults[i]
+      if (result.status === 'rejected') {
+        this.logger.warn(
+          `Provider ${autoProviders[i].name ?? autoProviders[i].id} search failed`,
+          result.reason
+        )
+        continue
+      }
+
+      const { autoProvider, foundSeasons } = result.value
+
+      if (foundSeasons.length === 0) {
+        this.logger.debug(`No seasons found with provider ${autoProvider.name}`)
+        continue
+      }
+
+      if (!firstSuccessfulProvider) {
+        firstSuccessfulProvider = autoProvider
+      }
+
+      for (const season of foundSeasons) {
+        const isDuplicate =
+          (season.indexedId && seenIndexedIds.has(season.indexedId)) ||
+          (season.id !== undefined && seenSeasonIds.has(season.id))
+        if (!isDuplicate) {
+          if (season.indexedId) seenIndexedIds.add(season.indexedId)
+          if (season.id !== undefined) seenSeasonIds.add(season.id)
+          if (season.id !== undefined) {
+            providerBySeasonId.set(season.id, autoProvider)
+          }
+          allSeasons.push(season as Season)
+        }
+      }
     }
 
-    if (foundSeasons.length === 1) {
-      const firstSeason = foundSeasons[0] as Season
-      this.logger.debug('Single season found, auto-mapping', firstSeason)
+    if (allSeasons.length === 0) {
+      return {
+        status: 'notFound',
+        data: null,
+        cause: 'matching.noSeasonsAllProviders',
+      }
+    }
+
+    // Try to find a single best match
+    let bestSeason: Season | null = null
+
+    if (allSeasons.length === 1) {
+      bestSeason = allSeasons[0]
+      this.logger.debug('Single season found, auto-mapping', bestSeason)
+    } else {
+      bestSeason = findBestMatchingSeason(allSeasons, title, seasonHint)
+      if (bestSeason) {
+        this.logger.debug(
+          'Multiple seasons found, best title match selected',
+          bestSeason
+        )
+      }
+    }
+
+    if (bestSeason) {
+      const bestSeasonProvider =
+        providerBySeasonId.get(bestSeason.id) ?? firstSuccessfulProvider
 
       await this.titleMappingService.add(
-        SeasonMap.fromSeason(mapKey, firstSeason)
+        SeasonMap.fromSeason(mapKey, bestSeason)
       )
 
       if (episodeNumber === undefined) {
         return {
           status: 'notFound',
           data: null,
-          cause: 'Episode number is undefined',
+          cause: 'matching.episodeNumberUndefined',
         }
       }
 
       try {
         const data = await this.episodeResolver.resolveEpisode(
-          firstSeason,
+          bestSeason,
           episodeNumber
         )
         return {
           status: 'success',
           data,
-          metadata: { strategy: 'search', providerConfig: autoProvider },
+          metadata: {
+            strategy: 'search',
+            providerConfig: bestSeasonProvider,
+          },
         }
       } catch (e) {
         return {
@@ -106,10 +192,14 @@ export class SearchMatchingStrategy implements IMatchingStrategy {
       }
     }
 
+    // No best match found, return disambiguation for user selection
     return {
       status: 'disambiguation',
-      data: foundSeasons.filter(isNotCustom),
-      metadata: { strategy: 'search', providerConfig: autoProvider },
+      data: allSeasons,
+      metadata: {
+        strategy: 'search',
+        providerConfig: firstSuccessfulProvider,
+      },
     }
   }
 }

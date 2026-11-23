@@ -1,5 +1,6 @@
 import { useEventCallback } from '@mui/material'
 import { useEffect } from 'react'
+import { IS_STANDALONE_RUNTIME } from '@/common/environment/isStandalone'
 import { useInvalidateSeasonAndEpisode } from '@/common/hooks/useInvalidateSeasonAndEpisode'
 import { createRpcServer } from '@/common/rpc/server'
 import type { ControllerMethods } from '@/common/rpcClient/controller/types'
@@ -35,12 +36,21 @@ export const useControllerRpcServer = () => {
       invalidateCache: async () => {
         invalidateSeasonAndEpisode()
       },
+      navigationStateUpdated: async () => {
+        // Handled by background NavigationWatcherService; no-op in controller
+      },
+      frameNavigated: async () => {
+        // Frames register themselves through `relay:event:playerReady`, which
+        // FrameManager handles. Nothing to do here.
+      },
     })
 
-    tabRpcServer.listen()
+    if (!IS_STANDALONE_RUNTIME) {
+      tabRpcServer.listen(chrome.runtime.onMessage)
 
-    return () => {
-      tabRpcServer.unlisten()
+      return () => {
+        tabRpcServer.unlisten(chrome.runtime.onMessage)
+      }
     }
   }, [handleSetDanmaku, handleUnsetDanmaku, handleGetDanmakuState])
 

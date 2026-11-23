@@ -1,0 +1,510 @@
+import { decodeTextBytes } from './decodeText'
+import { rememberPreparedUrl } from './prepared'
+import {
+  extOf,
+  joinPath,
+  type PickedMedia,
+  type PickedText,
+  type Platform,
+  type PreparedMediaUrl,
+  REMUX_EXTENSIONS,
+  SUBTITLE_EXTENSION_LIST,
+  SUBTITLE_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+} from './types'
+
+/** Must match `minWidth`/`minHeight` of the main window in tauri.conf.json. */
+const NORMAL_MIN_WIDTH = 880
+const NORMAL_MIN_HEIGHT = 560
+/** Smallest mini window the user can drag it down to. */
+const MINI_MIN_WIDTH = 240
+const MINI_MIN_HEIGHT = 135
+/** Gap between the mini window and the work-area corner (above the taskbar). */
+const MINI_MARGIN = 16
+
+/** Normal-window geometry captured on entering the mini player. */
+let miniRestore: {
+  maximized: boolean
+  size: { width: number; height: number }
+  position: { x: number; y: number }
+} | null = null
+
+const basename = (p: string): string => {
+  const parts = p.split(/[\\/]/)
+  return parts[parts.length - 1] || p
+}
+
+/**
+ * Build the URL the webview uses to stream a local file through our custom Rust
+ * protocol. On Windows, Tauri exposes custom URI schemes at
+ * `http://<scheme>.localhost/…`; the Rust handler reads `uri.path()` so the
+ * host prefix is irrelevant. The path is percent-encoded and decoded back on
+ * the Rust side. The <video> element sets crossOrigin="anonymous" and the
+ * handler replies with `Access-Control-Allow-Origin: *`, keeping frames
+ * CORS-clean for WebGPU.
+ */
+const streamUrlForPath = (path: string): string =>
+  `http://stream.localhost/${encodeURIComponent(path)}`
+
+/** Absolute paths of the files directly in `dir` whose extension is in `extensions`. */
+const listFiles = async (
+  dir: string,
+  extensions: ReadonlySet<string>
+): Promise<string[]> => {
+  const { readDir } = await import('@tauri-apps/plugin-fs')
+  try {
+    const entries = await readDir(dir)
+    return entries
+      .filter((entry) => entry.isFile && extensions.has(extOf(entry.name)))
+      .map((entry) => joinPath(dir, entry.name))
+  } catch {
+    // Unreadable folder (permissions, a disconnected drive, a network share):
+    // the scan simply finds nothing — opening the video must not fail because
+    // its neighbours could not be listed.
+    return []
+  }
+}
+
+/**
+ * Tauri adapter. Plugin modules are imported lazily so the browser bundle never
+ * evaluates them.
+ */
+export const tauriPlatform: Platform = {
+  isTauri: true,
+
+  async init() {
+    // Route DanDanPlay/proxy requests through the http plugin to bypass CORS.
+    // Bilibili/Tencent go through the hidden-WebView bridge instead: their
+    // risk control rejects the plugin's reqwest requests (Bilibili 412,
+    // Tencent ret 20607), while a real page on their own origin is accepted.
+    // Only these hosts — a blanket window.fetch swap breaks Tauri's own IPC
+    // custom-protocol probe and same-origin asset fetches (framegen weights),
+    // because plugin-http rejects URLs outside the capability scope.
+    try {
+      const { fetch: tauriFetch } = await import('@tauri-apps/plugin-http')
+      const nativeFetch = window.fetch.bind(window)
+      const urlOf = (input: RequestInfo | URL): string => {
+        if (typeof input === 'string') return input
+        if (input instanceof URL) return input.href
+        return input.url
+      }
+      const hostOf = (input: RequestInfo | URL): string | null => {
+        try {
+          return new URL(urlOf(input), window.location.href).host
+        } catch {
+          return null
+        }
+      }
+      const needsCorsBypass = (host: string | null): boolean =>
+        host === 'api.danmaku.weeblify.app' ||
+        (host?.endsWith('.dandanplay.net') ?? false)
+      const needsSourceBridge = (host: string | null): boolean =>
+        host === 'api.bilibili.com' ||
+        (host?.endsWith('.video.qq.com') ?? false)
+
+      const sourceFetch = async (
+        input: RequestInfo | URL,
+        init?: RequestInit
+      ): Promise<Response> => {
+        if (init?.signal?.aborted) {
+          throw new DOMException('Aborted', 'AbortError')
+        }
+        const { invoke } = await import('@tauri-apps/api/core')
+        const request = input instanceof Request ? input : null
+        const method = init?.method ?? request?.method ?? 'GET'
+        const headerSource = init?.headers ?? request?.headers
+        const headers: [string, string][] = []
+        new Headers(headerSource).forEach((value, key) =>
+          headers.push([key, value])
+        )
+        const body =
+          init?.body == null
+            ? undefined
+            : typeof init.body === 'string'
+              ? init.body
+              : String(init.body)
+        try {
+          const result = await invoke<{
+            status: number
+            text: string
+            error?: string | null
+          }>('source_fetch', {
+            url: urlOf(input),
+            method,
+            headers,
+            body,
+          })
+          if (result.error) {
+            return new Response(result.error, {
+              status: 500,
+              statusText: result.error,
+            })
+          }
+          return new Response(result.text, { status: result.status || 200 })
+        } catch (error) {
+          return new Response(
+            error instanceof Error ? error.message : String(error),
+            {
+              status: 500,
+            }
+          )
+        }
+      }
+
+      const bridged = (input: RequestInfo | URL, init?: RequestInit) => {
+        const host = hostOf(input)
+        if (needsSourceBridge(host)) return sourceFetch(input, init)
+        if (needsCorsBypass(host)) {
+          return (tauriFetch as unknown as typeof window.fetch)(input, init)
+        }
+        return nativeFetch(input, init)
+      }
+      window.fetch = bridged as typeof window.fetch
+    } catch (error) {
+      console.warn('[player] Failed to install Tauri fetch bridge', error)
+    }
+  },
+
+  async pickVideoFiles(): Promise<PickedMedia[]> {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({
+      multiple: true,
+      directory: false,
+      filters: [
+        {
+          name: 'Video',
+          extensions: [
+            'mp4',
+            'm4v',
+            'webm',
+            'mkv',
+            'mov',
+            'avi',
+            'ts',
+            'flv',
+            'ogv',
+          ],
+        },
+      ],
+    })
+    // Normalize return value: null → [], string → [string], string[] → string[]
+    const paths = Array.isArray(selected)
+      ? selected
+      : typeof selected === 'string'
+        ? [selected]
+        : []
+    return paths.map((path) => ({
+      url: streamUrlForPath(path),
+      name: basename(path),
+      path,
+    }))
+  },
+
+  async pickDanmakuFile(): Promise<PickedText | null> {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'Danmaku', extensions: ['xml', 'json', 'txt'] }],
+    })
+    if (typeof selected !== 'string') return null
+    const text = await this.readTextFile(selected)
+    return { text, name: basename(selected) }
+  },
+
+  async pickSubtitleFile(): Promise<PickedText | null> {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: 'Subtitle', extensions: [...SUBTITLE_EXTENSION_LIST] }],
+    })
+    if (typeof selected !== 'string') return null
+    const text = await this.readTextFile(selected)
+    return { text, name: basename(selected) }
+  },
+
+  mediaUrlForPath(path: string): string {
+    return streamUrlForPath(path)
+  },
+
+  async prepareMediaUrl(item: {
+    url: string
+    path?: string
+  }): Promise<PreparedMediaUrl> {
+    if (!item.path || !REMUX_EXTENSIONS.has(extOf(item.path))) {
+      return { url: item.url, remuxed: false }
+    }
+    // FLV/TS/AVI: WebView2's demuxer refuses the container even when the codecs
+    // inside are fine, so Rust rewrites it (`ffmpeg -c copy`, cached). The
+    // ORIGINAL path stays on the item — only the URL changes.
+    const { invoke } = await import('@tauri-apps/api/core')
+    const prepared = await invoke<{ path: string; remuxed: boolean }>(
+      'media_prepare',
+      { path: item.path }
+    )
+    const url = streamUrlForPath(prepared.path)
+    rememberPreparedUrl(item.path, url)
+    return { url, remuxed: prepared.remuxed }
+  },
+
+  async readTextFile(path: string): Promise<string> {
+    // Bytes, decoded here: subtitle and danmaku files are as often GBK, Big5
+    // or UTF-16 as UTF-8, and a UTF-8-only read turns those into mojibake.
+    const { readFile } = await import('@tauri-apps/plugin-fs')
+    return decodeTextBytes(await readFile(path))
+  },
+
+  async listVideoFiles(dir: string): Promise<string[]> {
+    return listFiles(dir, VIDEO_EXTENSIONS)
+  },
+
+  async listSubtitleFiles(dir: string): Promise<string[]> {
+    return listFiles(dir, SUBTITLE_EXTENSIONS)
+  },
+
+  minimizeWindow(): void {
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+      getCurrentWindow().minimize()
+    )
+  },
+
+  toggleMaximizeWindow(): void {
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+      getCurrentWindow().toggleMaximize()
+    )
+  },
+
+  closeWindow(): void {
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+      getCurrentWindow().close()
+    )
+  },
+
+  startWindowDrag(): void {
+    void import('@tauri-apps/api/window').then(({ getCurrentWindow }) =>
+      getCurrentWindow().startDragging()
+    )
+  },
+
+  async saveResumeThumb(path: string, jpeg: Uint8Array): Promise<void> {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('thumb_save', { key: path, data: Array.from(jpeg) })
+  },
+
+  async loadResumeThumb(path: string): Promise<Blob | null> {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const bytes = await invoke<number[] | null>('thumb_load', { key: path })
+    return bytes?.length
+      ? new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' })
+      : null
+  },
+
+  async deleteResumeThumb(path: string): Promise<void> {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('thumb_delete', { key: path })
+  },
+
+  onCloseRequested(handler: () => Promise<void>): () => void {
+    let unlisten: (() => void) | null = null
+    let disposed = false
+    void import('@tauri-apps/api/window').then(async ({ getCurrentWindow }) => {
+      // With a listener registered Tauri holds the close, awaits the handler
+      // and then destroys the window (capability: allow-destroy).
+      const off = await getCurrentWindow().onCloseRequested(async () => {
+        await handler()
+      })
+      if (disposed) off()
+      else unlisten = off
+    })
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  },
+
+  async enterMiniWindow(width: number, height: number): Promise<boolean> {
+    const { getCurrentWindow, currentMonitor } = await import(
+      '@tauri-apps/api/window'
+    )
+    const { LogicalPosition, LogicalSize } = await import('@tauri-apps/api/dpi')
+    const win = getCurrentWindow()
+    if (!miniRestore) {
+      // Remember the geometry ONCE: a second enter (window re-sized while
+      // mini) must not overwrite the normal-window state with the mini one.
+      const scale = await win.scaleFactor()
+      miniRestore = {
+        maximized: await win.isMaximized(),
+        size: (await win.innerSize()).toLogical(scale),
+        position: (await win.outerPosition()).toLogical(scale),
+      }
+    }
+    if (await win.isMaximized()) await win.unmaximize()
+    // tauri.conf.json sets an 880x560 minimum for the normal layout.
+    await win.setMinSize(new LogicalSize(MINI_MIN_WIDTH, MINI_MIN_HEIGHT))
+    await win.setSize(new LogicalSize(width, height))
+    const monitor = await currentMonitor()
+    if (monitor) {
+      const area = monitor.workArea
+      const origin = area.position.toLogical(monitor.scaleFactor)
+      const extent = area.size.toLogical(monitor.scaleFactor)
+      await win.setPosition(
+        new LogicalPosition(
+          origin.x + extent.width - width - MINI_MARGIN,
+          origin.y + extent.height - height - MINI_MARGIN
+        )
+      )
+    }
+    await win.setAlwaysOnTop(true)
+    return true
+  },
+
+  async exitMiniWindow(): Promise<void> {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    const { LogicalPosition, LogicalSize } = await import('@tauri-apps/api/dpi')
+    const win = getCurrentWindow()
+    await win.setAlwaysOnTop(false)
+    await win.setMinSize(new LogicalSize(NORMAL_MIN_WIDTH, NORMAL_MIN_HEIGHT))
+    const restore = miniRestore
+    miniRestore = null
+    if (!restore) return
+    await win.setSize(new LogicalSize(restore.size.width, restore.size.height))
+    await win.setPosition(
+      new LogicalPosition(restore.position.x, restore.position.y)
+    )
+    if (restore.maximized) await win.maximize()
+  },
+
+  async sourceLogin(provider: 'bilibili' | 'tencent'): Promise<void> {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('source_login', { provider })
+  },
+
+  async copyImageToClipboard(
+    width: number,
+    height: number,
+    rgba: Uint8Array
+  ): Promise<void> {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('screenshot_copy_clipboard', rgba, {
+      headers: {
+        'x-width': String(width),
+        'x-height': String(height),
+      },
+    })
+  },
+
+  async saveScreenshot(
+    fileName: string,
+    png: Uint8Array,
+    dir?: string
+  ): Promise<string | null> {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const headers: Record<string, string> = {
+      'x-file-name': encodeURIComponent(fileName),
+    }
+    if (dir?.trim()) {
+      headers['x-dir'] = encodeURIComponent(dir.trim())
+    }
+    return invoke<string>('screenshot_save', png, { headers })
+  },
+
+  async pickFolder(): Promise<string | null> {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({ directory: true, multiple: false })
+    return typeof selected === 'string' ? selected : null
+  },
+
+  onFileDrop(cb: (paths: string[]) => void): () => void {
+    let unlisten: (() => void) | null = null
+    let cancelled = false
+    void import('@tauri-apps/api/webview').then(({ getCurrentWebview }) => {
+      if (cancelled) return
+      void getCurrentWebview()
+        .onDragDropEvent((event) => {
+          if (event.payload.type === 'drop') {
+            cb(event.payload.paths)
+          }
+        })
+        .then((fn) => {
+          if (cancelled) fn()
+          else unlisten = fn
+        })
+    })
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  },
+
+  onFileDragHover(cb: (active: boolean) => void): () => void {
+    let unlisten: (() => void) | null = null
+    let cancelled = false
+    void import('@tauri-apps/api/webview').then(({ getCurrentWebview }) => {
+      if (cancelled) return
+      void getCurrentWebview()
+        .onDragDropEvent((event) => {
+          // `over` fires on every pointer move; the flag only changes twice.
+          if (event.payload.type === 'enter') cb(true)
+          else if (
+            event.payload.type === 'leave' ||
+            event.payload.type === 'drop'
+          ) {
+            cb(false)
+          }
+        })
+        .then((fn) => {
+          if (cancelled) fn()
+          else unlisten = fn
+        })
+    })
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  },
+
+  onOpenFiles(cb: (paths: string[]) => void): () => void {
+    let unlisten: (() => void) | null = null
+    let cancelled = false
+    void (async () => {
+      const [{ invoke }, { listen }] = await Promise.all([
+        import('@tauri-apps/api/core'),
+        import('@tauri-apps/api/event'),
+      ])
+      // Subscribe before taking the launch files so a second launch racing
+      // the first one's startup is not lost.
+      const fn = await listen<string[]>('open-files', (event) => {
+        if (event.payload.length) cb(event.payload)
+      })
+      if (cancelled) {
+        fn()
+        return
+      }
+      unlisten = fn
+      // Taken once per process: once taken they are delivered even if this
+      // subscription is torn down meanwhile, or they would be lost.
+      const launched = await invoke<string[]>('launch_files_take')
+      if (!launched.length) return
+      // On cold launch (Explorer 「打开方式」 / file association), WebView2's
+      // renderer, GPU process and font/layout sub-systems are still settling.
+      // Wait for document load + two painted frames before handing the file to
+      // the media pipeline so initial window paint and hardware decode don't
+      // collide on the same startup spike.
+      if (document.readyState !== 'complete') {
+        await new Promise<void>((resolve) => {
+          window.addEventListener('load', () => resolve(), { once: true })
+          window.setTimeout(resolve, 1500)
+        })
+      }
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      })
+      cb(launched)
+    })()
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  },
+}

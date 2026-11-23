@@ -1,15 +1,35 @@
 import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
 import { debounce } from '@mui/material'
 import { inject, injectable } from 'inversify'
-import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import { uiContainer } from '@/common/ioc/uiIoc'
+import { type ILogger, LoggerSymbol } from '@/common/Logger'
 import { ExtensionOptionsService } from '@/common/options/extensionOptions/service'
 import { PerfTimer } from '@/common/utils/perf'
 import { DanmakuLayoutService } from '@/content/player/danmakuLayout/DanmakuLayout.service'
+import {
+  filterByAdaptiveDensity,
+  getAdaptiveBinSize,
+} from '@/content/player/densityPlot/adaptiveDensity'
 import { computeDensityBins } from '@/content/player/densityPlot/computeDensityBins'
+import type { DensityTooltipInfo } from '@/content/player/densityPlot/DanmakuDensityChart'
 import { DanmakuDensityChart } from '@/content/player/densityPlot/DanmakuDensityChart'
-import type { DensityPoint } from '@/content/player/densityPlot/types'
+import {
+  detectHighlights,
+  type HighlightMoment,
+} from '@/content/player/densityPlot/highlightDetector'
+import type {
+  DensityPoint,
+  SkipRegion,
+} from '@/content/player/densityPlot/types'
 import { VideoEventService } from '@/content/player/videoEvent/VideoEvent.service'
+
+export type DensityFilterCallback = (filtered: CommentEntity[]) => void
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
 
 @injectable('Singleton')
 export class DanmakuDensityService {
@@ -19,16 +39,22 @@ export class DanmakuDensityService {
 
   private chart: DanmakuDensityChart
   private enabled = false
+  private autoDensityEnabled = false
 
   private data: DensityPoint[] = []
-  private binSizeSec = 10
-  private chartHeight = 28
+  private chartHeight = 14
   private computeTimer: number | null = null
   private perfEnabled = false
   private perfTimer: PerfTimer
 
   private showChartTimeout: ReturnType<typeof setTimeout> | null = null
   private resizeObserver: ResizeObserver | null = null
+
+  private densityFilterCallback: DensityFilterCallback | null = null
+
+  private highlights: HighlightMoment[] = []
+
+  private tooltipEl: HTMLElement | null = null
 
   private readonly boundHandleTimeUpdate: (event: Event) => void
   private readonly boundHandleSeeked: () => void
@@ -50,10 +76,6 @@ export class DanmakuDensityService {
     this.boundHandleResize = debounce(this.handleResize.bind(this), 100)
     this.chart = new DanmakuDensityChart(this.layoutService.wrapper, {
       height: this.chartHeight,
-      colors: {
-        unplayed: 'rgba(255,255,255,0.25)',
-        played: 'rgba(255, 255, 255, 0.45)',
-      },
     })
 
     const extensionOptionsService = uiContainer.get(ExtensionOptionsService)
@@ -71,12 +93,16 @@ export class DanmakuDensityService {
   }
 
   enable() {
+    // Guard prevents duplicate listeners: if already enabled, early return
+    // ensures setupEventListeners() is only called once.
     if (this.enabled) {
       return
     }
     this.enabled = true
     this.logger.debug('Enabling density plot')
     this.chart.setup()
+    this.setupTooltip()
+    this.setupChartCallbacks()
     this.scheduleCompute()
     this.setupEventListeners()
   }
@@ -94,18 +120,139 @@ export class DanmakuDensityService {
     this.cleanup()
   }
 
+  setAutoDensity(enabled: boolean) {
+    if (this.autoDensityEnabled === enabled) return
+    this.autoDensityEnabled = enabled
+    this.logger.debug(`Auto density: ${enabled}`)
+    // Re-filter when toggled while comments are loaded
+    if (this.comments.length > 0) {
+      this.applyDensityFilter()
+    }
+  }
+
+  /**
+   * Register a callback to receive density-filtered comments.
+   * Called whenever comments change or auto-density is toggled.
+   */
+  onDensityFilter(callback: DensityFilterCallback | null) {
+    this.densityFilterCallback = callback
+  }
+
   setComments(comments: CommentEntity[]) {
     this.comments = comments
     if (!this.enabled) {
+      // Even if chart is disabled, still apply density filter if auto-density is on
+      this.applyDensityFilter()
       return
     }
     this.scheduleCompute()
+    this.applyDensityFilter()
   }
 
   clear() {
     this.comments = []
     this.data = []
+    this.highlights = []
     this.chart.updateData([], 0)
+    this.chart.updateSkipRegions([])
+  }
+
+  /**
+   * Update the OP/ED skip region overlays on the density chart.
+   */
+  updateSkipRegions(regions: SkipRegion[]) {
+    this.chart.updateSkipRegions(regions)
+  }
+
+  /**
+   * Get detected highlight moments from the current density data.
+   */
+  getHighlights(): HighlightMoment[] {
+    return this.highlights
+  }
+
+  private setupTooltip() {
+    if (this.tooltipEl) return
+
+    const el = document.createElement('div')
+    el.className = 'da-density-tooltip'
+    el.style.display = 'none'
+    this.layoutService.wrapper.appendChild(el)
+    this.tooltipEl = el
+  }
+
+  private removeTooltip() {
+    if (this.tooltipEl) {
+      this.tooltipEl.remove()
+      this.tooltipEl = null
+    }
+  }
+
+  private setupChartCallbacks() {
+    this.chart.onTooltip((info: DensityTooltipInfo | null) => {
+      if (!this.tooltipEl) return
+
+      if (!info) {
+        this.tooltipEl.style.display = 'none'
+        return
+      }
+
+      const timeStr = formatTime(info.time)
+      this.tooltipEl.textContent = `${timeStr} | ${info.count}`
+      this.tooltipEl.style.display = ''
+
+      // Position the tooltip above the SVG, aligned to cursor x
+      const tooltipWidth = this.tooltipEl.offsetWidth
+      const wrapperWidth = this.layoutService.wrapper.clientWidth
+
+      let left = info.x - tooltipWidth / 2
+      // Clamp to wrapper bounds
+      if (left < 2) left = 2
+      if (left + tooltipWidth > wrapperWidth - 2) {
+        left = wrapperWidth - tooltipWidth - 2
+      }
+
+      this.tooltipEl.style.left = `${left}px`
+      this.tooltipEl.style.bottom = `${this.chartHeight + 4}px`
+    })
+
+    this.chart.onSeek((time: number) => {
+      if (!this.currentVideo) return
+      this.logger.debug(`Density chart seek to ${time.toFixed(1)}s`)
+      this.currentVideo.currentTime = time
+    })
+  }
+
+  private removeChartCallbacks() {
+    this.chart.onTooltip(null)
+    this.chart.onSeek(null)
+  }
+
+  private applyDensityFilter() {
+    if (!this.densityFilterCallback) return
+
+    if (!this.autoDensityEnabled) {
+      // Pass through all comments when disabled
+      this.densityFilterCallback(this.comments)
+      return
+    }
+
+    const duration = this.currentVideo?.duration ?? 0
+    if (!Number.isFinite(duration) || duration <= 0) {
+      this.densityFilterCallback(this.comments)
+      return
+    }
+
+    const binSize = getAdaptiveBinSize(duration)
+    const filtered = filterByAdaptiveDensity(this.comments, duration, binSize)
+
+    if (this.perfEnabled) {
+      this.logger.debug(
+        `Auto density: ${this.comments.length} -> ${filtered.length} comments (${Math.round((1 - filtered.length / this.comments.length) * 100)}% filtered)`
+      )
+    }
+
+    this.densityFilterCallback(filtered)
   }
 
   private setupEventListeners() {
@@ -149,12 +296,14 @@ export class DanmakuDensityService {
 
   private computeBins(duration: number) {
     const start = performance.now()
-    this.data = computeDensityBins(this.comments, duration, this.binSizeSec)
+    const binSize = getAdaptiveBinSize(duration)
+    this.data = computeDensityBins(this.comments, duration, binSize)
     const elapsed = performance.now() - start
     if (this.perfEnabled) {
       this.perfTimer.measure('density_compute_ms', elapsed, {
         comments: this.comments.length,
         bins: this.data.length,
+        binSize,
       })
     }
   }
@@ -177,6 +326,7 @@ export class DanmakuDensityService {
     }
 
     this.computeBins(duration)
+    this.highlights = detectHighlights(this.data, this.comments)
     this.chart.updateData(this.data, duration)
     this.chart.updateProgress(active.currentTime)
   }
@@ -239,7 +389,13 @@ export class DanmakuDensityService {
   }
 
   private cleanup() {
+    if (this.showChartTimeout) {
+      clearTimeout(this.showChartTimeout)
+      this.showChartTimeout = null
+    }
     this.removeEventListeners()
+    this.removeChartCallbacks()
+    this.removeTooltip()
     this.chart.teardown()
   }
 }

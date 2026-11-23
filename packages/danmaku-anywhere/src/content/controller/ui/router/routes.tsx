@@ -1,14 +1,18 @@
 import { i18n } from '@/common/localization/i18n'
 import { PopupTab } from '@/content/controller/store/popupStore'
 import { CommentsPage } from '@/content/controller/ui/floatingPanel/pages/CommentsPage'
-import { DebugPage } from '@/content/controller/ui/floatingPanel/pages/DebugPage'
+import { DebugPage } from '@/content/controller/ui/floatingPanel/pages/debug'
 import { IntegrationPage } from '@/content/controller/ui/floatingPanel/pages/integrationPolicy/IntegrationPage'
 import { MountPage } from '@/content/controller/ui/floatingPanel/pages/mount/MountPage'
 import { SelectorPage } from '@/content/controller/ui/floatingPanel/pages/SelectorPage'
 import { StylesPage } from '@/content/controller/ui/floatingPanel/pages/StylesPage'
 import { SearchPage } from '@/content/controller/ui/floatingPanel/pages/search/SearchPage'
+import { StatsPage } from '@/content/controller/ui/floatingPanel/pages/stats/StatsPage'
+import { CommunityPage } from '../floatingPanel/pages/community/CommunityPage'
 import { FilterPage } from '../floatingPanel/pages/FilterPage'
+import { HighlightsPage } from '../floatingPanel/pages/highlights/HighlightsPage'
 import { TitleMappingPage } from '../floatingPanel/pages/titleMapping/TitleMappingPage'
+import { WatchPartyPage } from '../floatingPanel/pages/watchParty/WatchPartyPage'
 
 export const routes = [
   {
@@ -30,6 +34,11 @@ export const routes = [
     tab: PopupTab.Comments,
     name: () => i18n.t('tabs.danmaku', 'Danmaku'),
     element: <CommentsPage />,
+  },
+  {
+    tab: PopupTab.Stats,
+    name: () => i18n.t('tabs.stats', 'Stats'),
+    element: <StatsPage />,
   },
   {
     tab: PopupTab.Styles,
@@ -55,5 +64,20 @@ export const routes = [
     tab: PopupTab.TitleMapping,
     name: () => i18n.t('titleMapping.title', 'Title Mappings'),
     element: <TitleMappingPage />,
+  },
+  {
+    tab: PopupTab.Highlights,
+    name: () => i18n.t('highlights.title', 'Highlights'),
+    element: <HighlightsPage />,
+  },
+  {
+    tab: PopupTab.Community,
+    name: () => i18n.t('community.title', 'Community'),
+    element: <CommunityPage />,
+  },
+  {
+    tab: PopupTab.WatchParty,
+    name: () => i18n.t('watchParty.title', 'Watch Party'),
+    element: <WatchPartyPage />,
   },
 ]

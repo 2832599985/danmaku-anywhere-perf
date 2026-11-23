@@ -2,15 +2,18 @@ import {
   Collapse,
   Divider,
   debounce,
-  Grid,
-  Input,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
   Stack,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
   Typography,
+  useEventCallback,
 } from '@mui/material'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { DocIcon } from '@/common/components/DocIcon'
@@ -19,10 +22,17 @@ import { IS_CHROME } from '@/common/constants'
 import { usePlatformInfo } from '@/common/hooks/usePlatformInfo'
 import { useResetForm } from '@/common/hooks/useResetForm'
 import type { DanmakuOptions } from '@/common/options/danmakuOptions/constant'
+import type { DanmakuPresetId } from '@/common/options/danmakuOptions/presets'
+import { danmakuPresetsMap } from '@/common/options/danmakuOptions/presets'
 import { useDanmakuOptions } from '@/common/options/danmakuOptions/useDanmakuOptions'
-import { withStopPropagation } from '@/common/utils/withStopPropagation'
+import { DanmakuPreview } from '@/content/common/DanmakuStyles/DanmakuPreview'
 import { FontSelector } from '@/content/common/DanmakuStyles/FontSelector'
 import { LabeledSwitch } from '@/content/common/DanmakuStyles/LabeledSwitch'
+import {
+  detectActivePreset,
+  PresetSelector,
+} from '@/content/common/DanmakuStyles/PresetSelector'
+import { LabeledScrubber } from './LabeledScrubber'
 import { LabeledSlider } from './LabeledSlider'
 
 const opacityMarks = [
@@ -158,6 +168,73 @@ const customCssPlaceholder = `.da-danmaku {
   font-weight: bold;
 }`
 
+type StrokePresetId = 'none' | 'thin' | 'thick' | 'glow' | '3d'
+
+interface StrokePreset {
+  labelKey: string
+  labelDefault: string
+  textStroke?: { width: number; color: string }
+  textShadow?: string
+}
+
+const strokePresets: Record<StrokePresetId, StrokePreset> = {
+  none: {
+    labelKey: 'stylePage.strokePresets.none',
+    labelDefault: 'Default',
+    textStroke: undefined,
+    textShadow: undefined,
+  },
+  thin: {
+    labelKey: 'stylePage.strokePresets.thin',
+    labelDefault: 'Thin Stroke',
+    textStroke: { width: 1, color: '#000000' },
+    textShadow: undefined,
+  },
+  thick: {
+    labelKey: 'stylePage.strokePresets.thick',
+    labelDefault: 'Thick Stroke',
+    textStroke: { width: 2, color: '#000000' },
+    textShadow: undefined,
+  },
+  glow: {
+    labelKey: 'stylePage.strokePresets.glow',
+    labelDefault: 'Glow',
+    textStroke: undefined,
+    textShadow:
+      '0 0 4px rgba(255,255,255,0.8), 0 0 8px rgba(255,255,255,0.5), 0 0 16px rgba(128,0,255,0.4)',
+  },
+  '3d': {
+    labelKey: 'stylePage.strokePresets.3d',
+    labelDefault: '3D Shadow',
+    textStroke: { width: 1, color: '#000000' },
+    textShadow: '2px 2px 0 #000, 3px 3px 0 rgba(0,0,0,0.4)',
+  },
+}
+
+const strokePresetIds: StrokePresetId[] = [
+  'none',
+  'thin',
+  'thick',
+  'glow',
+  '3d',
+]
+
+const detectStrokePreset = (style: {
+  textStroke?: { width: number; color: string }
+  textShadow?: string
+}): StrokePresetId => {
+  for (const id of strokePresetIds) {
+    const preset = strokePresets[id]
+    const strokeMatch =
+      preset.textStroke?.width === style.textStroke?.width &&
+      preset.textStroke?.color === style.textStroke?.color
+    const shadowMatch = preset.textShadow === style.textShadow
+    if (id === 'none' && !style.textStroke && !style.textShadow) return 'none'
+    if (id !== 'none' && strokeMatch && shadowMatch) return id
+  }
+  return 'none'
+}
+
 const opacityValueLabelFormat = (value: number) => `${value * 100}%`
 
 const fontSizeValueLabelFormat = (value: number) => `${value}px`
@@ -165,6 +242,11 @@ const fontSizeValueLabelFormat = (value: number) => `${value}px`
 const safeZoneValueLabelFormat = (value: number) => `${value}%`
 
 const offsetValueLabelFormat = (value: number) => {
+  const absValue = Math.abs(value)
+  if (absValue >= 1000) {
+    const formatted = Number.parseFloat((value / 1000).toFixed(3)).toString()
+    return `${value > 0 ? '+' : ''}${formatted}s`
+  }
   return `${value > 0 ? '+' : ''}${value}ms`
 }
 
@@ -223,22 +305,51 @@ export const DanmakuStylesForm = ({
 
   const { control, setValue, getValues, watch, handleSubmit, subscribe } = form
 
-  const onSave = async (formData: DanmakuOptions) => {
+  const onSave = useEventCallback(async (formData: DanmakuOptions) => {
     onSaveStatusChange?.('saving')
 
     await partialUpdate(formData)
 
     onSaveStatusChange?.('saved')
-  }
+  })
 
   const resetFlag = useResetForm({
     form,
     data: config,
   })
 
+  const activePreset = useMemo(() => detectActivePreset(config), [config])
+
+  const handlePresetSelect = useEventCallback((presetId: DanmakuPresetId) => {
+    const preset = danmakuPresetsMap[presetId]
+    const current = getValues()
+    const updated: DanmakuOptions = {
+      ...current,
+      ...preset.values,
+      style: {
+        ...current.style,
+        ...preset.values.style,
+      },
+      area: {
+        ...current.area,
+        ...preset.values.area,
+      },
+    }
+    form.reset(updated, { keepDefaultValues: true })
+    handleSubmit(onSave)()
+  })
+
+  const handleDebouncedSave = useEventCallback(() => {
+    handleSubmit(onSave)()
+  })
+
+  const handleSavingStatus = useEventCallback(() => {
+    onSaveStatusChange?.('saving')
+  })
+
   useEffect(() => {
     const debouncedSave = debounce(() => {
-      handleSubmit(onSave)()
+      handleDebouncedSave()
     }, 500)
 
     const unsubscribe = subscribe({
@@ -250,7 +361,7 @@ export const DanmakuStylesForm = ({
         if (!isDirty || resetFlag.current) {
           return
         }
-        onSaveStatusChange?.('saving')
+        handleSavingStatus()
         debouncedSave()
       },
     })
@@ -258,14 +369,26 @@ export const DanmakuStylesForm = ({
     return () => {
       unsubscribe()
     }
-  }, [subscribe])
+  }, [subscribe, resetFlag, handleDebouncedSave, handleSavingStatus])
 
+  const formValues = watch()
   const yStart = watch('area.yStart', config.area.yStart)
   const yEnd = watch('area.yEnd', config.area.yEnd)
   const useCustomCss = watch('useCustomCss', config.useCustomCss)
 
   return (
     <>
+      <Stack spacing={1} mt={2}>
+        <PresetSelector
+          activePreset={activePreset}
+          onSelect={handlePresetSelect}
+        />
+      </Stack>
+
+      <Stack spacing={1} mt={2}>
+        <DanmakuPreview config={formValues} />
+      </Stack>
+
       <Stack spacing={1} mt={2}>
         <Typography variant="h6" fontSize={18} component="div">
           {t('stylePage.style', 'Style')}
@@ -320,6 +443,31 @@ export const DanmakuStylesForm = ({
             )}
           />
         )}
+        <FormControl size="small" fullWidth>
+          <InputLabel>
+            {t('stylePage.strokePreset', 'Stroke / Shadow')}
+          </InputLabel>
+          <Select
+            value={detectStrokePreset(formValues.style)}
+            label={t('stylePage.strokePreset', 'Stroke / Shadow')}
+            onChange={(e) => {
+              const presetId = e.target.value as StrokePresetId
+              const preset = strokePresets[presetId]
+              setValue('style.textStroke', preset.textStroke, {
+                shouldDirty: true,
+              })
+              setValue('style.textShadow', preset.textShadow, {
+                shouldDirty: true,
+              })
+            }}
+          >
+            {strokePresetIds.map((id) => (
+              <MenuItem key={id} value={id}>
+                {t(strokePresets[id].labelKey, strokePresets[id].labelDefault)}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         <Controller
           name="useCustomCss"
           control={control}
@@ -404,81 +552,25 @@ export const DanmakuStylesForm = ({
         <Controller
           name="offset"
           control={control}
-          render={({ field }) => {
-            const [isEditingOffset, setIsEditingOffset] = useState(false)
-            const [editOffsetValue, setEditOffsetValue] = useState<string>(
-              field.value.toString()
-            )
-
-            useEffect(() => {
-              if (!isEditingOffset) {
-                setEditOffsetValue(field.value.toString())
-              }
-            }, [field.value, isEditingOffset])
-
-            const handleOffsetBlur = () => {
-              setIsEditingOffset(false)
-              let numericValue = Number.parseInt(editOffsetValue, 10)
-              if (isNaN(numericValue)) {
-                numericValue = field.value ?? 0
-              }
-              if (numericValue !== field.value) {
-                field.onChange(numericValue)
-              }
-              setEditOffsetValue(numericValue.toString())
-            }
-
-            return (
-              <LabeledSlider
-                label={t('stylePage.offset', 'Time Offset (milliseconds)')}
-                tooltip={t(
-                  'stylePage.tooltip.offset',
-                  'How earlier danmaku appears. Positive values make danmaku appear later, negative values make danmaku appear earlier.'
-                )}
-                value={field.value}
-                onChange={(_e, newValue) => {
-                  const numericValue = newValue as number
-                  field.onChange(numericValue)
-                  if (!isEditingOffset) {
-                    setEditOffsetValue(numericValue.toString())
-                  }
-                }}
-                gridSize={8}
-                step={10}
-                min={-5000}
-                max={5000}
-                size="small"
-                valueLabelDisplay="auto"
-                valueLabelFormat={offsetValueLabelFormat}
-              >
-                <Grid size={4}>
-                  <Input
-                    value={isEditingOffset ? editOffsetValue : field.value}
-                    size="small"
-                    {...withStopPropagation()}
-                    onFocus={() => {
-                      setIsEditingOffset(true)
-                      setEditOffsetValue(field.value.toString())
-                    }}
-                    onBlur={handleOffsetBlur}
-                    onChange={(e) => {
-                      setEditOffsetValue(e.target.value)
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        handleOffsetBlur()
-                        ;(e.target as HTMLInputElement).blur()
-                      }
-                    }}
-                    inputProps={{
-                      step: 1,
-                      type: 'number',
-                    }}
-                  />
-                </Grid>
-              </LabeledSlider>
-            )
-          }}
+          render={({ field }) => (
+            <LabeledScrubber
+              label={t('stylePage.offset', 'Time Offset')}
+              tooltip={t(
+                'stylePage.tooltip.offsetScrubber',
+                'Drag horizontally or use scroll wheel to adjust. Double-click to manual entry. Positive values make danmaku appear later, negative values earlier.'
+              )}
+              value={field.value}
+              onChange={(newValue) => field.onChange(newValue)}
+              onReset={() => field.onChange(0)}
+              step={10}
+              fastStep={100}
+              slowStep={1}
+              min={-100000}
+              max={100000}
+              formatValue={offsetValueLabelFormat}
+              unit="ms"
+            />
+          )}
         />
         <Controller
           name="interval"

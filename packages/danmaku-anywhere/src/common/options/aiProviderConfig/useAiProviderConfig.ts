@@ -1,17 +1,12 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { arrayMove } from '@dnd-kit/sortable'
+import { useMutation } from '@tanstack/react-query'
 import { useMemo } from 'react'
+import { useToast } from '@/common/components/Toast/toastStore'
 import { useInjectService } from '@/common/hooks/useInjectService'
 import { storageQueryKeys } from '@/common/queries/queryKeys'
 import { useSuspenseExtStorageQuery } from '@/common/storage/hooks/useSuspenseExtStorageQuery'
 import type { AiProviderConfig, AiProviderConfigOptions } from './schema'
 import { AiProviderConfigService } from './service'
-
-const arrayMove = <T>(array: T[], from: number, to: number): T[] => {
-  const newArray = [...array]
-  const item = newArray.splice(from, 1)[0]
-  newArray.splice(to, 0, item)
-  return newArray
-}
 
 export const useAiProviderConfig = () => {
   const {
@@ -46,18 +41,22 @@ export const useAiProviderConfig = () => {
 }
 
 export const useEditAiProviderConfig = () => {
-  const queryClient = useQueryClient()
   const queryKey = storageQueryKeys.external('sync', ['aiProviderConfig'])
+  const meta = { invalidates: [queryKey] }
 
   const service = useInjectService(AiProviderConfigService)
 
+  const { toast } = useToast()
+
   const createMutation = useMutation({
-    mutationKey: queryKey,
     mutationFn: service.create.bind(service),
+    meta,
+    onError: (e) => {
+      toast.error(e.message)
+    },
   })
 
   const updateMutation = useMutation({
-    mutationKey: queryKey,
     mutationFn: ({
       id,
       config,
@@ -65,33 +64,37 @@ export const useEditAiProviderConfig = () => {
       id: string
       config: Partial<AiProviderConfig>
     }) => service.update(id, config),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey })
+    meta,
+    onError: (e) => {
+      toast.error(e.message)
     },
   })
 
   const deleteMutation = useMutation({
-    mutationKey: queryKey,
     mutationFn: service.delete.bind(service),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey })
+    meta,
+    onError: (e) => {
+      toast.error(e.message)
     },
   })
 
   const toggleMutation = useMutation({
-    mutationKey: queryKey,
     mutationFn: async ({ id, enabled }: { id: string; enabled?: boolean }) => {
       const config = await service.get(id)
-      if (!config) return
-      return service.update(id, { enabled: enabled ?? !config.enabled })
+      if (!config) {
+        return
+      }
+      return service.update(id, {
+        enabled: enabled ?? !config.enabled,
+      })
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey })
+    meta,
+    onError: (e) => {
+      toast.error(e.message)
     },
   })
 
   const reorderMutation = useMutation({
-    mutationKey: queryKey,
     mutationFn: async ({
       sourceIndex,
       destinationIndex,
@@ -103,8 +106,9 @@ export const useEditAiProviderConfig = () => {
       const newConfigs = arrayMove(configs, sourceIndex, destinationIndex)
       await service.options.set(newConfigs)
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey })
+    meta,
+    onError: (e) => {
+      toast.error(e.message)
     },
   })
 

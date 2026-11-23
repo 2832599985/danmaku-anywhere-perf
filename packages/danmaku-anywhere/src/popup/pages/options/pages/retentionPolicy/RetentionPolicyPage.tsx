@@ -1,8 +1,13 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
+import { ExpandMore } from '@mui/icons-material'
 import {
+  AccordionDetails,
+  AccordionSummary,
   Box,
   Button,
+  Checkbox,
   Divider,
+  FormControlLabel,
   InputAdornment,
   List,
   ListItem,
@@ -10,22 +15,51 @@ import {
   Stack,
   Switch,
   TextField,
+  Typography,
 } from '@mui/material'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { produce } from 'immer'
+import { useRef } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { Outlet } from 'react-router'
-
 import { alarmKeys } from '@/common/alarms/constants'
+import { useDialog } from '@/common/components/Dialog/dialogStore'
+import { OutlineAccordion } from '@/common/components/OutlineAccordion'
 import { useToast } from '@/common/components/Toast/toastStore'
 import type { RetentionPolicy } from '@/common/options/extensionOptions/schema'
 import { retentionPolicySchema } from '@/common/options/extensionOptions/schema'
 import { useExtensionOptions } from '@/common/options/extensionOptions/useExtensionOptions'
-import { alarmQueryKeys, episodeQueryKeys } from '@/common/queries/queryKeys'
+import {
+  alarmQueryKeys,
+  customEpisodeQueryKeys,
+  episodeQueryKeys,
+  seasonMapQueryKeys,
+  seasonQueryKeys,
+} from '@/common/queries/queryKeys'
 import { chromeRpcClient } from '@/common/rpcClient/background/client'
 import { OptionsPageToolBar } from '@/popup/component/OptionsPageToolbar'
 import { OptionsPageLayout } from '@/popup/layout/OptionsPageLayout'
+
+function useWipeDanmakuStorage() {
+  return useMutation({
+    mutationFn: async ({
+      includeCustomEpisodes,
+    }: {
+      includeCustomEpisodes: boolean
+    }) => {
+      await chromeRpcClient.dataWipeDanmaku({ includeCustomEpisodes })
+    },
+    meta: {
+      invalidates: [
+        episodeQueryKeys.all(),
+        seasonQueryKeys.all(),
+        seasonMapQueryKeys.all(),
+        customEpisodeQueryKeys.all(),
+      ],
+    },
+  })
+}
 
 export const RetentionPolicyPage = () => {
   const { t } = useTranslation()
@@ -34,6 +68,7 @@ export const RetentionPolicyPage = () => {
   const { retentionPolicy } = data
 
   const { toast } = useToast()
+  const dialog = useDialog()
 
   const {
     control,
@@ -48,7 +83,9 @@ export const RetentionPolicyPage = () => {
   })
 
   const { mutate: handleApply, isPending } = useMutation({
-    mutationKey: alarmQueryKeys.danmakuPurge(),
+    meta: {
+      invalidates: [alarmQueryKeys.danmakuPurge()],
+    },
     mutationFn: async (update: RetentionPolicy) => {
       await partialUpdate(
         produce(data, (draft) => {
@@ -63,7 +100,9 @@ export const RetentionPolicyPage = () => {
   })
 
   const { mutate: purgeDanmaku, isPending: isPurgingDanmaku } = useMutation({
-    mutationKey: episodeQueryKeys.all(),
+    meta: {
+      invalidates: [episodeQueryKeys.all(), seasonQueryKeys.all()],
+    },
     mutationFn: async () => {
       const res = await chromeRpcClient.danmakuPurgeCache(
         getValues().deleteCommentsAfter
@@ -83,14 +122,73 @@ export const RetentionPolicyPage = () => {
     },
   })
 
+  const { mutate: wipeData, isPending: isWiping } = useWipeDanmakuStorage()
+
+  const includeCustomEpisodesRef = useRef(false)
+
+  const handleWipeData = () => {
+    includeCustomEpisodesRef.current = false
+
+    dialog.delete({
+      title: t(
+        'optionsPage.dataManagement.wipeDanmakuData',
+        'Wipe Danmaku Data'
+      ),
+      content: (
+        <>
+          <Typography color="text.secondary">
+            {t(
+              'optionsPage.dataManagement.wipeData.confirm1',
+              'Are you sure you want to wipe all danmaku, seasons, and mapping data? This action cannot be undone.'
+            )}
+          </Typography>
+          <FormControlLabel
+            control={
+              <Checkbox
+                onChange={(e) => {
+                  includeCustomEpisodesRef.current = e.target.checked
+                }}
+              />
+            }
+            label={t(
+              'optionsPage.dataManagement.wipeData.includeCustomEpisodes',
+              'Include custom episodes'
+            )}
+          />
+        </>
+      ),
+      onConfirm: () => {
+        dialog.delete({
+          title: t(
+            'optionsPage.dataManagement.wipeDanmakuData',
+            'Wipe Danmaku Data'
+          ),
+          content: t(
+            'optionsPage.dataManagement.wipeData.confirm2',
+            'Are you sure? This action cannot be undone.'
+          ),
+          onConfirm: () =>
+            wipeData(
+              { includeCustomEpisodes: includeCustomEpisodesRef.current },
+              { onSuccess: () => toast.success(t('common.success', 'Success')) }
+            ),
+          confirmButtonProps: { sx: { order: -1 }, color: 'error' },
+          cancelButtonProps: { sx: { ml: 1 } },
+        })
+      },
+    })
+  }
+
   const { data: nextPurgeTime } = useQuery({
     queryKey: alarmQueryKeys.danmakuPurge(),
     queryFn: async () => {
-      const alarm = await chrome.alarms.get(alarmKeys.PURGE_DANMAKU)
-      return alarm || null
+      const { data: alarm } = await chromeRpcClient.getAlarm(
+        alarmKeys.PURGE_DANMAKU
+      )
+      return alarm
     },
     select: (data) => {
-      return new Date(data.scheduledTime).toLocaleString()
+      return data ? new Date(data.scheduledTime).toLocaleString() : null
     },
     enabled: data.retentionPolicy.enabled,
   })
@@ -99,7 +197,7 @@ export const RetentionPolicyPage = () => {
     <>
       <OptionsPageLayout>
         <OptionsPageToolBar
-          title={t('optionsPage.pages.retentionPolicy', 'Retention Policy')}
+          title={t('optionsPage.pages.dataManagement', 'Data Management')}
         />
         <Box px={2}>
           <List>
@@ -216,6 +314,40 @@ export const RetentionPolicyPage = () => {
               {t('optionsPage.retentionPolicy.purgeNow', 'Purge Now')}
             </Button>
           </Stack>
+
+          <Box mt={4}>
+            <OutlineAccordion disableGutters elevation={0}>
+              <AccordionSummary expandIcon={<ExpandMore />}>
+                <Typography>{t('common.advanced', 'Advanced')}</Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  justifyContent="space-between"
+                >
+                  <Typography variant="body1">
+                    {t(
+                      'optionsPage.dataManagement.wipeDanmakuData',
+                      'Wipe Danmaku Data'
+                    )}
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    color="error"
+                    onClick={handleWipeData}
+                    loading={isWiping}
+                  >
+                    {t(
+                      'optionsPage.dataManagement.wipeDanmakuData',
+                      'Wipe Danmaku Data'
+                    )}
+                  </Button>
+                </Stack>
+              </AccordionDetails>
+            </OutlineAccordion>
+          </Box>
         </Box>
       </OptionsPageLayout>
       <Outlet />

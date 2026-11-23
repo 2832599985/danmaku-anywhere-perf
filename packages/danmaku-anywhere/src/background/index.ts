@@ -1,9 +1,12 @@
 import { configureApiStore } from '@danmaku-anywhere/danmaku-provider'
 import { AlarmManager } from '@/background/alarm/AlarmManager'
 import { ContextMenuManager } from '@/background/contextMenu/ContextMenuManager'
+import { NavigationWatcherService } from '@/background/navigation/NavigationWatcherService'
 import { NetRequestManager } from '@/background/netRequest/NetrequestManager'
+import { UpscaleRulesetManager } from '@/background/netRequest/UpscaleRulesetManager'
 import { PortsManager } from '@/background/ports/PortsManager'
 import { RpcManager } from '@/background/rpc/RpcManager'
+import { MountConfigTabReloader } from '@/background/scripting/MountConfigTabReloader'
 import { ScriptingManager } from '@/background/scripting/ScriptingManager'
 import { OptionsManager } from '@/background/syncOptions/OptionsManager'
 import { deferredConfigureStore } from '@/background/utils/deferredConfigureStore'
@@ -28,10 +31,13 @@ configureApiStore({
 
 container.get(OptionsManager).setup()
 container.get(ScriptingManager).setup()
+container.get(MountConfigTabReloader).setup()
 container.get(RpcManager).setup()
 container.get(NetRequestManager).setup()
+container.get(UpscaleRulesetManager).setup()
 container.get(AlarmManager).setup()
 container.get(PortsManager).setup()
+container.get(NavigationWatcherService).setup()
 
 setLogService(container.get(LogService))
 
