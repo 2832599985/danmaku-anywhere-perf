@@ -21,7 +21,7 @@ Danmaku Anywhere is a monorepo for a browser extension and web app that displays
 
 ### Fork Info
 
-This is a performance/UX fork (`2832599985/danmaku-anywhere-perf`) of `Mr-Quin/danmaku-anywhere`. Active feature branch: `feat/anime4k-upscale`.
+This is a performance/UX fork (`2832599985/danmaku-anywhere-perf`) of `Mr-Quin/danmaku-anywhere`. Primary branch: `master`.
 
 **Fork-specific features** (preserve during upstream merges):
 - Glass/neon UI theme (violet/fuchsia palette, `backdropFilter: blur(12px)`, dark mode only) — **extension only**; the desktop player (`app/player`) uses a manga ink theme (vermilion/paper, zero radius, halftone dots, hard shadows; see `app/player/src/theme/theme.ts`)
