@@ -1005,6 +1005,10 @@ export const usePlayerStore = create<PlayerStore>()(
             typeof p.playbackSettings?.muted === 'boolean'
               ? p.playbackSettings.muted
               : current.playbackSettings.muted,
+          screenshotSource:
+            p.playbackSettings?.screenshotSource === 'original'
+              ? 'original'
+              : 'upscaled',
         }
         return {
           ...current,

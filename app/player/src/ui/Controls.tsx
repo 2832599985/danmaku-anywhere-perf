@@ -26,7 +26,6 @@ import {
   VERMILION,
 } from '@/theme/theme'
 import {
-  CameraIcon,
   ExitFullscreenIcon,
   FullscreenIcon,
   MiniPlayerIcon,
@@ -42,6 +41,7 @@ import {
   SubtitleQuickButton,
   UpscaleQuickButton,
 } from './QuickButtons'
+import { ScreenshotButton } from './ScreenshotButton'
 import { TimeDisplay } from './TimeDisplay'
 import { VolumeControl } from './VolumeControl'
 
@@ -647,16 +647,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
           <DanmakuQuickButton />
           <SubtitleQuickButton />
 
-          <Box
-            component="button"
-            type="button"
-            aria-label="截图 (Shift+S) / Screenshot"
-            title="纯净截图 (Shift+S / Ctrl+S)"
-            onClick={() => void commands.takeScreenshot()}
-            sx={squareSx}
-          >
-            <CameraIcon size={16} />
-          </Box>
+          <ScreenshotButton />
 
           {isTauri && (
             <Box

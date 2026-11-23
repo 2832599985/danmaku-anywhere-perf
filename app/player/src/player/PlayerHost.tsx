@@ -71,7 +71,11 @@ import {
   miniWindowSize,
 } from './mini/miniPlayer'
 import { snapshotThumb } from './resumeThumbs'
-import { captureVideoFrame, screenshotFileName } from './screenshot'
+import {
+  captureVideoFrame,
+  formatScreenshotOsd,
+  screenshotFileName,
+} from './screenshot'
 import { type SiblingEpisode, selectBatch } from './siblingEpisodes'
 import { SubtitleController } from './subtitle/SubtitleController'
 import { SubtitleRenderer } from './subtitle/SubtitleRenderer'
@@ -207,6 +211,9 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   const isHdr = usePlayerStore((s) => s.isHdr)
   const playing = usePlayerStore((s) => s.playback.playing)
   const controlsHoldCount = usePlayerStore((s) => s.controlsHoldCount)
+  const overlayModalOpen = usePlayerStore(
+    (s) => s.settingsOpen || s.playlistOpen || s.danmakuDialogOpen
+  )
   const compareRatio = usePlayerStore((s) => s.compareRatio)
   const autoAddSiblings = usePlayerStore(
     (s) => s.playbackSettings.autoAddSiblings
@@ -228,6 +235,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   const hideTimer = useRef<number | null>(null)
   const pointerInsideStageRef = useRef(false)
   const prevHoldCountRef = useRef(0)
+  const prevOverlayModalRef = useRef(false)
   /** Window geometry changes are async; ignore a second toggle mid-flight. */
   const miniBusyRef = useRef(false)
   // A single click on the picture plays/pauses only once it is certain not
@@ -1177,12 +1185,31 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         const v = getVideo()
         const s = store()
         if (!v || !s.media) return
-        const saveToFile = s.playbackSettings.saveScreenshotToFile
+        const {
+          saveScreenshotToFile,
+          screenshotDir,
+          screenshotSource,
+          screenshotIncludeDanmaku,
+          screenshotIncludeSubtitles,
+        } = s.playbackSettings
+        const wantOriginal = screenshotSource === 'original'
         try {
           const frame = await captureVideoFrame(
             v,
-            upscaleCtrlRef.current?.getCanvas() ?? null,
-            { encodePng: !platform.isTauri || saveToFile }
+            wantOriginal ? null : (upscaleCtrlRef.current?.getCanvas() ?? null),
+            {
+              encodePng: !platform.isTauri || saveScreenshotToFile,
+              stageEl: stageRef.current,
+              danmakuLayer:
+                screenshotIncludeDanmaku && s.danmakuSettings.visible
+                  ? danmakuLayerRef.current
+                  : null,
+              subtitleLayer:
+                screenshotIncludeSubtitles && s.subtitleSettings.visible
+                  ? subtitleLayerRef.current
+                  : null,
+              subtitleSettings: s.subtitleSettings,
+            }
           )
           let copied = false
           let copyError: unknown = null
@@ -1199,25 +1226,31 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
           }
 
           let saved = false
-          if (saveToFile && frame.pngBytes) {
+          if (saveScreenshotToFile && frame.pngBytes) {
             const name = screenshotFileName(s.media.name, v.currentTime)
             await platform.saveScreenshot(
               name,
               frame.pngBytes,
-              s.playbackSettings.screenshotDir || undefined
+              screenshotDir || undefined
             )
             saved = true
           }
 
-          if (copied && saved) {
-            store().showOsd('已截图 · 已复制并保存', '📷')
-          } else if (copied) {
-            store().showOsd('已截图 · 已复制到剪贴板', '📷')
-          } else if (saved) {
-            store().showOsd('已保存截图（剪贴板写入失败）', '📷')
-          } else {
+          if (!copied && !saved) {
             throw copyError ?? new Error('剪贴板写入失败')
           }
+
+          store().showOsd(
+            formatScreenshotOsd({
+              upscaled: frame.upscaled,
+              requestedOriginal: wantOriginal,
+              drewDanmaku: frame.drewDanmaku,
+              drewSubtitles: frame.drewSubtitles,
+              copied,
+              saved,
+            }),
+            '📷'
+          )
         } catch (err) {
           store().showOsd(
             `截图失败：${err instanceof Error ? err.message : String(err)}`,
@@ -1480,6 +1513,16 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     }
   }, [controlsHoldCount, media, revealControls, clearHideTimer])
 
+  // Returning from Settings / Playlist / Danmaku dialog reveals the controls
+  // briefly (then lets the normal 2.6s timer fade them out).
+  useEffect(() => {
+    const prev = prevOverlayModalRef.current
+    prevOverlayModalRef.current = overlayModalOpen
+    if (prev && !overlayModalOpen && media) {
+      revealControls()
+    }
+  }, [overlayModalOpen, media, revealControls])
+
   useEffect(() => {
     return () => {
       clearHideTimer()
@@ -1580,7 +1623,13 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             onWheel={onStageWheel}
             onMouseLeave={() => {
               pointerInsideStageRef.current = false
-              if (usePlayerStore.getState().controlsHoldCount === 0) {
+              const s = usePlayerStore.getState()
+              if (
+                s.controlsHoldCount === 0 &&
+                !s.settingsOpen &&
+                !s.playlistOpen &&
+                !s.danmakuDialogOpen
+              ) {
                 clearHideTimer()
                 setControlsVisible(false)
               }

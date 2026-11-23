@@ -122,6 +122,9 @@ export interface DanmakuSettings {
 /** How the player handles detected OP/ED segments. */
 export type SkipOpEdMode = 'auto' | 'ask' | 'off'
 
+/** Which picture source screenshots capture when super-resolution is active. */
+export type ScreenshotSource = 'upscaled' | 'original'
+
 export interface SubtitleSettings {
   /** master switch; hides the layer without dropping mounted cues. */
   visible: boolean
@@ -176,6 +179,12 @@ export interface PlaybackSettings {
   muted: boolean
   /** Show the top-right real-time FPS / CPU HUD while upscaling (off by default). */
   showPerformanceHud: boolean
+  /** Prefer the upscaled WebGPU frame when available, or always capture raw <video>. */
+  screenshotSource: ScreenshotSource
+  /** Composite live on-screen danmaku into screenshots. */
+  screenshotIncludeDanmaku: boolean
+  /** Composite active subtitles (at resting margin, unlifted) into screenshots. */
+  screenshotIncludeSubtitles: boolean
   /** Save screenshots to disk as PNG in addition to copying to clipboard. */
   saveScreenshotToFile: boolean
   /** Custom folder for saved screenshots (empty = Pictures/DanmakuPlayer). */
@@ -232,6 +241,9 @@ export const DEFAULT_PLAYBACK: PlaybackSettings = {
   volume: 1,
   muted: false,
   showPerformanceHud: false,
+  screenshotSource: 'upscaled',
+  screenshotIncludeDanmaku: false,
+  screenshotIncludeSubtitles: false,
   saveScreenshotToFile: false,
   screenshotDir: '',
 }

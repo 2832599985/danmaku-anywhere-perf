@@ -427,8 +427,8 @@ const PlaybackSettingsPage = () => {
                   lineHeight: 1.4,
                 }}
               >
-                Shift+S / Ctrl+S 截图默认直接写入剪贴板；开启后额外保存无损 PNG
-                文件
+                Shift+S / Ctrl+S
+                截图默认写入剪贴板；右键底栏相机按钮可自由勾选超分/原片、弹幕与字幕图层
               </Typography>
             </Box>
             <InkSwitch

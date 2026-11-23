@@ -572,6 +572,26 @@ test.describe('quick panels and settings navigation', () => {
         await page.keyboard.press('Escape')
         await expect(panel).not.toBeVisible()
       }
+      // Right-clicking the camera button opens the screenshot layer popover.
+      await page
+        .getByRole('button', { name: '截图 (Shift+S) / Screenshot' })
+        .click({ button: 'right' })
+      const shotPanel = page.locator('[data-quick-panel="screenshot"]')
+      await expect(shotPanel).toBeVisible()
+      await expect(shotPanel).toHaveCSS('opacity', '1')
+      const shotRect = await shotPanel.boundingBox()
+      expect(shotRect).not.toBeNull()
+      if (shotRect) {
+        expect(shotRect.x).toBeGreaterThanOrEqual(0)
+        expect(shotRect.y).toBeGreaterThanOrEqual(0)
+        expect(shotRect.x + shotRect.width).toBeLessThanOrEqual(size.width)
+        expect(shotRect.y + shotRect.height).toBeLessThanOrEqual(size.height)
+      }
+      await page.screenshot({
+        path: test.info().outputPath(`quick-截图-${size.width}.png`),
+      })
+      await page.keyboard.press('Escape')
+      await expect(shotPanel).not.toBeVisible()
     }
     await page
       .getByRole('button', { name: '全屏 / Fullscreen', exact: true })
