@@ -26,12 +26,15 @@ import {
 import { ensureSelectData } from './utils.js'
 
 const BILIBILI_API_URL_ROOT = 'https://api.bilibili.com'
+const BILIBILI_FETCH_OPTIONS = {
+  credentials: 'include' as const,
+}
 
 const throttle = createThrottle(200)
 
 // Visit bilibili.com to set cookies
 export const setCookies = async () => {
-  await fetch('http://bilibili.com')
+  await fetch('https://www.bilibili.com', BILIBILI_FETCH_OPTIONS)
 }
 
 export const getCurrentUser = async (): Promise<
@@ -42,6 +45,7 @@ export const getCurrentUser = async (): Promise<
   const result = await fetchData({
     url: `${BILIBILI_API_URL_ROOT}/x/web-interface/nav`,
     responseSchema: zBilibiliUserInfo,
+    ...BILIBILI_FETCH_OPTIONS,
   })
 
   if (!result.success) return result
@@ -64,6 +68,7 @@ const search = async (
       search_type: type,
     },
     responseSchema: zBilibiliSearchResponse,
+    ...BILIBILI_FETCH_OPTIONS,
   })
 
   if (!result.success) return result
@@ -75,16 +80,27 @@ const search = async (
 export const searchMedia = async (
   params: BiliBiliSearchParams
 ): Promise<Result<BilibiliMedia[], DanmakuProviderError>> => {
-  // We need to handle multiple promises returning Result
-  const [ftResult, bangumiResult] = await Promise.all([
-    search(params, 'media_ft'),
-    search(params, 'media_bangumi'),
-  ])
+  const results: BilibiliMedia[] = []
+  const errors: DanmakuProviderError[] = []
 
-  if (!ftResult.success) return ftResult
-  if (!bangumiResult.success) return bangumiResult
+  for (const type of [
+    'media_bangumi',
+    'media_ft',
+  ] satisfies BiliBiliSearchType[]) {
+    const result = await search(params, type)
 
-  return ok([...ftResult.data, ...bangumiResult.data])
+    if (result.success) {
+      results.push(...result.data)
+    } else {
+      errors.push(result.error)
+    }
+  }
+
+  if (errors.length === 2) {
+    return err(errors[0])
+  }
+
+  return ok(results)
 }
 
 // using season id, get a list of episodes
@@ -108,6 +124,7 @@ export const getBangumiInfo = async ({
     url,
     query,
     responseSchema: zBilibiliBangumiInfoResponse,
+    ...BILIBILI_FETCH_OPTIONS,
   })
 
   if (!result.success) return result
@@ -126,6 +143,7 @@ export const getDanmakuXml = async (
     url,
     responseType: 'text',
     responseSchema: zGenericXml,
+    ...BILIBILI_FETCH_OPTIONS,
   })
 
   if (!response.success) return response

@@ -19,6 +19,7 @@ export interface FetchOptions<T extends ZodType> {
   responseType?: 'json' | 'text'
   responseSchema: T
   headers?: Record<string, string>
+  credentials?: RequestCredentials
   // if this request goes to the danmaku-anywhere backend
   isDaRequest?: boolean
   getErrorMessage?: (res: Response) => Promise<string | undefined>
@@ -82,6 +83,7 @@ export const fetchData = async <OutSchema extends ZodType>(
     body,
     responseSchema,
     headers = {},
+    credentials,
     getErrorMessage,
   } = validatedOptions
 
@@ -110,6 +112,7 @@ export const fetchData = async <OutSchema extends ZodType>(
     const res = await fetch(finalUrl, {
       headers: { ...headers },
       method,
+      credentials,
       body: body ? JSON.stringify(body) : undefined,
     })
 
