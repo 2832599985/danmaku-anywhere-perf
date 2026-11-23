@@ -63,6 +63,10 @@ windows = { version = "0.61", features = [
   "Win32_System_JobObjects",
   # storage.rs: pick a non-system fixed drive for models and caches.
   "Win32_Storage_FileSystem",
+  # screenshot.rs: write captured video frames directly to the Windows clipboard.
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_Graphics_Gdi",
 ] }
 
 # Sensible release optimizations (smaller, faster binary).

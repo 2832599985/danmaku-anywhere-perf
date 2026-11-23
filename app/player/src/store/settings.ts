@@ -112,6 +112,11 @@ export interface DanmakuSettings {
   sources: { ddp: boolean; bilibili: boolean; tencent: boolean }
   /** Merge comments from every confident source for the matched episode. */
   mergeSources: boolean
+  /**
+   * When auto-match fails to find or disambiguate a show, automatically open
+   * the manual danmaku search dialog instead of staying silent.
+   */
+  autoOpenPickerOnMiss: boolean
 }
 
 /** How the player handles detected OP/ED segments. */
@@ -165,6 +170,16 @@ export interface PlaybackSettings {
    * (snapshotted on engage, so a 1.5× global rate resumes after a 3× hold).
    */
   holdSpeed: number
+  /** Persisted audio volume (0..1). */
+  volume: number
+  /** Persisted mute state. */
+  muted: boolean
+  /** Show the top-right real-time FPS / CPU HUD while upscaling (off by default). */
+  showPerformanceHud: boolean
+  /** Save screenshots to disk as PNG in addition to copying to clipboard. */
+  saveScreenshotToFile: boolean
+  /** Custom folder for saved screenshots (empty = Pictures/DanmakuPlayer). */
+  screenshotDir: string
 }
 
 export interface Settings {
@@ -204,6 +219,7 @@ export const DEFAULT_DANMAKU: DanmakuSettings = {
   learnFilenamePatterns: true,
   sources: { ddp: true, bilibili: true, tencent: true },
   mergeSources: true,
+  autoOpenPickerOnMiss: true,
 }
 
 export const DEFAULT_PLAYBACK: PlaybackSettings = {
@@ -213,6 +229,11 @@ export const DEFAULT_PLAYBACK: PlaybackSettings = {
   autoAdvance: true,
   skipOpEd: 'ask',
   holdSpeed: 3,
+  volume: 1,
+  muted: false,
+  showPerformanceHud: false,
+  saveScreenshotToFile: false,
+  screenshotDir: '',
 }
 
 export const DEFAULT_SUBTITLE: SubtitleSettings = {

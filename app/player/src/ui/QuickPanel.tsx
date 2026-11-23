@@ -54,6 +54,7 @@ export const FeatureSplitButton = ({
 }: FeatureSplitButtonProps) => {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
   const openSettingsAt = usePlayerStore((s) => s.openSettingsAt)
+  const holdControls = usePlayerStore((s) => s.holdControls)
   const blocked = usePlayerStore((s) => s.settingsOpen || s.danmakuDialogOpen)
   const panelId = useId()
   const open = Boolean(anchor) && !blocked
@@ -62,6 +63,12 @@ export const FeatureSplitButton = ({
   useEffect(() => {
     if (blocked) setAnchor(null)
   }, [blocked])
+
+  useEffect(() => {
+    if (!open) return
+    holdControls(1)
+    return () => holdControls(-1)
+  }, [open, holdControls])
 
   const lit = on || busy
   const frame = busy ? VERMILION : lit ? PAPER : alpha(PAPER, 0.6)

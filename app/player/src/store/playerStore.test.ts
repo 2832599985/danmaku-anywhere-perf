@@ -83,3 +83,25 @@ describe('setSubtitles', () => {
     expect(store().activeEmbeddedTrack).toBeNull()
   })
 })
+
+describe('session polish state', () => {
+  it('preserves playbackRate across episode switches and closes stale danmaku dialog', () => {
+    store().openMedia([ep(1), ep(2)])
+    store().patchPlayback({ playbackRate: 1.5 })
+    store().setDanmakuDialogOpen(true, { keyword: 'old' })
+    store().playPlaylistIndex(1)
+    expect(store().playback.playbackRate).toBe(1.5)
+    expect(store().danmakuDialogOpen).toBe(false)
+    expect(store().danmakuSearchPrefill).toBeNull()
+  })
+
+  it('clamps controlsHoldCount at zero', () => {
+    store().holdControls(1)
+    store().holdControls(1)
+    expect(store().controlsHoldCount).toBe(2)
+    store().holdControls(-1)
+    store().holdControls(-1)
+    store().holdControls(-1)
+    expect(store().controlsHoldCount).toBe(0)
+  })
+})

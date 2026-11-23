@@ -142,4 +142,20 @@ describe('parseReleaseName', () => {
     expect(parse('某番 第11话 [1080p].mkv').episodeTitle).toBe(null)
     expect(parse('某番 第11话 1080p.mkv').episodeTitle).toBe(null)
   })
+
+  it('falls back to the parent folder name for bare episode files', () => {
+    const bare = parseReleaseName('D:\\Anime\\葬送的芙莉莲\\01.mp4')
+    expect(bare.title).toBe('葬送的芙莉莲')
+    expect(bare.episode).toBe(1)
+
+    const ep = parseReleaseName('D:\\番剧\\进击的巨人 第二季\\EP05.mkv')
+    expect(ep.title).toBe('进击的巨人 第二季')
+    expect(ep.season).toBe(2)
+    expect(ep.episode).toBe(5)
+
+    // Generic container folders must never be mistaken for an anime title.
+    const generic = parseReleaseName('C:\\Videos\\03.mp4')
+    expect(generic.title).toBe('')
+    expect(generic.episode).toBe(3)
+  })
 })

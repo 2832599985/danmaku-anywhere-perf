@@ -9,6 +9,7 @@ import {
   LINE_HEIGHT_STEP,
 } from '@/player/danmaku/trackHeight'
 import { usePlayerStore } from '@/store/playerStore'
+import { DEFAULT_DANMAKU } from '@/store/settings'
 import {
   hatchSx,
   INK,
@@ -232,6 +233,7 @@ export const DanmakuSettings = () => {
           en="OPACITY"
           display={`${Math.round(danmaku.opacity * 100)}%`}
           value={danmaku.opacity}
+          defaultValue={DEFAULT_DANMAKU.opacity}
           min={0}
           max={1}
           step={0.05}
@@ -243,6 +245,7 @@ export const DanmakuSettings = () => {
           en="FONT SIZE"
           display={`${danmaku.fontSize}px`}
           value={danmaku.fontSize}
+          defaultValue={DEFAULT_DANMAKU.fontSize}
           min={12}
           max={48}
           step={1}
@@ -254,6 +257,7 @@ export const DanmakuSettings = () => {
           en="LINE HEIGHT"
           display={`${danmaku.lineHeight.toFixed(2)}×`}
           value={danmaku.lineHeight}
+          defaultValue={DEFAULT_DANMAKU.lineHeight}
           min={LINE_HEIGHT_MIN}
           max={LINE_HEIGHT_MAX}
           step={LINE_HEIGHT_STEP}
@@ -265,6 +269,7 @@ export const DanmakuSettings = () => {
           en="SPEED"
           display={`${danmaku.speed.toFixed(1)}×`}
           value={danmaku.speed}
+          defaultValue={DEFAULT_DANMAKU.speed}
           min={0.5}
           max={2}
           step={0.1}
@@ -276,6 +281,7 @@ export const DanmakuSettings = () => {
           en="OFFSET"
           display={`${danmaku.offset > 0 ? '+' : ''}${(danmaku.offset / 1000).toFixed(1)}s`}
           value={danmaku.offset}
+          defaultValue={DEFAULT_DANMAKU.offset}
           min={-10000}
           max={10000}
           step={100}
@@ -288,6 +294,7 @@ export const DanmakuSettings = () => {
           en="MAX ON SCREEN"
           display={`${danmaku.maxOnScreen}`}
           value={danmaku.maxOnScreen}
+          defaultValue={DEFAULT_DANMAKU.maxOnScreen}
           min={50}
           max={1000}
           step={50}
@@ -357,6 +364,37 @@ export const DanmakuSettings = () => {
             }}
           >
             无同名弹幕文件时，用文件名解析番名/集数并自动挂载
+          </Typography>
+        </Box>
+
+        <Box sx={{ border: LINE_SUBTLE, padding: '12px' }}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+          >
+            <InkLabel zh="匹配失败自动弹窗" en="AUTO OPEN PICKER" size={13} />
+            <InkSwitch
+              checked={danmaku.autoOpenPickerOnMiss}
+              disabled={!danmaku.autoOnlineMatch}
+              onChange={(v) =>
+                updateDanmakuSettings({ autoOpenPickerOnMiss: v })
+              }
+              label="匹配失败自动弹窗"
+            />
+          </Stack>
+          <Typography
+            sx={{
+              fontFamily: MONO,
+              fontSize: 10,
+              fontWeight: 700,
+              color: alpha(PAPER, 0.5),
+              marginTop: '8px',
+              letterSpacing: '0.04em',
+              lineHeight: 1.5,
+            }}
+          >
+            自动匹配未命中时直接弹出弹幕源搜索框并聚焦输入框，省去手动点开
           </Typography>
         </Box>
 

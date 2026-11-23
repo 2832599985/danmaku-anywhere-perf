@@ -16,11 +16,13 @@ import {
   VERMILION,
 } from '@/theme/theme'
 import {
+  CameraIcon,
   CheckIcon,
   CompareIcon,
   DanmakuIcon,
   NextIcon,
   PlaylistAddIcon,
+  PrevIcon,
   SeekBackIcon,
   SeekForwardIcon,
   SparkleIcon,
@@ -42,7 +44,9 @@ const OSD_ICONS: Record<string, ReactNode> = {
   '🔇': <VolumeMuteIcon size={22} />,
   '⏩': <SeekForwardIcon size={22} />,
   '⏪': <SeekBackIcon size={22} />,
+  '⏮': <PrevIcon size={22} />,
   '⏭': <NextIcon size={22} />,
+  '📷': <CameraIcon size={22} />,
   '💬': <DanmakuIcon size={22} />,
   '🎬': <SubtitleIcon size={22} />,
   '✨': <SparkleIcon size={22} />,

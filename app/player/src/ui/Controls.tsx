@@ -19,15 +19,14 @@ import {
   inkStampPressSx,
   LINE_STRONG,
   MONO,
-  MOTION_BANNER,
   MOTION_PANEL,
   OVERLAY_GRADIENT,
   PAPER,
-  SERIF_JP,
   STAGE_Z,
   VERMILION,
 } from '@/theme/theme'
 import {
+  CameraIcon,
   ExitFullscreenIcon,
   FullscreenIcon,
   MiniPlayerIcon,
@@ -37,7 +36,6 @@ import {
   PrevIcon,
   SkipForwardIcon,
 } from './icons'
-import { InkBlinkDot } from './ink'
 import { ProgressBar } from './ProgressBar'
 import {
   DanmakuQuickButton,
@@ -70,6 +68,7 @@ const squareSx = {
   appearance: 'none',
   width: 38,
   height: 38,
+  '@media (max-width: 960px)': { width: 34, height: 34 },
   border: LINE_STRONG,
   background: 'transparent',
   color: PAPER,
@@ -111,17 +110,31 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
   const isTauri = getPlatform().isTauri
   const playbackRate = usePlayerStore((s) => s.playback.playbackRate)
   const duration = usePlayerStore((s) => s.playback.duration)
-  const danmakuSource = usePlayerStore((s) => s.danmakuSource)
   const comments = usePlayerStore((s) => s.comments)
   const playlist = usePlayerStore((s) => s.playlist)
   const playlistIndex = usePlayerStore((s) => s.playlistIndex)
   const upscale = usePlayerStore((s) => s.upscale)
   const upscaleStatus = usePlayerStore((s) => s.upscaleStatus)
+  const holdControls = usePlayerStore((s) => s.holdControls)
 
   const [rateAnchor, setRateAnchor] = useState<HTMLElement | null>(null)
+  const [barHovered, setBarHovered] = useState(false)
   const [densityHover, setDensityHover] = useState<number | null>(null)
   const barRef = useRef<HTMLDivElement | null>(null)
   const [barHeight, setBarHeight] = useState(0)
+
+  const rateOpen = Boolean(rateAnchor)
+  useEffect(() => {
+    if (!rateOpen) return
+    holdControls(1)
+    return () => holdControls(-1)
+  }, [rateOpen, holdControls])
+
+  useEffect(() => {
+    if (!barHovered) return
+    holdControls(1)
+    return () => holdControls(-1)
+  }, [barHovered, holdControls])
 
   // The bar's height depends on its own content (the danmaku density strip
   // appears once comments load, the status capsules come and go), so the
@@ -195,41 +208,6 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
   const playbackSettings = usePlayerStore((s) => s.playbackSettings)
   const currentTime = usePlayerStore((s) => s.playback.currentTime)
 
-  // The "弹幕已挂载" banner confirms a mount, then gets out of the picture.
-  // It used to stay up every time the controls showed, parked over the top
-  // centre of the video, repeating what the top-bar badge and the danmaku
-  // button already say.
-  const [bannerVisible, setBannerVisible] = useState(false)
-  const [bannerMounted, setBannerMounted] = useState(false)
-  const sourceKey = danmakuSource
-    ? `${danmakuSource.label}|${danmakuSource.count}`
-    : null
-  useEffect(() => {
-    if (!sourceKey) {
-      setBannerVisible(false)
-      setBannerMounted(false)
-      return
-    }
-    setBannerMounted(true)
-    // Mount at opacity 0, then flip on the next frame so the slide-down fade
-    // actually has a starting frame to transition from.
-    setBannerVisible(false)
-    const enter = window.requestAnimationFrame(() => setBannerVisible(true))
-    const timer = window.setTimeout(() => setBannerVisible(false), 3500)
-    return () => {
-      window.cancelAnimationFrame(enter)
-      window.clearTimeout(timer)
-    }
-  }, [sourceKey])
-  // Keep the banner mounted for the exit transition instead of vanishing on
-  // the same frame its timer fires.
-  useEffect(() => {
-    if (bannerVisible || !bannerMounted) return
-    const timer = window.setTimeout(() => setBannerMounted(false), 160)
-    return () => window.clearTimeout(timer)
-  }, [bannerVisible, bannerMounted])
-  const showBanner = danmakuSource !== null && bannerMounted
-
   // OP/ED marks for the skip-OP button.
   const { opEnd } = useOpEdMarks(comments, duration)
   const showSkipOp =
@@ -271,227 +249,135 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
 
   return (
     <>
-      {/* 「再生中」 vertical status flag (design: left rail while playing) */}
-      {playing && (
-        <Box
-          sx={{
-            position: 'absolute',
-            left: 26,
-            top: 96,
-            zIndex: STAGE_Z.HUD,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '8px',
-            background: INK_SCRIM_LIGHT,
-            borderLeft: `3px solid ${VERMILION}`,
-            padding: '10px 6px',
-            ...fade,
-            // Decorative: a click here must reach the stage (pause/play).
-            pointerEvents: 'none',
-          }}
-        >
+      {/* Real-time HUD (top-right, below the top bar; opt-in via settings/quick panel) */}
+      {playbackSettings.showPerformanceHud &&
+        upscaleStatus === 'active' &&
+        upscaleStats !== null && (
           <Box
-            component="span"
             sx={{
-              writingMode: 'vertical-rl',
-              fontFamily: SERIF_JP,
-              fontSize: 15,
-              letterSpacing: '0.3em',
-              color: PAPER,
+              position: 'absolute',
+              top: OVERLAY_TOP,
+              right: 26,
+              zIndex: STAGE_Z.HUD,
+              background: INK_SCRIM_HEAVY,
+              border: LINE_STRONG,
+              padding: '8px 12px 10px',
+              display: 'flex',
+              gap: '18px',
+              alignItems: 'flex-end',
+              ...fade,
+              // A readout, not a target: never swallow the pause click.
+              pointerEvents: 'none',
             }}
           >
-            再生中
-          </Box>
-          <InkBlinkDot />
-        </Box>
-      )}
-
-      {/* mounted-danmaku confirmation: shown for a few seconds after a mount,
-          on its own timer (independent of the controls' fade) */}
-      {showBanner && danmakuSource && (
-        <Box
-          sx={{
-            position: 'absolute',
-            top: OVERLAY_TOP,
-            left: '50%',
-            zIndex: STAGE_Z.HUD,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '2px',
-            background: INK_SCRIM_LIGHT,
-            border: LINE_STRONG,
-            padding: '4px 12px 6px',
-            pointerEvents: 'none',
-            opacity: bannerVisible ? 1 : 0,
-            transform: bannerVisible
-              ? 'translate(-50%, 0)'
-              : 'translate(-50%, -6px)',
-            transition: `opacity ${MOTION_BANNER}, transform ${MOTION_BANNER}`,
-            '@media (prefers-reduced-motion: reduce)': {
-              transform: 'translate(-50%, 0)',
-              transition: 'opacity 120ms linear !important',
-            },
-          }}
-        >
-          <Box
-            component="span"
-            sx={{
-              fontFamily: MONO,
-              fontSize: 9,
-              letterSpacing: '0.3em',
-              color: VERMILION,
-              fontWeight: 700,
-            }}
-          >
-            DANMAKU
-          </Box>
-          <Box
-            component="span"
-            sx={{
-              fontSize: 12,
-              fontWeight: 700,
-              color: PAPER,
-              letterSpacing: '0.12em',
-              maxWidth: 420,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            弹幕已挂载 · {danmakuSource.label}
-          </Box>
-        </Box>
-      )}
-
-      {/* Real-time HUD (top-right, below the top bar) */}
-      {upscaleStatus === 'active' && upscaleStats !== null && (
-        <Box
-          sx={{
-            position: 'absolute',
-            top: OVERLAY_TOP,
-            right: 26,
-            zIndex: STAGE_Z.HUD,
-            background: INK_SCRIM_HEAVY,
-            border: LINE_STRONG,
-            padding: '8px 12px 10px',
-            display: 'flex',
-            gap: '18px',
-            alignItems: 'flex-end',
-            ...fade,
-            // A readout, not a target: never swallow the pause click.
-            pointerEvents: 'none',
-          }}
-        >
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-            <Box
-              component="span"
-              sx={{
-                fontFamily: MONO,
-                fontSize: 9,
-                letterSpacing: '0.22em',
-                color: alpha(PAPER, 0.5),
-              }}
-            >
-              OUTPUT FPS
-            </Box>
-            <Box
-              component="span"
-              sx={{
-                fontFamily: MONO,
-                fontSize: 24,
-                fontWeight: 700,
-                color: PAPER,
-                lineHeight: 1,
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            >
-              {upscaleStats.fps}
-            </Box>
-            {/* The composition, so the big number is never mistaken for the
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+              <Box
+                component="span"
+                sx={{
+                  fontFamily: MONO,
+                  fontSize: 9,
+                  letterSpacing: '0.22em',
+                  color: alpha(PAPER, 0.5),
+                }}
+              >
+                OUTPUT FPS
+              </Box>
+              <Box
+                component="span"
+                sx={{
+                  fontFamily: MONO,
+                  fontSize: 24,
+                  fontWeight: 700,
+                  color: PAPER,
+                  lineHeight: 1,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {upscaleStats.fps}
+              </Box>
+              {/* The composition, so the big number is never mistaken for the
                 display refresh or for the interpolated rate alone. Stated
                 factually rather than as a warning: 0 interpolated frames is
                 legitimate while paused, on a static passage, or in the first
                 second after enabling, so alarming wording would cry wolf. A
                 persistent "补帧 0" while playing is the real signal. The one
                 definitive failure the engine reports is its fallback state. */}
-            {fi.enabled && (
+              {fi.enabled && (
+                <Box
+                  component="span"
+                  sx={{
+                    fontFamily: MONO,
+                    fontSize: 10,
+                    letterSpacing: '0.1em',
+                    color:
+                      interpolationStatus === 'fallback'
+                        ? VERMILION
+                        : alpha(PAPER, 0.45),
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {interpolationStatus === 'fallback'
+                    ? '补帧不可用'
+                    : `源 ${upscaleStats.sourceFps} + 补帧 ${upscaleStats.generatedFps}`}
+                </Box>
+              )}
+            </Box>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
               <Box
                 component="span"
                 sx={{
                   fontFamily: MONO,
-                  fontSize: 10,
-                  letterSpacing: '0.1em',
-                  color:
-                    interpolationStatus === 'fallback'
-                      ? VERMILION
-                      : alpha(PAPER, 0.45),
+                  fontSize: 9,
+                  letterSpacing: '0.22em',
+                  color: alpha(PAPER, 0.5),
+                }}
+              >
+                SCALE
+              </Box>
+              <Box
+                component="span"
+                sx={{
+                  fontFamily: MONO,
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: PAPER,
+                  lineHeight: 1.6,
                   fontVariantNumeric: 'tabular-nums',
                 }}
               >
-                {interpolationStatus === 'fallback'
-                  ? '补帧不可用'
-                  : `源 ${upscaleStats.sourceFps} + 补帧 ${upscaleStats.generatedFps}`}
+                {SCALE_LABEL[upscale.targetResolution]}
               </Box>
-            )}
-          </Box>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-            <Box
-              component="span"
-              sx={{
-                fontFamily: MONO,
-                fontSize: 9,
-                letterSpacing: '0.22em',
-                color: alpha(PAPER, 0.5),
-              }}
-            >
-              SCALE
             </Box>
-            <Box
-              component="span"
-              sx={{
-                fontFamily: MONO,
-                fontSize: 15,
-                fontWeight: 700,
-                color: PAPER,
-                lineHeight: 1.6,
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            >
-              {SCALE_LABEL[upscale.targetResolution]}
-            </Box>
-          </Box>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
-            <Box
-              component="span"
-              sx={{
-                fontFamily: MONO,
-                fontSize: 9,
-                letterSpacing: '0.22em',
-                color: alpha(PAPER, 0.5),
-              }}
-            >
-              CPU ms/帧
-            </Box>
-            <Box
-              component="span"
-              sx={{
-                fontFamily: MONO,
-                fontSize: 15,
-                fontWeight: 700,
-                color: PAPER,
-                lineHeight: 1.6,
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            >
-              {upscaleStats.cpuFrameMs > 0
-                ? upscaleStats.cpuFrameMs.toFixed(1)
-                : '—'}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+              <Box
+                component="span"
+                sx={{
+                  fontFamily: MONO,
+                  fontSize: 9,
+                  letterSpacing: '0.22em',
+                  color: alpha(PAPER, 0.5),
+                }}
+              >
+                CPU ms/帧
+              </Box>
+              <Box
+                component="span"
+                sx={{
+                  fontFamily: MONO,
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: PAPER,
+                  lineHeight: 1.6,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {upscaleStats.cpuFrameMs > 0
+                  ? upscaleStats.cpuFrameMs.toFixed(1)
+                  : '—'}
+              </Box>
             </Box>
           </Box>
-        </Box>
-      )}
+        )}
 
       {/* Skip OP: bottom-right, just above the control bar — where streaming
           players put it. It does NOT fade with the controls: in 询问 mode the
@@ -563,6 +449,8 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
       <Box
         ref={barRef}
         data-controls-bar
+        onMouseEnter={() => setBarHovered(true)}
+        onMouseLeave={() => setBarHovered(false)}
         sx={{
           position: 'absolute',
           left: 0,
@@ -570,6 +458,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
           bottom: 0,
           zIndex: STAGE_Z.CHROME,
           padding: '52px 24px 16px',
+          '@media (max-width: 960px)': { padding: '52px 12px 16px' },
           background: OVERLAY_GRADIENT,
           opacity: visible ? 1 : 0,
           transform: visible ? 'translateY(0)' : 'translateY(12px)',
@@ -669,6 +558,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
               appearance: 'none',
               width: 46,
               height: 46,
+              '@media (max-width: 960px)': { width: 42, height: 42 },
               border: LINE_STRONG,
               background: PAPER,
               color: INK,
@@ -765,6 +655,17 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
           <UpscaleQuickButton />
           <DanmakuQuickButton />
           <SubtitleQuickButton />
+
+          <Box
+            component="button"
+            type="button"
+            aria-label="截图 (Shift+S) / Screenshot"
+            title="纯净截图 (Shift+S / Ctrl+S)"
+            onClick={() => void commands.takeScreenshot()}
+            sx={squareSx}
+          >
+            <CameraIcon size={16} />
+          </Box>
 
           {isTauri && (
             <Box

@@ -171,4 +171,38 @@ export const browserPlatform: Platform = {
   async sourceLogin(): Promise<void> {
     // Bilibili/Tencent sources require the Tauri hidden-WebView bridge.
   },
+
+  async copyImageToClipboard(
+    _width: number,
+    _height: number,
+    _rgba: Uint8Array,
+    png: Blob
+  ): Promise<void> {
+    if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
+      throw new Error('当前浏览器不支持写入图片剪贴板')
+    }
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+  },
+
+  async saveScreenshot(
+    fileName: string,
+    png: Uint8Array
+  ): Promise<string | null> {
+    const copy = new Uint8Array(png.byteLength)
+    copy.set(png)
+    const blob = new Blob([copy], { type: 'image/png' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName.endsWith('.png') ? fileName : `${fileName}.png`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    return a.download
+  },
+
+  async pickFolder(): Promise<string | null> {
+    return null
+  },
 }

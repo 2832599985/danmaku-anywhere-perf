@@ -6,7 +6,11 @@ import {
   LINE_HEIGHT_STEP,
 } from '@/player/danmaku/trackHeight'
 import { usePlayerStore } from '@/store/playerStore'
-import type { InterpolationMultiplier } from '@/store/settings'
+import {
+  DEFAULT_DANMAKU,
+  DEFAULT_SUBTITLE,
+  type InterpolationMultiplier,
+} from '@/store/settings'
 import { aiGenLabel } from '@/subtitle/generate'
 import { GOLD, GREEN, MONO, PAPER, VERMILION } from '@/theme/theme'
 import {
@@ -107,6 +111,7 @@ export const DanmakuQuickButton = () => {
             zh="不透明度"
             display={`${Math.round(danmaku.opacity * 100)}%`}
             value={danmaku.opacity}
+            defaultValue={DEFAULT_DANMAKU.opacity}
             min={0}
             max={1}
             step={0.05}
@@ -116,6 +121,7 @@ export const DanmakuQuickButton = () => {
             zh="字号"
             display={`${danmaku.fontSize}px`}
             value={danmaku.fontSize}
+            defaultValue={DEFAULT_DANMAKU.fontSize}
             min={12}
             max={48}
             step={1}
@@ -125,6 +131,7 @@ export const DanmakuQuickButton = () => {
             zh="行距"
             display={`${danmaku.lineHeight.toFixed(2)}×`}
             value={danmaku.lineHeight}
+            defaultValue={DEFAULT_DANMAKU.lineHeight}
             min={LINE_HEIGHT_MIN}
             max={LINE_HEIGHT_MAX}
             step={LINE_HEIGHT_STEP}
@@ -134,10 +141,22 @@ export const DanmakuQuickButton = () => {
             zh="滚动速度"
             display={`${danmaku.speed.toFixed(1)}×`}
             value={danmaku.speed}
+            defaultValue={DEFAULT_DANMAKU.speed}
             min={0.5}
             max={2}
             step={0.1}
             onChange={(v) => update({ speed: v })}
+          />
+          <InkLabeledSlider
+            zh="时间偏移"
+            display={`${danmaku.offset > 0 ? '+' : ''}${(danmaku.offset / 1000).toFixed(1)}s`}
+            value={danmaku.offset}
+            defaultValue={DEFAULT_DANMAKU.offset}
+            min={-10000}
+            max={10000}
+            step={100}
+            centerTick
+            onChange={(v) => update({ offset: v })}
           />
           <Box>
             <Typography
@@ -215,6 +234,7 @@ export const SubtitleQuickButton = () => {
             max={64}
             step={2}
             value={subtitle.fontSize}
+            defaultValue={DEFAULT_SUBTITLE.fontSize}
             onChange={(value) => update({ fontSize: value })}
           />
           <InkLabeledSlider
@@ -225,6 +245,7 @@ export const SubtitleQuickButton = () => {
             max={10000}
             step={100}
             value={subtitle.offset}
+            defaultValue={DEFAULT_SUBTITLE.offset}
             centerTick
             onChange={(value) => update({ offset: value })}
           />
@@ -255,7 +276,11 @@ export const UpscaleQuickButton = () => {
   const interpolationStatus = usePlayerStore((s) => s.interpolationStatus)
   const compareRatio = usePlayerStore((s) => s.compareRatio)
   const isHdr = usePlayerStore((s) => s.isHdr)
+  const showPerformanceHud = usePlayerStore(
+    (s) => s.playbackSettings.showPerformanceHud
+  )
   const update = usePlayerStore((s) => s.updateUpscale)
+  const updatePlayback = usePlayerStore((s) => s.updatePlaybackSettings)
   const setCompareRatio = usePlayerStore((s) => s.setCompareRatio)
   const fi = upscale.frameInterpolation
 
@@ -354,6 +379,15 @@ export const UpscaleQuickButton = () => {
               disabled={!running}
               onChange={(checked) => setCompareRatio(checked ? 0.5 : null)}
               label="A/B 对比"
+            />
+          </QuickRow>
+          <QuickRow label="性能 HUD" hint="右上角显示帧率与耗时">
+            <InkSwitch
+              checked={showPerformanceHud}
+              onChange={(checked) =>
+                updatePlayback({ showPerformanceHud: checked })
+              }
+              label="性能 HUD"
             />
           </QuickRow>
           {running && (

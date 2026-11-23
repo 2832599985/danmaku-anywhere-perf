@@ -71,6 +71,7 @@ import {
   miniWindowSize,
 } from './mini/miniPlayer'
 import { snapshotThumb } from './resumeThumbs'
+import { captureVideoFrame, screenshotFileName } from './screenshot'
 import { type SiblingEpisode, selectBatch } from './siblingEpisodes'
 import { SubtitleController } from './subtitle/SubtitleController'
 import { SubtitleRenderer } from './subtitle/SubtitleRenderer'
@@ -205,6 +206,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   const upscale = usePlayerStore((s) => s.upscale)
   const isHdr = usePlayerStore((s) => s.isHdr)
   const playing = usePlayerStore((s) => s.playback.playing)
+  const controlsHoldCount = usePlayerStore((s) => s.controlsHoldCount)
   const compareRatio = usePlayerStore((s) => s.compareRatio)
   const autoAddSiblings = usePlayerStore(
     (s) => s.playbackSettings.autoAddSiblings
@@ -299,6 +301,10 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         if (stale) return
         video.src = prepared.url
         video.load()
+        // Keep the user's session playback rate across episode switches.
+        if (video.defaultPlaybackRate && video.defaultPlaybackRate !== 1) {
+          video.playbackRate = video.defaultPlaybackRate
+        }
         // Desktop-player behavior: start playing as soon as a file is opened.
         // (The exe allows this via --autoplay-policy; browsers may reject →
         // ignore.)
@@ -646,36 +652,64 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       // The AI is an ENHANCER, not a gate. A 500 from the proxy (which
       // `[LoliHouse]` filenames trigger) or an offline machine used to abort
       // this whole block; the deterministic parser + search below still work.
+      // Pass the full path so `parseReleaseName` can fall back to the parent
+      // folder when the file itself is just `01.mp4` / `EP05.mkv`.
       const release = parseReleaseName(videoPath)
-      const info = await aiExtractTitle(basename(videoPath))
+      const info = await aiExtractTitle(videoPath)
       s = usePlayerStore.getState()
-      if (stale || s.media?.path !== videoPath || s.danmakuSource) return
+      if (
+        stale ||
+        s.media?.path !== videoPath ||
+        s.danmakuSource ||
+        s.mediaError
+      ) {
+        return
+      }
 
-      const looksEpisodic =
+      const hasSearchSignal =
         release.episode > 0 ||
         release.isMovie ||
         release.season !== null ||
+        release.title.length > 0 ||
         info !== null
-      if (!looksEpisodic) return
+      if (!hasSearchSignal) {
+        if (s.danmakuSettings.autoOpenPickerOnMiss) {
+          s.setDanmakuDialogOpen(true, {
+            keyword: '',
+            targetEpisode: 0,
+            note: '未能从文件名识别番剧，请手动搜索',
+          })
+          s.showOsd('未识别到番剧 · 请手动搜索', '❓')
+        }
+        return
+      }
 
       const sources = enabledSources(s.danmakuSettings, platform.isTauri)
-      const outcome = await autoMatch(basename(videoPath), info, {
+      const outcome = await autoMatch(videoPath, info, {
         search: (keyword, index) => searchAll(keyword, sources, index),
         episodes: (season) => adapterFor(season.source).episodes(season),
         searchEpisodes: searchEpisodesAcross,
         mergeSources: s.danmakuSettings.mergeSources,
       })
       s = usePlayerStore.getState()
-      if (stale || s.media?.path !== videoPath || s.danmakuSource) return
+      if (
+        stale ||
+        s.media?.path !== videoPath ||
+        s.danmakuSource ||
+        s.mediaError
+      ) {
+        return
+      }
 
       if (outcome.status !== 'matched') {
-        if (!outcome.keyword) return
+        if (!s.danmakuSettings.autoOpenPickerOnMiss) return
         // If this folder HAS learned rules and none matched, that is almost
         // certainly why we are asking — say so, or "it never learned" is the
         // only thing the user can conclude.
         const hint = unmatchedRuleHint(s.filenameRules, videoPath)
+        const prefillKeyword = outcome.keyword || release.title || ''
         s.setDanmakuDialogOpen(true, {
-          keyword: outcome.keyword,
+          keyword: prefillKeyword,
           targetEpisode:
             outcome.status === 'ambiguous'
               ? outcome.targetEpisode
@@ -702,8 +736,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
           result.status === 'fulfilled' ? result.value : []
         )
       )
-      const localEpisode =
-        release.episode || targetEpisode(basename(videoPath), info)
+      const localEpisode = release.episode || targetEpisode(videoPath, info)
       if (!comments.length) {
         const failed = settled.every((result) => result.status === 'rejected')
         s.showOsd(
@@ -1114,6 +1147,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         const clamped = Math.max(0, Math.min(1, volume))
         v.volume = clamped
         if (clamped > 0) v.muted = false
+        store().updatePlaybackSettings({ volume: v.volume, muted: v.muted })
       },
       changeVolume: (delta) => {
         const v = getVideo()
@@ -1121,17 +1155,73 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
         const next = Math.max(0, Math.min(1, v.volume + delta))
         v.volume = next
         if (next > 0) v.muted = false
+        store().updatePlaybackSettings({ volume: v.volume, muted: v.muted })
         store().showOsd(`${Math.round(next * 100)}%`, next === 0 ? '🔇' : '🔊')
       },
       toggleMute: () => {
         const v = getVideo()
         if (!v) return
         v.muted = !v.muted
+        store().updatePlaybackSettings({ muted: v.muted })
         store().showOsd(v.muted ? '静音' : '取消静音', v.muted ? '🔇' : '🔊')
       },
-      setPlaybackRate: (rate) => {
+      setPlaybackRate: (rate, options) => {
         const v = getVideo()
-        if (v) v.playbackRate = rate
+        if (!v) return
+        if (!options?.temporary) v.defaultPlaybackRate = rate
+        v.playbackRate = rate
+      },
+      takeScreenshot: async () => {
+        const v = getVideo()
+        const s = store()
+        if (!v || !s.media) return
+        const saveToFile = s.playbackSettings.saveScreenshotToFile
+        try {
+          const frame = await captureVideoFrame(
+            v,
+            upscaleCtrlRef.current?.getCanvas() ?? null,
+            { encodePng: !platform.isTauri || saveToFile }
+          )
+          let copied = false
+          let copyError: unknown = null
+          try {
+            await platform.copyImageToClipboard(
+              frame.width,
+              frame.height,
+              frame.rgba,
+              frame.pngBlob ?? new Blob([], { type: 'image/png' })
+            )
+            copied = true
+          } catch (err) {
+            copyError = err
+          }
+
+          let saved = false
+          if (saveToFile && frame.pngBytes) {
+            const name = screenshotFileName(s.media.name, v.currentTime)
+            await platform.saveScreenshot(
+              name,
+              frame.pngBytes,
+              s.playbackSettings.screenshotDir || undefined
+            )
+            saved = true
+          }
+
+          if (copied && saved) {
+            store().showOsd('已截图 · 已复制并保存', '📷')
+          } else if (copied) {
+            store().showOsd('已截图 · 已复制到剪贴板', '📷')
+          } else if (saved) {
+            store().showOsd('已保存截图（剪贴板写入失败）', '📷')
+          } else {
+            throw copyError ?? new Error('剪贴板写入失败')
+          }
+        } catch (err) {
+          store().showOsd(
+            `截图失败：${err instanceof Error ? err.message : String(err)}`,
+            '⚠️'
+          )
+        }
       },
       toggleFullscreen: () => {
         const stage = stageRef.current
@@ -1344,14 +1434,32 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
   // window's drag events. (Browser builds get it from the stage handlers.)
   useEffect(() => platform.onFileDragHover(setDragActive), [platform])
 
-  // --- controls auto-hide ---
+  // --- controls auto-hide (both playing and paused) ---
+  // Pausing no longer pins the chrome permanently: controls appear briefly on
+  // pause or mouse movement, stay locked while hovering chrome / opening a
+  // quick panel or menu (`controlsHoldCount > 0`), and fade out after 2.6s of
+  // inactivity so the user always gets an unobstructed picture.
   const revealControls = useCallback(() => {
     setControlsVisible(true)
     if (hideTimer.current) window.clearTimeout(hideTimer.current)
     hideTimer.current = window.setTimeout(() => {
-      if (usePlayerStore.getState().playback.playing) setControlsVisible(false)
+      if (usePlayerStore.getState().controlsHoldCount === 0) {
+        setControlsVisible(false)
+      }
     }, 2600)
   }, [])
+
+  // Show chrome briefly on play/pause transitions and whenever the last
+  // hover/popover lock releases so the 2.6s countdown starts cleanly.
+  useEffect(() => {
+    if (!media) return
+    revealControls()
+  }, [playing, media, revealControls])
+
+  useEffect(() => {
+    if (!media || controlsHoldCount > 0) return
+    revealControls()
+  }, [controlsHoldCount, media, revealControls])
 
   useEffect(() => {
     return () => {
@@ -1359,6 +1467,28 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
       if (clickTimerRef.current) window.clearTimeout(clickTimerRef.current)
     }
   }, [])
+
+  const onStageWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      if (!event.deltaY) return
+      const s = usePlayerStore.getState()
+      if (!s.media || s.settingsOpen || s.playlistOpen || s.danmakuDialogOpen) {
+        return
+      }
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest(
+          '.MuiModal-root, .MuiPopover-root, .MuiDrawer-root'
+        ) !== null
+      ) {
+        return
+      }
+      event.preventDefault()
+      const step = s.playbackSettings.volumeStep
+      commands.changeVolume(event.deltaY < 0 ? step : -step)
+    },
+    [commands]
+  )
 
   const cancelPendingClick = useCallback(() => {
     if (clickTimerRef.current === null) return
@@ -1401,7 +1531,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
     [commands, platform]
   )
 
-  const overlaysVisible = controlsVisible || !playing || !media
+  const overlaysVisible = controlsVisible || !media || controlsHoldCount > 0
 
   // Move the subtitle rows clear of the bottom controls while they show.
   useEffect(() => {
@@ -1423,8 +1553,9 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             ref={setStageRef}
             data-player-stage
             onMouseMove={revealControls}
+            onWheel={onStageWheel}
             onMouseLeave={() => {
-              if (usePlayerStore.getState().playback.playing) {
+              if (usePlayerStore.getState().controlsHoldCount === 0) {
                 setControlsVisible(false)
               }
             }}
@@ -1544,7 +1675,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
             <Osd />
             <AiSubtitleOverlay />
             {miniPlayer ? (
-              <MiniControls visible={controlsVisible || !playing} />
+              <MiniControls visible={controlsVisible} />
             ) : (
               <>
                 <TopBar visible={overlaysVisible} platform={platform} />

@@ -1,5 +1,6 @@
 import { Box, Button, Modal, Stack, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
+import { getPlatform } from '@/platform'
 import { usePlayerStore } from '@/store/playerStore'
 import {
   halftoneSx,
@@ -39,7 +40,7 @@ const SHORTCUTS: Array<{
   { key: '← →', zh: '快退快进', en: 'SEEK' },
   { key: '→ 长按', zh: '临时倍速', en: 'HOLD SPEED' },
   { key: '← 长按', zh: '倍速快退', en: 'HOLD REWIND' },
-  { key: '↑ ↓', zh: '音量', en: 'VOLUME' },
+  { key: '↑ ↓ / 滚轮', zh: '音量', en: 'VOLUME' },
   { key: 'F', zh: '全屏', en: 'FULLSCREEN' },
   { key: 'P / Esc', zh: '小窗 / 退出小窗', en: 'MINI' },
   { key: 'M', zh: '静音', en: 'MUTE' },
@@ -48,6 +49,7 @@ const SHORTCUTS: Array<{
   { key: 'U', zh: '超分开关', en: 'UPSCALE' },
   { key: 'C', zh: '增强对比', en: 'COMPARE' },
   { key: 'S', zh: '字幕开关', en: 'SUBTITLE' },
+  { key: 'Shift+S / Ctrl+S', zh: '纯净截图', en: 'SCREENSHOT' },
   { key: ', .', zh: '字幕时轴±100ms', en: 'SUB OFFSET' },
   { key: 'T', zh: 'AI 字幕 双语/译文/原文', en: 'AI SUB MODE' },
 ]
@@ -340,6 +342,12 @@ const SkipOpEdCard = () => {
 const PlaybackSettingsPage = () => {
   const playback = usePlayerStore((s) => s.playbackSettings)
   const updatePlaybackSettings = usePlayerStore((s) => s.updatePlaybackSettings)
+  const isTauri = getPlatform().isTauri
+
+  const pickScreenshotFolder = async () => {
+    const dir = await getPlatform().pickFolder()
+    if (dir) updatePlaybackSettings({ screenshotDir: dir })
+  }
 
   return (
     <Stack spacing={2}>
@@ -398,6 +406,84 @@ const PlaybackSettingsPage = () => {
           })
         }
       />
+      <Box sx={{ border: LINE_SUBTLE, padding: '16px 12px' }}>
+        <Stack spacing={1.25}>
+          <Stack
+            direction="row"
+            alignItems="center"
+            justifyContent="space-between"
+            spacing={2}
+          >
+            <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+              <Typography sx={{ fontSize: 12, fontWeight: 700, color: PAPER }}>
+                截图同时保存到本地
+              </Typography>
+              <Typography
+                sx={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: alpha(PAPER, 0.5),
+                  mt: '3px',
+                  lineHeight: 1.4,
+                }}
+              >
+                Shift+S / Ctrl+S 截图默认直接写入剪贴板；开启后额外保存无损 PNG
+                文件
+              </Typography>
+            </Box>
+            <InkSwitch
+              checked={playback.saveScreenshotToFile}
+              onChange={(checked) =>
+                updatePlaybackSettings({ saveScreenshotToFile: checked })
+              }
+              label="截图同时保存到本地"
+            />
+          </Stack>
+          {isTauri && playback.saveScreenshotToFile && (
+            <Stack
+              direction="row"
+              alignItems="center"
+              spacing={1}
+              sx={{
+                pt: 1,
+                borderTop: `1px dashed ${alpha(PAPER, 0.16)}`,
+              }}
+            >
+              <Typography
+                noWrap
+                title={playback.screenshotDir || '默认：图片\\DanmakuPlayer'}
+                sx={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontFamily: MONO,
+                  fontSize: 11,
+                  color: alpha(PAPER, 0.65),
+                }}
+              >
+                {playback.screenshotDir || '默认：图片\\DanmakuPlayer'}
+              </Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => void pickScreenshotFolder()}
+                sx={{ textTransform: 'none', fontWeight: 700, flexShrink: 0 }}
+              >
+                选择目录
+              </Button>
+              {playback.screenshotDir && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => updatePlaybackSettings({ screenshotDir: '' })}
+                  sx={{ textTransform: 'none', fontWeight: 700, flexShrink: 0 }}
+                >
+                  恢复默认
+                </Button>
+              )}
+            </Stack>
+          )}
+        </Stack>
+      </Box>
       <SkipOpEdCard />
     </Stack>
   )

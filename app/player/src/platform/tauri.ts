@@ -380,6 +380,41 @@ export const tauriPlatform: Platform = {
     await invoke('source_login', { provider })
   },
 
+  async copyImageToClipboard(
+    width: number,
+    height: number,
+    rgba: Uint8Array
+  ): Promise<void> {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('screenshot_copy_clipboard', rgba, {
+      headers: {
+        'x-width': String(width),
+        'x-height': String(height),
+      },
+    })
+  },
+
+  async saveScreenshot(
+    fileName: string,
+    png: Uint8Array,
+    dir?: string
+  ): Promise<string | null> {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const headers: Record<string, string> = {
+      'x-file-name': encodeURIComponent(fileName),
+    }
+    if (dir?.trim()) {
+      headers['x-dir'] = encodeURIComponent(dir.trim())
+    }
+    return invoke<string>('screenshot_save', png, { headers })
+  },
+
+  async pickFolder(): Promise<string | null> {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({ directory: true, multiple: false })
+    return typeof selected === 'string' ? selected : null
+  },
+
   onFileDrop(cb: (paths: string[]) => void): () => void {
     let unlisten: (() => void) | null = null
     let cancelled = false

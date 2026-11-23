@@ -193,6 +193,8 @@ export interface PlayerStore {
 
   // --- transient UI ---
   osd: OsdMessage | null
+  /** Number of active hover/popover locks keeping top/bottom chrome visible. */
+  controlsHoldCount: number
   settingsOpen: boolean
   /** which page the settings window shows (also used to deep-link into it). */
   settingsSection: string
@@ -265,6 +267,8 @@ export interface PlayerStore {
 
   showOsd: (text: string, icon?: string) => void
   clearOsd: () => void
+  /** Increment/decrement the controls visibility lock (hovered bar or open menu/popover). */
+  holdControls: (delta: 1 | -1) => void
   setSettingsOpen: (open: boolean) => void
   setSettingsSection: (section: string) => void
   /** open the settings window directly on a given page. */
@@ -482,10 +486,12 @@ function resetPlaybackForNewMedia(s: PlayerStore): void {
   // The prefill describes the PREVIOUS file's show; a stale one would open the
   // picker on the wrong title after a media switch.
   s.danmakuSearchPrefill = null
+  s.danmakuDialogOpen = false
   s.playback = {
     ...INITIAL_PLAYBACK,
     volume: s.playback.volume,
     muted: s.playback.muted,
+    playbackRate: s.playback.playbackRate,
   }
 }
 
@@ -519,6 +525,7 @@ export const usePlayerStore = create<PlayerStore>()(
       miniPlayer: false,
 
       osd: null,
+      controlsHoldCount: 0,
       settingsOpen: false,
       settingsSection: 'playback',
       danmakuDialogOpen: false,
@@ -651,6 +658,11 @@ export const usePlayerStore = create<PlayerStore>()(
       clearOsd: () =>
         set((s) => {
           s.osd = null
+        }),
+
+      holdControls: (delta) =>
+        set((s) => {
+          s.controlsHoldCount = Math.max(0, s.controlsHoldCount + delta)
         }),
 
       setSettingsOpen: (open) =>
@@ -981,8 +993,26 @@ export const usePlayerStore = create<PlayerStore>()(
           progress?: Record<string, ResumeEntry>
           filenameRules?: FilenameRule[]
         }
+        const mergedPlayback: PlaybackSettings = {
+          ...current.playbackSettings,
+          ...p.playbackSettings,
+          volume:
+            typeof p.playbackSettings?.volume === 'number' &&
+            Number.isFinite(p.playbackSettings.volume)
+              ? clamp(p.playbackSettings.volume, 0, 1)
+              : current.playbackSettings.volume,
+          muted:
+            typeof p.playbackSettings?.muted === 'boolean'
+              ? p.playbackSettings.muted
+              : current.playbackSettings.muted,
+        }
         return {
           ...current,
+          playback: {
+            ...current.playback,
+            volume: mergedPlayback.volume,
+            muted: mergedPlayback.muted,
+          },
           upscale: {
             ...current.upscale,
             ...p.upscale,
@@ -1003,10 +1033,7 @@ export const usePlayerStore = create<PlayerStore>()(
               ...p.danmakuSettings?.sources,
             },
           },
-          playbackSettings: {
-            ...current.playbackSettings,
-            ...p.playbackSettings,
-          },
+          playbackSettings: mergedPlayback,
           subtitleSettings: {
             ...current.subtitleSettings,
             ...p.subtitleSettings,

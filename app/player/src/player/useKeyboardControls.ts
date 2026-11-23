@@ -62,7 +62,7 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
       const rate = rateBeforeHoldRef.current ?? 1
       holdingRightRef.current = false
       rateBeforeHoldRef.current = null
-      commands.setPlaybackRate(rate)
+      commands.setPlaybackRate(rate, { temporary: true })
       usePlayerStore.getState().showOsd(`${rate}×`, '▶')
     }
 
@@ -106,15 +106,23 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
     }
 
     const handler = (event: KeyboardEvent) => {
-      if (
-        event.defaultPrevented ||
-        event.altKey ||
-        event.ctrlKey ||
-        event.metaKey
-      ) {
+      if (event.defaultPrevented || event.altKey || event.metaKey) {
         return
       }
       if (isEditable(event.target) || isInsideOverlay(event.target)) return
+
+      // Clean video screenshot: Shift+S or Ctrl+S (bare S toggles subtitles).
+      if (
+        event.code === 'KeyS' &&
+        ((event.shiftKey && !event.ctrlKey) ||
+          (event.ctrlKey && !event.shiftKey))
+      ) {
+        event.preventDefault()
+        if (!event.repeat) void commands.takeScreenshot()
+        return
+      }
+
+      if (event.ctrlKey) return
 
       const { holdSpeed } = usePlayerStore.getState().playbackSettings
 
@@ -135,7 +143,7 @@ export const useKeyboardControls = (commands: PlayerCommands): void => {
           rateBeforeHoldRef.current =
             usePlayerStore.getState().playback.playbackRate
           holdingRightRef.current = true
-          commands.setPlaybackRate(holdSpeed)
+          commands.setPlaybackRate(holdSpeed, { temporary: true })
           usePlayerStore.getState().showOsd(`${holdSpeed}× 快进`, '⏩')
         }
         if (event.code === 'ArrowLeft' && rewindTimerRef.current === null) {

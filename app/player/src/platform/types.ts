@@ -222,4 +222,29 @@ export interface Platform {
    * browser, where the sources are unavailable.
    */
   sourceLogin(provider: 'bilibili' | 'tencent'): Promise<void>
+
+  /**
+   * Copy a captured video frame to the system clipboard.
+   * Tauri writes native CF_DIB via Win32 (zero permission prompts); browser
+   * uses `navigator.clipboard.write` with the PNG blob.
+   */
+  copyImageToClipboard(
+    width: number,
+    height: number,
+    rgba: Uint8Array,
+    png: Blob
+  ): Promise<void>
+
+  /**
+   * Save a PNG screenshot to disk (Tauri: `dir` or Pictures/DanmakuPlayer;
+   * browser: downloads the file). Returns the saved path or file name.
+   */
+  saveScreenshot(
+    fileName: string,
+    png: Uint8Array,
+    dir?: string
+  ): Promise<string | null>
+
+  /** Pick a local directory (Tauri only; returns null in the browser). */
+  pickFolder(): Promise<string | null>
 }

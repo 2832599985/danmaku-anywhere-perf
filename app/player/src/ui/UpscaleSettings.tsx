@@ -110,7 +110,11 @@ export const UpscaleSettings = () => {
   const interpolationStatus = usePlayerStore((s) => s.interpolationStatus)
   const compareRatio = usePlayerStore((s) => s.compareRatio)
   const playback = usePlayerStore((s) => s.playback)
+  const showPerformanceHud = usePlayerStore(
+    (s) => s.playbackSettings.showPerformanceHud
+  )
   const updateUpscale = usePlayerStore((s) => s.updateUpscale)
+  const updatePlayback = usePlayerStore((s) => s.updatePlaybackSettings)
   const setCompareRatio = usePlayerStore((s) => s.setCompareRatio)
 
   const supported = isWebGpuSupported()
@@ -776,6 +780,29 @@ export const UpscaleSettings = () => {
           </Typography>
         </Stack>
       </InkSection>
+
+      {/* Performance HUD toggle */}
+      <Box sx={{ border: LINE_SUBTLE, padding: '12px' }}>
+        <Stack
+          direction="row"
+          alignItems="center"
+          justifyContent="space-between"
+          spacing={2}
+        >
+          <InkLabel
+            zh="画面性能 HUD"
+            en="OUTPUT FPS / CPU · 右上角浮层"
+            size={13}
+          />
+          <InkSwitch
+            checked={showPerformanceHud}
+            onChange={(checked) =>
+              updatePlayback({ showPerformanceHud: checked })
+            }
+            label="画面性能 HUD"
+          />
+        </Stack>
+      </Box>
     </Stack>
   )
 }

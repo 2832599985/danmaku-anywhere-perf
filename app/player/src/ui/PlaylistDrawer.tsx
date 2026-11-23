@@ -1,5 +1,6 @@
 import { Box, Drawer, Stack, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
+import { useEffect, useRef, useState } from 'react'
 import { usePlayerCommands } from '@/player/commands'
 import { useFullscreenPortalContainer } from '@/player/fullscreenPortal'
 import type { PlaylistItem, ResumeEntry } from '@/store/playerStore'
@@ -21,6 +22,7 @@ import { formatTime } from './TimeDisplay'
 const WATCHED_RATIO = 0.95
 
 const relativeTime = (timestamp: number): string => {
+  if (!timestamp || timestamp <= 0) return ''
   const elapsed = Date.now() - timestamp
   if (!Number.isFinite(elapsed) || elapsed < 0) return ''
   const minutes = Math.floor(elapsed / 60_000)
@@ -63,12 +65,41 @@ export const PlaylistDrawer = () => {
   const clearPlaylist = usePlayerStore((s) => s.clearPlaylist)
   const updatePlaybackSettings = usePlayerStore((s) => s.updatePlaybackSettings)
 
+  const [confirmClear, setConfirmClear] = useState(false)
+  const activeRowRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!confirmClear) return
+    const timer = window.setTimeout(() => setConfirmClear(false), 3000)
+    return () => window.clearTimeout(timer)
+  }, [confirmClear])
+
+  useEffect(() => {
+    if (!playlistOpen) {
+      setConfirmClear(false)
+      return
+    }
+    const raf = window.requestAnimationFrame(() => {
+      activeRowRef.current?.scrollIntoView({ block: 'nearest' })
+    })
+    return () => window.cancelAnimationFrame(raf)
+  }, [playlistOpen])
+
   const handleRemoveItem = (
     e: React.MouseEvent<HTMLElement>,
     index: number
   ) => {
     e.stopPropagation()
     removePlaylistIndex(index)
+  }
+
+  const handleClearClick = () => {
+    if (!confirmClear) {
+      setConfirmClear(true)
+      return
+    }
+    setConfirmClear(false)
+    clearPlaylist()
   }
 
   return (
@@ -132,7 +163,7 @@ export const PlaylistDrawer = () => {
           <Box
             component="button"
             type="button"
-            onClick={() => clearPlaylist()}
+            onClick={handleClearClick}
             disabled={playlist.length === 0}
             sx={{
               appearance: 'none',
@@ -142,19 +173,23 @@ export const PlaylistDrawer = () => {
               fontSize: 12,
               fontWeight: 700,
               ...inkHold(2),
-              background: 'transparent',
-              color: alpha(PAPER, 0.8),
+              ...(confirmClear ? inkHoldOn(VERMILION) : {}),
+              background: confirmClear ? VERMILION : 'transparent',
+              color: confirmClear ? PAPER : alpha(PAPER, 0.8),
               transition: 'border-color 0ms, color 0ms, box-shadow 0ms',
               opacity: playlist.length === 0 ? 0.4 : 1,
               pointerEvents: playlist.length === 0 ? 'none' : 'auto',
-              '&:hover': { ...inkHoldOn(VERMILION), color: VERMILION },
+              '&:hover': {
+                ...inkHoldOn(VERMILION),
+                color: confirmClear ? PAPER : VERMILION,
+              },
               '&:focus-visible': {
                 outline: `2px solid ${VERMILION}`,
                 outlineOffset: '2px',
               },
             }}
           >
-            清空
+            {confirmClear ? '确认清空?' : '清空'}
           </Box>
 
           <Box sx={{ flex: 1 }} />
@@ -215,6 +250,7 @@ export const PlaylistDrawer = () => {
                 return (
                   <Box
                     key={`${index}:${item.url}`}
+                    ref={isActive ? activeRowRef : undefined}
                     role="button"
                     tabIndex={0}
                     aria-current={isActive ? 'true' : undefined}
@@ -224,10 +260,6 @@ export const PlaylistDrawer = () => {
                         e.preventDefault()
                         commands.playlistPlayAt(index)
                       }
-                    }}
-                    onContextMenu={(e: React.MouseEvent<HTMLDivElement>) => {
-                      e.preventDefault()
-                      handleRemoveItem(e, index)
                     }}
                     sx={{
                       appearance: 'none',
@@ -241,7 +273,7 @@ export const PlaylistDrawer = () => {
                       boxShadow: isActive
                         ? `inset 4px 0 0 ${VERMILION}`
                         : `inset 0 0 0 1px ${alpha(PAPER, 0.22)}`,
-                      padding: '9px 11px',
+                      padding: isActive ? '16px 11px 9px' : '9px 11px',
                       display: 'flex',
                       flexDirection: 'column',
                       gap: '7px',
@@ -266,9 +298,9 @@ export const PlaylistDrawer = () => {
                         rotate={-3}
                         sx={{
                           position: 'absolute',
-                          top: -10,
+                          top: -9,
                           left: 10,
-                          fontSize: 10,
+                          fontSize: 9,
                         }}
                       >
                         NOW PLAYING

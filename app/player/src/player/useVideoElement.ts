@@ -77,6 +77,12 @@ export const useVideoElement = (video: HTMLVideoElement | null): void => {
     video.addEventListener('error', onError)
     video.addEventListener('loadeddata', onLoadedData)
 
+    // Restore persisted volume/mute onto the <video> element before priming.
+    const persisted = usePlayerStore.getState().playbackSettings
+    const savedVolume = Math.max(0, Math.min(1, persisted.volume))
+    if (Number.isFinite(savedVolume)) video.volume = savedVolume
+    video.muted = Boolean(persisted.muted)
+
     // Prime the store with the element's current values.
     patch({
       playing: !video.paused && !video.ended,

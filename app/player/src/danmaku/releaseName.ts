@@ -281,6 +281,72 @@ const episodeTitleFrom = (base: string): string | null => {
   return title.length >= 2 ? title : null
 }
 
+/** Generic directory names that never identify an anime show. */
+const GENERIC_FOLDERS = new Set([
+  'video',
+  'videos',
+  'movie',
+  'movies',
+  'download',
+  'downloads',
+  'desktop',
+  'documents',
+  'anime',
+  'animes',
+  'bangumi',
+  'media',
+  'tv',
+  'series',
+  'shows',
+  'temp',
+  'tmp',
+  'new folder',
+  '视频',
+  '下载',
+  '桌面',
+  '番剧',
+  '动漫',
+  '动画',
+  '电影',
+  '剧集',
+  '新番',
+  '新建文件夹',
+])
+
+/**
+ * Immediate parent folder name of `filePath`, or null when the input has no
+ * directory part or the parent is a generic container folder (`Videos`,
+ * `Downloads`, `番剧`, a drive root, etc.).
+ */
+const parentFolderName = (filePath: string): string | null => {
+  const parts = filePath.split(/[\\/]+/).filter(Boolean)
+  if (parts.length < 2) return null
+  const parent = parts[parts.length - 2].trim()
+  if (!parent || /^[a-z]:$/i.test(parent) || parent.length < 2) return null
+  if (GENERIC_FOLDERS.has(parent.toLowerCase())) return null
+  return parent
+}
+
+/**
+ * Bare numeric episode filenames like `01`, `12`, `03v2`, `E05` that carry no
+ * show name — `MediaParser` intentionally ignores bare numbers so it never
+ * misreads years/resolutions in full titles, so handle the whole-name case here.
+ */
+const bareEpisodeNumber = (base: string): number => {
+  const trimmed = base.trim()
+  const match =
+    /^(?:(?:ep?|episode|ova|sp)\s*[-_. ]?)?0*(\d{1,4})(?:\s*v\d+)?$/i.exec(
+      trimmed
+    )
+  if (!match) return 0
+  const n = Number(match[1])
+  if (!Number.isInteger(n) || n <= 0) return 0
+  // Avoid treating a bare 4-digit year (2024) or resolution (1080) as an episode.
+  if (n >= 1900 && n <= 2099) return 0
+  if (n === 480 || n === 720 || n === 1080 || n === 2160) return 0
+  return n
+}
+
 /** Parse a release file path/name into everything the matcher needs. */
 export const parseReleaseName = (filePath: string): ReleaseInfo => {
   const base = basenameWithoutExt(filePath)
@@ -289,19 +355,51 @@ export const parseReleaseName = (filePath: string): ReleaseInfo => {
   })
   const { title, group } = stripGroups(parsed.searchTitle)
   const fallback = stripGroups(base).title
-  const resolvedTitle = title || fallback
-  const episode =
+  let resolvedTitle = title || fallback
+  let episode =
     parsed.episode && Number.isFinite(parsed.episode) ? parsed.episode : 0
+  if (episode === 0) {
+    episode = bareEpisodeNumber(base)
+  }
+
+  let season = extractSeasonHint(resolvedTitle) ?? extractSeasonHint(base)
+  let year = yearFrom(base)
+  let isMovie = MOVIE.test(base)
+  let titleCandidates = candidatesFor(resolvedTitle || base, base)
+
+  // When the file itself carries no show name (e.g. `葬送的芙莉莲\01.mp4` or
+  // `进击的巨人 第二季\EP05.mkv`), borrow the parent folder name so auto-match
+  // and picker prefill still know which anime this is.
+  const titleLacksShowName =
+    !resolvedTitle ||
+    /^(?:s\d{1,2})?(?:ep?|episode)?\s*\d{1,4}(?:v\d+)?$/i.test(resolvedTitle) ||
+    /^第\s*\d{1,4}\s*[集话話回]?$/.test(resolvedTitle)
+  if (titleLacksShowName) {
+    const parent = parentFolderName(filePath)
+    if (parent) {
+      const parentParsed = stripGroups(parent)
+      const parentTitle = parentParsed.title
+      if (parentTitle) {
+        resolvedTitle = parentTitle
+        if (season === null) {
+          season = extractSeasonHint(parentTitle) ?? extractSeasonHint(parent)
+        }
+        if (year === null) year = yearFrom(parent)
+        if (!isMovie) isMovie = MOVIE.test(parent)
+        titleCandidates = candidatesFor(parentTitle, parent)
+      }
+    }
+  }
 
   return {
     base,
     title: resolvedTitle,
-    titleCandidates: candidatesFor(resolvedTitle || base, base),
+    titleCandidates,
     episode,
     episodeTitle: episodeTitleFrom(base),
-    season: extractSeasonHint(resolvedTitle) ?? extractSeasonHint(base),
-    year: yearFrom(base),
-    isMovie: MOVIE.test(base),
+    season,
+    year,
+    isMovie,
     isBatch: BATCH.test(base),
     group,
   }

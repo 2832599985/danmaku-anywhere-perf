@@ -234,7 +234,9 @@ interface InkSliderProps {
   max: number
   step: number
   onChange: (value: number) => void
-  /** draw a центр-zero tick (offset sliders). */
+  /** Optional default value restored on double-click (and on readout click). */
+  defaultValue?: number
+  /** draw a center-zero tick (offset sliders). */
   centerTick?: boolean
   'aria-label'?: string
 }
@@ -249,6 +251,7 @@ export const InkSlider = ({
   max,
   step,
   onChange,
+  defaultValue,
   centerTick = false,
   'aria-label': ariaLabel,
 }: InkSliderProps) => {
@@ -273,6 +276,10 @@ export const InkSlider = ({
       aria-valuemax={max}
       aria-valuenow={value}
       tabIndex={0}
+      title={defaultValue !== undefined ? '双击重置为默认值' : undefined}
+      onDoubleClick={
+        defaultValue !== undefined ? () => onChange(defaultValue) : undefined
+      }
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId)
         commit(e.clientX, e.currentTarget)
@@ -365,43 +372,90 @@ export const InkLabeledSlider = ({
   en,
   display,
   ...slider
-}: InkLabeledSliderProps) => (
-  <Box sx={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-    <Stack direction="row" justifyContent="space-between" alignItems="baseline">
-      <Typography component="span" sx={{ fontSize: 12, fontWeight: 700 }}>
-        {zh}
-        {en && (
+}: InkLabeledSliderProps) => {
+  const canReset =
+    slider.defaultValue !== undefined &&
+    Math.abs(slider.value - slider.defaultValue) > 1e-6
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <Stack
+        direction="row"
+        justifyContent="space-between"
+        alignItems="baseline"
+      >
+        <Typography component="span" sx={{ fontSize: 12, fontWeight: 700 }}>
+          {zh}
+          {en && (
+            <Typography
+              component="span"
+              sx={{
+                fontFamily: MONO,
+                fontSize: 9,
+                color: alpha(PAPER, 0.4),
+                ml: '6px',
+                letterSpacing: '0.16em',
+                textTransform: 'uppercase',
+              }}
+            >
+              {en}
+            </Typography>
+          )}
+        </Typography>
+        {slider.defaultValue !== undefined ? (
+          <Box
+            component="button"
+            type="button"
+            disabled={!canReset}
+            title={canReset ? '点击重置为默认值' : undefined}
+            aria-label={canReset ? `重置${zh}为默认值` : undefined}
+            onClick={() => {
+              if (slider.defaultValue !== undefined) {
+                slider.onChange(slider.defaultValue)
+              }
+            }}
+            sx={{
+              appearance: 'none',
+              border: 0,
+              background: 'transparent',
+              padding: 0,
+              fontFamily: MONO,
+              fontSize: 14,
+              fontWeight: 700,
+              color: VERMILION,
+              fontVariantNumeric: 'tabular-nums',
+              cursor: canReset ? 'pointer' : 'default',
+              textDecoration: 'none',
+              '&:hover:not(:disabled)': {
+                textDecoration: 'underline',
+                textUnderlineOffset: '3px',
+              },
+              '&:focus-visible': {
+                outline: `2px solid ${VERMILION}`,
+                outlineOffset: '2px',
+              },
+            }}
+          >
+            {display}
+          </Box>
+        ) : (
           <Typography
             component="span"
             sx={{
               fontFamily: MONO,
-              fontSize: 9,
-              color: alpha(PAPER, 0.4),
-              ml: '6px',
-              letterSpacing: '0.16em',
-              textTransform: 'uppercase',
+              fontSize: 14,
+              fontWeight: 700,
+              color: VERMILION,
+              fontVariantNumeric: 'tabular-nums',
             }}
           >
-            {en}
+            {display}
           </Typography>
         )}
-      </Typography>
-      <Typography
-        component="span"
-        sx={{
-          fontFamily: MONO,
-          fontSize: 14,
-          fontWeight: 700,
-          color: VERMILION,
-          fontVariantNumeric: 'tabular-nums',
-        }}
-      >
-        {display}
-      </Typography>
-    </Stack>
-    <InkSlider aria-label={zh} {...slider} />
-  </Box>
-)
+      </Stack>
+      <InkSlider aria-label={zh} {...slider} />
+    </Box>
+  )
+}
 
 // ---------------------------------------------------------------------------
 
@@ -685,7 +739,7 @@ export const InkButton = ({
     whiteSpace: 'nowrap' as const,
     flex: fullWidth ? 1 : '0 0 auto',
     minWidth: 0,
-    ...(variant === 'primary' || danger
+    ...(variant === 'primary' && !disabled
       ? inkStampPressSx(3, VERMILION, {
           background: VERMILION,
           color: PAPER,
@@ -702,13 +756,19 @@ export const InkButton = ({
       {...rest}
       sx={{
         ...base,
-        border: danger ? `2px solid ${VERMILION}` : LINE_STRONG,
-        ...(variant === 'primary' || danger
+        border: danger
+          ? `2px solid ${disabled ? alpha(PAPER, 0.25) : VERMILION}`
+          : LINE_STRONG,
+        ...(variant === 'primary'
           ? { background: PAPER, color: INK }
           : {
               background: 'transparent',
-              color: danger ? VERMILION : PAPER,
-              '&:hover': danger
+              color: danger
+                ? disabled
+                  ? alpha(PAPER, 0.45)
+                  : VERMILION
+                : PAPER,
+              '&:hover:not(:disabled)': danger
                 ? { background: VERMILION, color: PAPER }
                 : { background: PAPER, color: INK },
             }),

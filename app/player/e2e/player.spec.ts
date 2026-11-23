@@ -378,6 +378,13 @@ test('local player: video, danmaku, keyboard controls, upscale + interpolation',
         )
         .toBeGreaterThan(0)
       await page.mouse.move(640, 400)
+      // Performance HUD is opt-in (hidden by default so watching stays clean).
+      await expect(page.getByText('CPU ms/帧', { exact: true })).toHaveCount(0)
+      await page.evaluate(() =>
+        (window as PlayerWindow).__player.store
+          .getState()
+          .updatePlaybackSettings({ showPerformanceHud: true })
+      )
       await expect(page.getByText('CPU ms/帧', { exact: true })).toBeVisible()
       await page.screenshot({
         path: test.info().outputPath('hud-cpu-timing.png'),

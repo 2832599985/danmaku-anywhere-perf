@@ -152,6 +152,18 @@ export class UpscaleController {
     return { interpolation: this.renderer.getInterpolationStats() }
   }
 
+  /** Active upscaled canvas when visible, or null when upscaling is off. */
+  getCanvas(): HTMLCanvasElement | null {
+    if (
+      !this.renderer ||
+      !this.canvas ||
+      this.canvas.style.visibility === 'hidden'
+    ) {
+      return null
+    }
+    return this.canvas
+  }
+
   constructor(
     video: HTMLVideoElement,
     container: HTMLElement,

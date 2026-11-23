@@ -1,5 +1,6 @@
 mod launch;
 mod remux;
+mod screenshot;
 mod source_bridge;
 mod stream;
 mod thumbs;
@@ -67,6 +68,8 @@ pub fn run() {
             thumbs::thumb_save,
             thumbs::thumb_load,
             thumbs::thumb_delete,
+            screenshot::screenshot_copy_clipboard,
+            screenshot::screenshot_save,
             launch::launch_files_take,
         ])
         // The hidden Bilibili/Tencent bridge windows (source_bridge) are still

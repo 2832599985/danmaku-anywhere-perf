@@ -19,7 +19,9 @@ export interface PlayerCommands {
   /** relative volume change; unmutes and shows a volume OSD. */
   changeVolume(delta: number): void
   toggleMute(): void
-  setPlaybackRate(rate: number): void
+  setPlaybackRate(rate: number, options?: { temporary?: boolean }): void
+  /** capture the clean video frame (no UI chrome) to clipboard (+ optional PNG save). */
+  takeScreenshot(): Promise<void>
   toggleFullscreen(): void
   /** enter/exit the always-on-top mini window (小窗, keyboard P). */
   toggleMiniPlayer(): Promise<void>

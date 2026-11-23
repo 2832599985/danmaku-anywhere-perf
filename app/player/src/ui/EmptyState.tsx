@@ -19,6 +19,7 @@ import {
   SERIF_JP,
   VERMILION,
 } from '@/theme/theme'
+import { CloseIcon } from './icons'
 import { formatTime } from './TimeDisplay'
 
 /**
@@ -154,6 +155,7 @@ export const EmptyState = () => {
   const commands = usePlayerCommands()
   const playlist = usePlayerStore((s) => s.playlist)
   const progress = usePlayerStore((s) => s.progress)
+  const clearProgress = usePlayerStore((s) => s.clearProgress)
   const recent = pickRecent(playlist, progress)
 
   return (
@@ -420,12 +422,13 @@ export const EmptyState = () => {
             sx={{
               fontFamily: MONO,
               fontSize: 11,
-              letterSpacing: '0.32em',
+              letterSpacing: '0.26em',
               color: alpha(PAPER, 0.4),
               fontWeight: 700,
             }}
           >
-            拖入文件亦可 · MP4 / MKV / WEBM · 同名 .xml / .json 自动挂载
+            拖入文件亦可 · MP4 / MKV / WEBM / FLV / TS / AVI ·
+            自动匹配弹幕与字幕
           </Typography>
 
           {/* Continue watching grid (3 cols, only if recent items exist). */}
@@ -488,15 +491,20 @@ export const EmptyState = () => {
                   return (
                     <Box
                       key={item.path}
-                      component="button"
-                      type="button"
+                      role="button"
+                      tabIndex={0}
                       onClick={() =>
                         item.path && commands.openVideoFromPath(item.path)
                       }
+                      onKeyDown={(e: React.KeyboardEvent) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          if (item.path) commands.openVideoFromPath(item.path)
+                        }
+                      }}
                       sx={{
-                        appearance: 'none',
-                        font: 'inherit',
-                        textAlign: 'inherit',
+                        position: 'relative',
+                        textAlign: 'left',
                         cursor: 'pointer',
                         display: 'flex',
                         '&:focus-visible': {
@@ -513,6 +521,10 @@ export const EmptyState = () => {
                           transform: 'translate(-2px, -2px)',
                           boxShadow: `4px 4px 0 ${VERMILION}`,
                         },
+                        '&:hover [data-remove-recent], &:focus-within [data-remove-recent]':
+                          {
+                            opacity: 1,
+                          },
                         '&:active': {
                           transform: 'translate(1px, 1px)',
                           boxShadow: `2px 2px 0 ${VERMILION}`,
@@ -522,6 +534,54 @@ export const EmptyState = () => {
                         },
                       }}
                     >
+                      {item.path && (
+                        <Box
+                          component="button"
+                          type="button"
+                          data-remove-recent
+                          aria-label={`移除继续观看 ${item.name}`}
+                          title="从继续观看移除"
+                          onClick={(e: React.MouseEvent) => {
+                            e.stopPropagation()
+                            if (!item.path) return
+                            clearProgress(item.path)
+                            void getPlatform()
+                              .deleteResumeThumb(item.path)
+                              .catch(() => undefined)
+                          }}
+                          sx={{
+                            appearance: 'none',
+                            position: 'absolute',
+                            top: 5,
+                            right: 5,
+                            zIndex: 2,
+                            width: 22,
+                            height: 22,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: `1px solid ${alpha(PAPER, 0.45)}`,
+                            background: alpha(INK, 0.82),
+                            color: PAPER,
+                            cursor: 'pointer',
+                            opacity: 0,
+                            transition:
+                              'opacity 120ms linear, background-color 0ms, color 0ms',
+                            '&:hover': {
+                              background: VERMILION,
+                              borderColor: VERMILION,
+                              color: PAPER,
+                            },
+                            '&:focus-visible': {
+                              opacity: 1,
+                              outline: `2px solid ${VERMILION}`,
+                              outlineOffset: '1px',
+                            },
+                          }}
+                        >
+                          <CloseIcon size={10} />
+                        </Box>
+                      )}
                       {item.path && (
                         <ResumeThumb
                           path={item.path}

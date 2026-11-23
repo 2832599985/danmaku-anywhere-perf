@@ -19,7 +19,6 @@ import {
   GOLD,
   GREEN,
   hardShadow,
-  hatchSx,
   INK,
   inkHold,
   inkHoldOn,
@@ -100,6 +99,7 @@ const seasonKey = (season: SourceSeason): string =>
 const OnlineTab = ({ onDone }: { onDone: () => void }) => {
   const prefill = usePlayerStore((s) => s.danmakuSearchPrefill)
   const dialogOpen = usePlayerStore((s) => s.danmakuDialogOpen)
+  const mediaKey = usePlayerStore((s) => s.media?.path ?? s.media?.url ?? '')
   const [keyword, setKeyword] = useState('')
   const [searching, setSearching] = useState(false)
   const [results, setResults] = useState<SourceSeason[]>([])
@@ -110,12 +110,39 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
   const [loadingSeason, setLoadingSeason] = useState<string | null>(null)
   const [fetchingId, setFetchingId] = useState<string | null>(null)
 
+  const inputRef = useRef<HTMLInputElement | null>(null)
   const searchingRef = useRef(false)
   // The prefill we have already acted on — the dialog stays mounted between
   // opens, so this is what stops a re-search storm on every re-render.
   const handledRef = useRef<string | null>(null)
+  const lastMediaRef = useRef(mediaKey)
   const episodesRef = useRef(episodes)
   episodesRef.current = episodes
+
+  // Clear stale search results from a previous video when switching media.
+  useEffect(() => {
+    if (lastMediaRef.current === mediaKey) return
+    lastMediaRef.current = mediaKey
+    handledRef.current = null
+    setKeyword('')
+    setResults([])
+    setSearched(false)
+    setError(null)
+    setExpanded(null)
+  }, [mediaKey])
+
+  // Auto-focus (and select any prefilled keyword) whenever the dialog opens so
+  // the user can immediately type a show name and press Enter.
+  useEffect(() => {
+    if (!dialogOpen) return
+    const timer = window.setTimeout(() => {
+      const el = inputRef.current
+      if (!el) return
+      el.focus()
+      if (el.value) el.select()
+    }, 30)
+    return () => window.clearTimeout(timer)
+  }, [dialogOpen, prefill])
 
   const loadEpisodes = useCallback(async (season: SourceSeason) => {
     const key = seasonKey(season)
@@ -162,15 +189,23 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
   )
 
   // The automatic matcher hands us a keyword + the episode it wanted; open
-  // pre-searched so the user only has to click the right episode.
+  // pre-searched so the user only has to click the right episode. When no
+  // keyword could be parsed, clear stale results so the user gets a clean box.
   useEffect(() => {
     if (!dialogOpen || !prefill) return
-    const key = `${prefill.keyword}|${prefill.targetEpisode ?? 0}`
+    const key = `${mediaKey}|${prefill.keyword}|${prefill.targetEpisode ?? 0}|${prefill.note ?? ''}`
     if (handledRef.current === key) return
     handledRef.current = key
     setKeyword(prefill.keyword)
-    void runSearch(prefill.keyword)
-  }, [dialogOpen, prefill, runSearch])
+    if (prefill.keyword.trim()) {
+      void runSearch(prefill.keyword)
+    } else {
+      setResults([])
+      setSearched(false)
+      setError(null)
+      setExpanded(null)
+    }
+  }, [dialogOpen, prefill, mediaKey, runSearch])
 
   const handlePickEpisode = async (season: SourceSeason, ep: SourceEpisode) => {
     if (fetchingId !== null) return
@@ -280,6 +315,7 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
 
           <TextField
             fullWidth
+            inputRef={inputRef}
             placeholder="搜索番剧 / Search anime…"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
@@ -302,19 +338,6 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
               },
             }}
           />
-
-          {keyword && !searching && (
-            <Box
-              sx={{
-                display: 'inline-block',
-                width: 2,
-                height: 18,
-                background: VERMILION,
-                animation: 'ink-blink 1s steps(1) infinite',
-                flexShrink: 0,
-              }}
-            />
-          )}
         </Box>
 
         <Box
@@ -410,69 +433,52 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                   </Box>
                 )}
 
-                {/* Cover + title row */}
-                <Stack direction="row" gap={1}>
-                  <Box
+                {/* Title + metadata row */}
+                <Stack sx={{ flex: 1, minWidth: 0, gap: 0.5 }}>
+                  <Typography
                     sx={{
-                      ...hatchSx(),
-                      width: 44,
-                      height: 58,
-                      border: LINE_SUBTLE,
-                      flexShrink: 0,
+                      fontSize: 15,
+                      fontWeight: 900,
+                      color: PAPER,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
                     }}
-                  />
+                  >
+                    {season.title}
+                  </Typography>
 
-                  <Stack sx={{ flex: 1, minWidth: 0, gap: 0.5 }}>
+                  <Stack
+                    direction="row"
+                    alignItems="center"
+                    gap={1}
+                    sx={{ flexWrap: 'wrap' }}
+                  >
                     <Typography
                       sx={{
-                        fontSize: 15,
-                        fontWeight: 900,
-                        color: PAPER,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
+                        fontFamily: MONO,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        color: GOLD,
+                        border: `1px solid ${alpha(GOLD, 0.7)}`,
+                        padding: '0 4px',
                       }}
                     >
-                      {season.title}
+                      {SOURCE_LABELS[season.source]}
                     </Typography>
-
-                    <Stack direction="row" gap={1} sx={{ flexWrap: 'wrap' }}>
-                      <Typography
-                        sx={{
-                          fontFamily: MONO,
-                          fontSize: 9,
-                          fontWeight: 700,
-                          letterSpacing: '0.08em',
-                          color: GOLD,
-                          border: `1px solid ${alpha(GOLD, 0.7)}`,
-                          padding: '0 4px',
-                        }}
-                      >
-                        {SOURCE_LABELS[season.source]}
-                      </Typography>
-                      <Typography
-                        sx={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: alpha(PAPER, 0.6),
-                        }}
-                      >
-                        {season.typeDescription || season.type}
-                      </Typography>
-                      {Number.isFinite(season.year) && (
-                        <Typography
-                          sx={{
-                            fontFamily: MONO,
-                            fontSize: 10,
-                            fontWeight: 700,
-                            color: alpha(PAPER, 0.5),
-                          }}
-                        >
-                          {season.year}
-                        </Typography>
-                      )}
+                    <Typography
+                      sx={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: alpha(PAPER, 0.6),
+                      }}
+                    >
+                      {season.typeDescription || season.type}
+                    </Typography>
+                    {Number.isFinite(season.year) && (
                       <Typography
                         sx={{
                           fontFamily: MONO,
@@ -481,9 +487,19 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                           color: alpha(PAPER, 0.5),
                         }}
                       >
-                        {season.episodeCount} 集
+                        {season.year}
                       </Typography>
-                    </Stack>
+                    )}
+                    <Typography
+                      sx={{
+                        fontFamily: MONO,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: alpha(PAPER, 0.5),
+                      }}
+                    >
+                      {season.episodeCount} 集
+                    </Typography>
                   </Stack>
                 </Stack>
 
@@ -634,20 +650,12 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                   },
                 }}
               >
-                <Box
-                  sx={{
-                    ...hatchSx(),
-                    width: 36,
-                    height: 48,
-                    border: LINE_SUBTLE,
-                    flexShrink: 0,
-                  }}
-                />
-
-                <Stack sx={{ flex: 1, minWidth: 0, gap: 0.25 }}>
+                <Stack
+                  sx={{ flex: 1, minWidth: 0, gap: 0.5, textAlign: 'left' }}
+                >
                   <Typography
                     sx={{
-                      fontSize: 12,
+                      fontSize: 13,
                       fontWeight: 700,
                       color: PAPER,
                       overflow: 'hidden',
@@ -657,18 +665,36 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                   >
                     {season.title}
                   </Typography>
-                  <Typography
-                    sx={{
-                      fontFamily: MONO,
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: alpha(PAPER, 0.5),
-                    }}
-                  >
-                    {season.typeDescription || season.type}
-                    {' · '}
-                    {season.episodeCount} 集
-                  </Typography>
+                  <Stack direction="row" alignItems="center" gap={0.75}>
+                    <Typography
+                      component="span"
+                      sx={{
+                        fontFamily: MONO,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        color: GOLD,
+                        border: `1px solid ${alpha(GOLD, 0.7)}`,
+                        padding: '0 4px',
+                      }}
+                    >
+                      {SOURCE_LABELS[season.source]}
+                    </Typography>
+                    <Typography
+                      component="span"
+                      sx={{
+                        fontFamily: MONO,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: alpha(PAPER, 0.5),
+                      }}
+                    >
+                      {season.typeDescription || season.type}
+                      {Number.isFinite(season.year) ? ` · ${season.year}` : ''}
+                      {' · '}
+                      {season.episodeCount} 集
+                    </Typography>
+                  </Stack>
                 </Stack>
 
                 <Typography

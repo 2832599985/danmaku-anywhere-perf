@@ -223,3 +223,10 @@ export const CompareIcon = (props: IconProps) => (
     />
   </InkSvg>
 )
+
+export const CameraIcon = (props: IconProps) => (
+  <InkSvg {...props}>
+    <path d={'M3 7h4l2-2h6l2 2h4v12H3Z'} />
+    <rect x={9} y={10} width={6} height={6} />
+  </InkSvg>
+)

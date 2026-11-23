@@ -1,6 +1,7 @@
 import { Box, Stack } from '@mui/material'
 import { getPlatform } from '@/platform'
 import { usePlayerStore } from '@/store/playerStore'
+import { DEFAULT_SUBTITLE } from '@/store/settings'
 import { LINE_SUBTLE } from '@/theme/theme'
 import { AiSubtitleSettings } from './AiSubtitleSettings'
 import { InkLabel, InkLabeledSlider, InkSection, InkSwitch } from './ink'
@@ -40,6 +41,7 @@ export const SubtitleSettings = () => {
           max={64}
           step={2}
           value={subtitle.fontSize}
+          defaultValue={DEFAULT_SUBTITLE.fontSize}
           onChange={(value) => update({ fontSize: value })}
         />
         <InkLabeledSlider
@@ -50,6 +52,7 @@ export const SubtitleSettings = () => {
           max={30}
           step={1}
           value={subtitle.bottom}
+          defaultValue={DEFAULT_SUBTITLE.bottom}
           onChange={(value) => update({ bottom: value })}
         />
         <InkLabeledSlider
@@ -60,6 +63,7 @@ export const SubtitleSettings = () => {
           max={1}
           step={0.05}
           value={subtitle.opacity}
+          defaultValue={DEFAULT_SUBTITLE.opacity}
           onChange={(value) => update({ opacity: value })}
         />
         <InkLabeledSlider
@@ -70,6 +74,7 @@ export const SubtitleSettings = () => {
           max={10000}
           step={100}
           value={subtitle.offset}
+          defaultValue={DEFAULT_SUBTITLE.offset}
           centerTick
           onChange={(value) => update({ offset: value })}
         />
