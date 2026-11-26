@@ -93,5 +93,28 @@ export function findBestMatchingSeason<T extends { title: string }>(
 
   if (containing.length > 0) return containing[0]
 
+  // 3. When `keyword` itself carries a season marker (e.g. "咒术回战 第二季")
+  // while provider titles spell the season differently ("第2季" / "Season 2")
+  // or insert an arc subtitle ("咒术回战 怀玉·玉折 第二季"), match the stripped
+  // base title together with the season number.
+  const effectiveHint = seasonHint ?? extractSeasonHint(keyword)
+  if (effectiveHint && effectiveHint > 0) {
+    let stripped = keyword
+    for (const { pattern } of seasonPatterns) {
+      stripped = stripped.replace(pattern, '')
+    }
+    const normalizedBase = normalizeTitle(stripped)
+    if (normalizedBase.length > 0 && normalizedBase !== normalizedKeyword) {
+      const baseMatched = seasons
+        .filter(
+          (s) =>
+            normalizeTitle(s.title).includes(normalizedBase) &&
+            extractSeasonHint(s.title) === effectiveHint
+        )
+        .sort((a, b) => a.title.length - b.title.length)
+      if (baseMatched.length > 0) return baseMatched[0]
+    }
+  }
+
   return null
 }

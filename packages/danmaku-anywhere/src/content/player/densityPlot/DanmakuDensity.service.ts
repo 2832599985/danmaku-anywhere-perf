@@ -40,6 +40,8 @@ export class DanmakuDensityService {
   private chart: DanmakuDensityChart
   private enabled = false
   private autoDensityEnabled = false
+  private pendingAutoDensityRefilter = false
+  private metadataWaitRegistered = false
 
   private data: DensityPoint[] = []
   private chartHeight = 14
@@ -57,6 +59,7 @@ export class DanmakuDensityService {
   private tooltipEl: HTMLElement | null = null
 
   private readonly boundHandleTimeUpdate: (event: Event) => void
+  private readonly boundHandleMetadataForFilter: () => void
   private readonly boundHandleSeeked: () => void
   private readonly boundHandleMouseMove: (event: MouseEvent) => void
   private readonly boundHandleResize: () => void
@@ -71,6 +74,7 @@ export class DanmakuDensityService {
     this.logger = logger.sub('[DanmakuDensityService]')
     this.perfTimer = new PerfTimer(this.logger, 'densityPlot', false)
     this.boundHandleTimeUpdate = this.handleTimeUpdate.bind(this)
+    this.boundHandleMetadataForFilter = this.handleMetadataForFilter.bind(this)
     this.boundHandleSeeked = this.handleSeeked.bind(this)
     this.boundHandleMouseMove = this.handleMouseMove.bind(this)
     this.boundHandleResize = debounce(this.handleResize.bind(this), 100)
@@ -153,6 +157,8 @@ export class DanmakuDensityService {
     this.comments = []
     this.data = []
     this.highlights = []
+    this.pendingAutoDensityRefilter = false
+    this.removeMetadataWaitListener()
     this.chart.updateData([], 0)
     this.chart.updateSkipRegions([])
   }
@@ -228,20 +234,68 @@ export class DanmakuDensityService {
     this.chart.onSeek(null)
   }
 
+  private ensureMetadataWaitListener() {
+    if (this.metadataWaitRegistered) return
+    this.metadataWaitRegistered = true
+    this.videoEventService.addVideoEventListener(
+      'loadedmetadata',
+      this.boundHandleMetadataForFilter
+    )
+    this.videoEventService.addVideoEventListener(
+      'durationchange',
+      this.boundHandleMetadataForFilter
+    )
+  }
+
+  private removeMetadataWaitListener() {
+    if (!this.metadataWaitRegistered) return
+    this.metadataWaitRegistered = false
+    this.videoEventService.removeVideoEventListener(
+      'loadedmetadata',
+      this.boundHandleMetadataForFilter
+    )
+    this.videoEventService.removeVideoEventListener(
+      'durationchange',
+      this.boundHandleMetadataForFilter
+    )
+  }
+
+  private handleMetadataForFilter() {
+    if (!this.pendingAutoDensityRefilter) {
+      this.removeMetadataWaitListener()
+      return
+    }
+    const video = this.currentVideo ?? this.videoEventService.getVideoElement()
+    const duration = video?.duration ?? 0
+    if (Number.isFinite(duration) && duration > 0) {
+      this.applyDensityFilter()
+    }
+  }
+
   private applyDensityFilter() {
     if (!this.densityFilterCallback) return
 
     if (!this.autoDensityEnabled) {
+      this.pendingAutoDensityRefilter = false
+      this.removeMetadataWaitListener()
       // Pass through all comments when disabled
       this.densityFilterCallback(this.comments)
       return
     }
 
-    const duration = this.currentVideo?.duration ?? 0
+    const video = this.currentVideo ?? this.videoEventService.getVideoElement()
+    const duration = video?.duration ?? 0
     if (!Number.isFinite(duration) || duration <= 0) {
+      if (this.comments.length > 0) {
+        this.pendingAutoDensityRefilter = true
+        this.ensureMetadataWaitListener()
+      }
       this.densityFilterCallback(this.comments)
       return
     }
+
+    this.pendingAutoDensityRefilter = false
+    this.removeMetadataWaitListener()
 
     const binSize = getAdaptiveBinSize(duration)
     const filtered = filterByAdaptiveDensity(this.comments, duration, binSize)
@@ -342,6 +396,13 @@ export class DanmakuDensityService {
       this.currentVideo = newVideo
       this.setupVideoResizeObserver(newVideo)
     }
+    if (
+      this.pendingAutoDensityRefilter &&
+      Number.isFinite(newVideo.duration) &&
+      newVideo.duration > 0
+    ) {
+      this.applyDensityFilter()
+    }
     if (this.data.length === 0) {
       this.tryComputeAndRender()
     } else {
@@ -393,6 +454,7 @@ export class DanmakuDensityService {
       clearTimeout(this.showChartTimeout)
       this.showChartTimeout = null
     }
+    this.removeMetadataWaitListener()
     this.removeEventListeners()
     this.removeChartCallbacks()
     this.removeTooltip()

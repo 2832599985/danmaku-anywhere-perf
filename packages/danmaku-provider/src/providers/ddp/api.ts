@@ -303,11 +303,17 @@ export const commentGetCommentManualWithRelated = async (
 
           if (additionalCommentsResult.success) {
             additionalCommentsResult.data.forEach((comment) => {
-              // if the shift is not 0, we need to adjust the time of the comments
+              // if the shift is not 0, we need to adjust the time of the comments.
+              // Skip individual comments with unsupported modes (e.g. Bilibili mode 7/8)
+              // instead of aborting the entire related-streams loop.
               if (entry.shift !== 0) {
-                const options = parseCommentEntityP(comment.p)
-                options.time = Math.max(0, options.time + entry.shift)
-                comment.p = commentOptionsToString(options)
+                try {
+                  const options = parseCommentEntityP(comment.p)
+                  options.time = Math.max(0, options.time + entry.shift)
+                  comment.p = commentOptionsToString(options)
+                } catch {
+                  return
+                }
               }
 
               const key = keyOf(comment)

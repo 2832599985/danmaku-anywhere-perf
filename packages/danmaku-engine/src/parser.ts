@@ -104,8 +104,7 @@ const REGEX_CACHE_TTL_MS = 5 * 60 * 1000
 
 let lastCacheCleanup = Date.now()
 
-const cleanRegexCache = () => {
-  const now = Date.now()
+const cleanRegexCache = (now: number) => {
   if (now - lastCacheCleanup < REGEX_CACHE_TTL_MS) return
   lastCacheCleanup = now
   for (const [key, entry] of regexCache) {
@@ -117,15 +116,17 @@ const cleanRegexCache = () => {
 
 // returns true if the comment should be filtered out
 export const applyFilter = (comment: string, filters: DanmakuFilter[]) => {
-  cleanRegexCache()
+  if (filters.length === 0) return false
+  const now = Date.now()
+  cleanRegexCache(now)
   return filters.some(({ type, value, enabled }) => {
-    if (!enabled) return false
+    // An enabled filter whose input is still empty must never match everything.
+    if (!enabled || value === '') return false
 
     switch (type) {
       case 'text':
         return comment.includes(value)
       case 'regex': {
-        const now = Date.now()
         let entry = regexCache.get(value)
         if (!entry) {
           try {
@@ -145,6 +146,16 @@ export const applyFilter = (comment: string, filters: DanmakuFilter[]) => {
 }
 
 const WHITE_COLOR = '#ffffff'
+const blacklistSetCache = new WeakMap<readonly string[], Set<string>>()
+
+const getNormalizedBlacklist = (blacklist: readonly string[]): Set<string> => {
+  let cached = blacklistSetCache.get(blacklist)
+  if (!cached || cached.size !== blacklist.length) {
+    cached = new Set(blacklist.map((c) => c.toLowerCase()))
+    blacklistSetCache.set(blacklist, cached)
+  }
+  return cached
+}
 
 export const applyModeFilter = (
   mode: ParsedComment['mode'],
@@ -158,10 +169,10 @@ export const applyColorFilter = (
   colorFilter: DanmakuColorFilter
 ): boolean => {
   if (!colorFilter.enabled) return false
-  if (colorFilter.onlyWhite && color.toLowerCase() !== WHITE_COLOR) return true
+  const lowerColor = color.toLowerCase()
+  if (colorFilter.onlyWhite && lowerColor !== WHITE_COLOR) return true
   if (colorFilter.blacklist.length > 0) {
-    const lowerColor = color.toLowerCase()
-    return colorFilter.blacklist.some((c) => c.toLowerCase() === lowerColor)
+    return getNormalizedBlacklist(colorFilter.blacklist).has(lowerColor)
   }
   return false
 }

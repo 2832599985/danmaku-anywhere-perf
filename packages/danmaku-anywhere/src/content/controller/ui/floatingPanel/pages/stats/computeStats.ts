@@ -1,5 +1,4 @@
 import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
-import { parseCommentEntityP } from '@danmaku-anywhere/danmaku-converter'
 
 export interface DanmakuStats {
   totalCount: number
@@ -14,11 +13,13 @@ export interface DanmakuStats {
   topKeywords: { word: string; count: number }[]
 }
 
-const MODE_LABELS: Record<string, string> = {
-  rtl: 'RTL',
-  ltr: 'LTR',
-  top: 'Top',
-  bottom: 'Bottom',
+const NUMERIC_MODE_LABELS: Record<number, string> = {
+  1: 'RTL',
+  2: 'RTL',
+  3: 'RTL',
+  4: 'Bottom',
+  5: 'Top',
+  6: 'LTR',
 }
 
 /** Minimum word length to consider as a keyword */
@@ -189,19 +190,19 @@ export function computeStats(comments: CommentEntity[]): DanmakuStats {
   const bucketMap = new Map<number, number>()
 
   for (const c of comments) {
-    try {
-      const parsed = parseCommentEntityP(c.p)
+    const firstComma = c.p.indexOf(',')
+    if (firstComma <= 0) continue
+    const time = Number.parseFloat(c.p.slice(0, firstComma))
+    const modeNum = Number.parseInt(c.p.slice(firstComma + 1), 10)
+    const label = NUMERIC_MODE_LABELS[modeNum]
+    if (!Number.isFinite(time) || !label) continue
 
-      // Mode distribution
-      const label = MODE_LABELS[parsed.mode] ?? parsed.mode
-      modeCounts.set(label, (modeCounts.get(label) ?? 0) + 1)
+    // Mode distribution
+    modeCounts.set(label, (modeCounts.get(label) ?? 0) + 1)
 
-      // Density buckets
-      const bucket = Math.floor(parsed.time / BUCKET_SIZE) * BUCKET_SIZE
-      bucketMap.set(bucket, (bucketMap.get(bucket) ?? 0) + 1)
-    } catch {
-      // Skip malformed entries
-    }
+    // Density buckets
+    const bucket = Math.floor(time / BUCKET_SIZE) * BUCKET_SIZE
+    bucketMap.set(bucket, (bucketMap.get(bucket) ?? 0) + 1)
   }
 
   // Sort density buckets by time

@@ -145,4 +145,18 @@ describe('findBestMatchingSeason', () => {
     const result = findBestMatchingSeason(englishSeasons, 'Attack on Titan', 3)
     expect(result?.title).toBe('Attack on Titan Season 3')
   })
+
+  it('matches across different season notations or arc subtitles when keyword includes season marker', () => {
+    const providerSeasons = [
+      { title: '咒术回战' },
+      { title: '咒术回战 怀玉·玉折 / 涩谷事变 第二季' },
+      { title: '进击的巨人 第3季' },
+    ]
+    expect(
+      findBestMatchingSeason(providerSeasons, '咒术回战 第二季', 2)?.title
+    ).toBe('咒术回战 怀玉·玉折 / 涩谷事变 第二季')
+    expect(
+      findBestMatchingSeason(providerSeasons, '进击的巨人 第三季', 3)?.title
+    ).toBe('进击的巨人 第3季')
+  })
 })
