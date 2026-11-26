@@ -6,6 +6,11 @@ interface RoomState {
   episode: string
 }
 
+interface UserAttachment {
+  userId: string
+  userName: string
+}
+
 interface WsMessage {
   type: 'danmaku' | 'sync' | 'join' | 'leave' | 'pause' | 'play' | 'seek'
   data?: unknown
@@ -13,8 +18,17 @@ interface WsMessage {
   userName?: string
 }
 
+const ROOM_STATE_KEY = 'room_state'
+
 export class WatchRoom extends DurableObject {
   private state: RoomState | null = null
+
+  private async getRoomState(): Promise<RoomState | null> {
+    if (this.state !== null) return this.state
+    const stored = await this.ctx.storage.get<RoomState>(ROOM_STATE_KEY)
+    this.state = stored ?? null
+    return this.state
+  }
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
@@ -23,25 +37,37 @@ export class WatchRoom extends DurableObject {
       const pair = new WebSocketPair()
       const [client, server] = Object.values(pair)
 
-      this.ctx.acceptWebSocket(server)
-
       const userId = url.searchParams.get('userId') ?? 'anonymous'
       const userName = url.searchParams.get('userName') ?? 'Anonymous'
+
+      this.ctx.acceptWebSocket(server)
+      server.serializeAttachment({ userId, userName } satisfies UserAttachment)
+
       this.broadcast({ type: 'join', userId, userName }, server)
 
       return new Response(null, { status: 101, webSocket: client })
     }
 
     if (url.pathname === '/info') {
+      const state = await this.getRoomState()
       return Response.json({
         memberCount: this.ctx.getWebSockets().length,
-        state: this.state,
+        state,
       })
     }
 
     if (url.pathname === '/init' && request.method === 'POST') {
-      this.state = (await request.json()) as RoomState
-      return Response.json({ success: true })
+      try {
+        const nextState = (await request.json()) as RoomState
+        this.state = nextState
+        await this.ctx.storage.put(ROOM_STATE_KEY, nextState)
+        return Response.json({ success: true })
+      } catch {
+        return Response.json(
+          { success: false, message: 'Invalid JSON body' },
+          { status: 400 }
+        )
+      }
     }
 
     return new Response('Not found', { status: 404 })
@@ -58,7 +84,19 @@ export class WatchRoom extends DurableObject {
   }
 
   async webSocketClose(ws: WebSocket) {
-    this.broadcast({ type: 'leave' }, ws)
+    const attachment = ws.deserializeAttachment() as UserAttachment | null
+    this.broadcast(
+      {
+        type: 'leave',
+        userId: attachment?.userId,
+        userName: attachment?.userName,
+      },
+      ws
+    )
+  }
+
+  async webSocketError(ws: WebSocket) {
+    await this.webSocketClose(ws)
   }
 
   private broadcast(msg: WsMessage, exclude?: WebSocket) {
