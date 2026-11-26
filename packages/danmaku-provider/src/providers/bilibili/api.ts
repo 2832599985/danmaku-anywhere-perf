@@ -177,7 +177,7 @@ export async function* getDanmakuProtoSegment(
     const url = `${BILIBILI_API_URL_ROOT}/x/v2/dm/web/seg.so?${params}`
 
     try {
-      const response = await fetch(url)
+      const response = await fetch(url, BILIBILI_FETCH_OPTIONS)
 
       if (response.status === 304) {
         return null

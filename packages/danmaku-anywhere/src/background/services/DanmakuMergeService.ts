@@ -4,6 +4,10 @@ import type {
   Season,
   WithSeason,
 } from '@danmaku-anywhere/danmaku-converter'
+import {
+  extractSeasonHint,
+  findBestMatchingSeason,
+} from '@danmaku-anywhere/media-parser'
 import { inject, injectable } from 'inversify'
 import { SeasonService } from '@/background/services/persistence/SeasonService'
 import type { DanmakuSourceType } from '@/common/danmaku/enums'
@@ -100,6 +104,7 @@ export class DanmakuMergeService {
     this.logger.debug(
       `Searching ${otherProviders.length} other providers for: ${title} ep${episodeNumber}`
     )
+    const seasonHint = extractSeasonHint(title)
 
     // Search and resolve episode from each other provider
     const results = await Promise.allSettled(
@@ -120,17 +125,32 @@ export class DanmakuMergeService {
           return null
         }
 
-        // Try to find best matching season (exact title match preferred)
+        // Season-aware selection aligned with SearchMatchingStrategy so sequels
+        // never silently fall back to Season 1 (`foundSeasons[0]`).
         let bestSeason: Season | undefined
-        for (const season of foundSeasons) {
-          if (season.title === title) {
-            bestSeason = season as Season
-            break
+        if (foundSeasons.length === 1) {
+          bestSeason = foundSeasons[0] as Season
+        } else {
+          for (const season of foundSeasons) {
+            if (season.title === title) {
+              bestSeason = season as Season
+              break
+            }
+          }
+          if (!bestSeason) {
+            bestSeason =
+              findBestMatchingSeason(
+                foundSeasons as Season[],
+                title,
+                seasonHint
+              ) ?? undefined
           }
         }
         if (!bestSeason) {
-          // Fallback: take the first result
-          bestSeason = foundSeasons[0] as Season
+          this.logger.debug(
+            `No unambiguous matching season in provider ${providerConfig.name} for: ${title}`
+          )
+          return null
         }
 
         // Resolve the specific episode

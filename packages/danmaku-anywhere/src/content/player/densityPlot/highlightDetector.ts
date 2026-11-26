@@ -15,6 +15,20 @@ export interface HighlightMoment {
   topComments: string[]
 }
 
+const lowerBoundTimed = (
+  items: ReadonlyArray<{ time: number; text: string }>,
+  target: number
+): number => {
+  let lo = 0
+  let hi = items.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (items[mid].time < target) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
 /**
  * Detect highlight moments from density data using peak detection.
  *
@@ -22,7 +36,7 @@ export interface HighlightMoment {
  * 1. Compute mean and stddev of density values
  * 2. Find local maxima above threshold (mean + 1.5 * stddev)
  * 3. Merge adjacent peaks within 10s
- * 4. Extract top comments from each peak region
+ * 4. Extract top comments from each peak region via binary search
  * 5. Return top N highlights sorted by density
  */
 export function detectHighlights(
@@ -88,25 +102,32 @@ export function detectHighlights(
   // Estimate bin size from data
   const binSize = data.length >= 2 ? data[1].time - data[0].time : 10
 
+  // Pre-parse and sort comment timestamps once so each peak lookup is O(log N)
+  // rather than re-scanning and re-parsing all comments per peak.
+  const timedComments: Array<{ time: number; text: string }> = []
+  for (const c of comments) {
+    const t = parseCommentEntityTime(c.p)
+    if (Number.isFinite(t)) {
+      timedComments.push({ time: t, text: c.m })
+    }
+  }
+  timedComments.sort((a, b) => a.time - b.time)
+
   // Extract top comments for each highlight region
   const highlights: HighlightMoment[] = merged.map((region) => {
     const regionStart = region.startTime - binSize
     const regionEnd = region.endTime + binSize
 
-    // Collect comments in this time range
-    const regionComments: string[] = []
-    for (const c of comments) {
-      const t = parseCommentEntityTime(c.p)
-      if (t >= regionStart && t <= regionEnd) {
-        regionComments.push(c.m)
-      }
-    }
-
-    // Find most common comments (simple frequency count)
     const freq = new Map<string, number>()
-    for (const text of regionComments) {
+    for (
+      let i = lowerBoundTimed(timedComments, regionStart);
+      i < timedComments.length && timedComments[i].time <= regionEnd;
+      i++
+    ) {
+      const text = timedComments[i].text
       freq.set(text, (freq.get(text) ?? 0) + 1)
     }
+
     const topComments = [...freq.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3)
@@ -128,10 +149,10 @@ export function detectHighlights(
 }
 
 /**
- * Format seconds to mm:ss string
+ * Format seconds to mm:ss display string.
  */
 export function formatTimestamp(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.floor(seconds % 60)
+  return `${mins}:${secs.toString().padStart(2, '0')}`
 }

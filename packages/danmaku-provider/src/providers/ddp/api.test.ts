@@ -139,6 +139,65 @@ describe('DanDanPlay API', () => {
       const cids = result.data.map((c) => c.cid).sort()
       expect(cids).toEqual([1, 2, 3])
     })
+
+    it('should skip unsupported comment modes during non-zero shift without dropping remaining related streams', async () => {
+      const makeRes = (data: unknown) =>
+        ({
+          json: vi.fn().mockResolvedValue(data),
+          text: vi.fn().mockResolvedValue(data),
+          arrayBuffer: vi.fn().mockResolvedValue(data),
+          status: 200,
+          headers: new Map(),
+          clone() {
+            return this
+          },
+        }) as any
+
+      vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(
+          makeRes({
+            count: 1,
+            comments: [{ cid: 1, p: '5.00,1,16777215,u1', m: 'base' }],
+          })
+        )
+        .mockResolvedValueOnce(
+          makeRes({
+            errorCode: 0,
+            errorMessage: '',
+            success: true,
+            relateds: [
+              { url: 'https://example.com/ext1', shift: 2 },
+              { url: 'https://example.com/ext2', shift: 3 },
+            ],
+          })
+        )
+        .mockResolvedValueOnce(
+          makeRes({
+            count: 2,
+            comments: [
+              { cid: 2, p: '10.00,7,16777215,u2', m: 'advanced mode 7' },
+              { cid: 3, p: '10.00,1,16777215,u3', m: 'valid shifted 1' },
+            ],
+          })
+        )
+        .mockResolvedValueOnce(
+          makeRes({
+            count: 1,
+            comments: [
+              { cid: 4, p: '20.00,1,16777215,u4', m: 'valid shifted 2' },
+            ],
+          })
+        )
+
+      const result = await commentGetCommentManualWithRelated(1, {
+        withRelated: true,
+      })
+      expect(result.success).toBe(true)
+      if (!result.success) return
+      expect(result.data.map((c) => c.cid)).toEqual([1, 3, 4])
+      expect(result.data[1].p.startsWith('12.00,')).toBe(true)
+      expect(result.data[2].p.startsWith('23.00,')).toBe(true)
+    })
   })
 
   describe('getBangumiAnime', () => {
