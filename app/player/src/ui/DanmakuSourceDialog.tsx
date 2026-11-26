@@ -1,7 +1,11 @@
 import { Box, Dialog, Stack, TextField, Typography } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { chooseSeason, episodeFromFilename } from '@/danmaku/autoMatch'
+import {
+  chooseSeason,
+  episodeFromFilename,
+  resolveEpisodeTarget,
+} from '@/danmaku/autoMatch'
 import { learnRule } from '@/danmaku/filenameRules'
 import {
   adapterFor,
@@ -226,8 +230,18 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
         // Learn the LOCAL episode number from the file name, not the source's
         // number: sequels are often numbered absolutely there (S2E11 = 35), and
         // a rule looking for `35` in `Show - 11` could never fire again.
-        const localEpisode =
+        const parsedEpisode =
           episodeFromFilename(path) || prefill?.targetEpisode || 0
+        const pickedEpisode = Number(ep.episodeNumber)
+        // When `parseReleaseName` returned 0 (custom naming like `[Group] Show [10]`),
+        // try the picked episode number — `learnRule` only succeeds if that
+        // exact integer appears as a standalone candidate digit run in `path`.
+        const localEpisode =
+          parsedEpisode > 0
+            ? parsedEpisode
+            : Number.isInteger(pickedEpisode) && pickedEpisode > 0
+              ? pickedEpisode
+              : 0
         const rule = localEpisode
           ? learnRule({
               filePath: path,
@@ -510,89 +524,97 @@ const OnlineTab = ({ onDone }: { onDone: () => void }) => {
                   </Stack>
                 )}
 
-                {!loading && list && (
-                  <Box
-                    sx={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(4, 1fr)',
-                      gap: '6px',
-                    }}
-                  >
-                    {list.map((ep) => {
-                      const isTarget =
-                        target > 0 &&
-                        String(ep.episodeNumber) === String(target)
-                      const isFetching = fetchingId === `${ep.source}:${ep.id}`
-                      // The visible label is swapped for loading ticks while
-                      // this cell fetches, which used to leave it nameless.
-                      const label = episodeLabel(ep)
-                      return (
-                        <Box
-                          key={`${ep.source}:${ep.id}`}
-                          component="button"
-                          type="button"
-                          onClick={() => void handlePickEpisode(season, ep)}
-                          disabled={fetchingId !== null}
-                          title={ep.title}
-                          aria-label={
-                            ep.title && ep.title !== label
-                              ? `${label} ${ep.title}`
-                              : label
-                          }
-                          sx={{
-                            appearance: 'none',
-                            cursor: 'pointer',
-                            padding: '7px 4px',
-                            border: `2px solid ${
-                              isTarget ? VERMILION : 'transparent'
-                            }`,
-                            boxShadow: isFetching
-                              ? hardShadow(3)
-                              : isTarget
-                                ? `inset 3px 0 0 ${VERMILION}, inset 0 0 0 1px ${alpha(PAPER, 0.22)}`
-                                : `inset 0 0 0 1px ${alpha(PAPER, 0.22)}`,
-                            background: isFetching
-                              ? VERMILION
-                              : isTarget
-                                ? alpha(VERMILION, 0.18)
-                                : 'transparent',
-                            color: isFetching
-                              ? PAPER
-                              : isTarget
-                                ? VERMILION
-                                : alpha(PAPER, 0.8),
-                            fontSize: 11,
-                            fontWeight: 700,
-                            transition:
-                              'border-color 0ms, background 0ms, color 0ms, box-shadow 0ms',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            minHeight: 28,
-                            '&:hover:not(:disabled)': {
-                              borderColor: isTarget ? VERMILION : PAPER,
-                              background: PAPER,
-                              color: INK,
-                            },
-                            '&:focus-visible': {
-                              outline: `2px solid ${VERMILION}`,
-                              outlineOffset: '2px',
-                            },
-                            '&:disabled': {
-                              opacity: 0.5,
-                            },
-                          }}
-                        >
-                          {isFetching ? (
-                            <InkLoadingTicks size={3} />
-                          ) : (
-                            episodeLabel(ep)
-                          )}
-                        </Box>
-                      )
-                    })}
-                  </Box>
-                )}
+                {!loading &&
+                  list &&
+                  (() => {
+                    const resolvedTarget =
+                      target > 0 ? resolveEpisodeTarget(list, target) : null
+                    return (
+                      <Box
+                        sx={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(4, 1fr)',
+                          gap: '6px',
+                        }}
+                      >
+                        {list.map((ep) => {
+                          const isTarget = resolvedTarget
+                            ? ep.id === resolvedTarget.episode.id
+                            : target > 0 &&
+                              String(ep.episodeNumber) === String(target)
+                          const isFetching =
+                            fetchingId === `${ep.source}:${ep.id}`
+                          // The visible label is swapped for loading ticks while
+                          // this cell fetches, which used to leave it nameless.
+                          const label = episodeLabel(ep)
+                          return (
+                            <Box
+                              key={`${ep.source}:${ep.id}`}
+                              component="button"
+                              type="button"
+                              onClick={() => void handlePickEpisode(season, ep)}
+                              disabled={fetchingId !== null}
+                              title={ep.title}
+                              aria-label={
+                                ep.title && ep.title !== label
+                                  ? `${label} ${ep.title}`
+                                  : label
+                              }
+                              sx={{
+                                appearance: 'none',
+                                cursor: 'pointer',
+                                padding: '7px 4px',
+                                border: `2px solid ${
+                                  isTarget ? VERMILION : 'transparent'
+                                }`,
+                                boxShadow: isFetching
+                                  ? hardShadow(3)
+                                  : isTarget
+                                    ? `inset 3px 0 0 ${VERMILION}, inset 0 0 0 1px ${alpha(PAPER, 0.22)}`
+                                    : `inset 0 0 0 1px ${alpha(PAPER, 0.22)}`,
+                                background: isFetching
+                                  ? VERMILION
+                                  : isTarget
+                                    ? alpha(VERMILION, 0.18)
+                                    : 'transparent',
+                                color: isFetching
+                                  ? PAPER
+                                  : isTarget
+                                    ? VERMILION
+                                    : alpha(PAPER, 0.8),
+                                fontSize: 11,
+                                fontWeight: 700,
+                                transition:
+                                  'border-color 0ms, background 0ms, color 0ms, box-shadow 0ms',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                minHeight: 28,
+                                '&:hover:not(:disabled)': {
+                                  borderColor: isTarget ? VERMILION : PAPER,
+                                  background: PAPER,
+                                  color: INK,
+                                },
+                                '&:focus-visible': {
+                                  outline: `2px solid ${VERMILION}`,
+                                  outlineOffset: '2px',
+                                },
+                                '&:disabled': {
+                                  opacity: 0.5,
+                                },
+                              }}
+                            >
+                              {isFetching ? (
+                                <InkLoadingTicks size={3} />
+                              ) : (
+                                episodeLabel(ep)
+                              )}
+                            </Box>
+                          )
+                        })}
+                      </Box>
+                    )
+                  })()}
 
                 {/* Collapse button */}
                 <Box

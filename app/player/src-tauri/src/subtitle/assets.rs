@@ -16,9 +16,11 @@
 //! extracted into a staging dir and renamed into place, so a half-installed
 //! runtime is never mistaken for a working one.
 
+use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -211,12 +213,37 @@ pub enum DownloadEvent {
     Failed { message: String },
 }
 
+static ACTIVE_DOWNLOADS: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
+
+struct DownloadGuard(&'static str);
+
+impl Drop for DownloadGuard {
+    fn drop(&mut self) {
+        if let Some(set) = ACTIVE_DOWNLOADS
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_mut()
+        {
+            set.remove(self.0);
+        }
+    }
+}
+
 /// Download + verify + install, trying each source in order.
 pub fn download(
     app: &tauri::AppHandle,
     spec: &'static AssetSpec,
     on_event: &tauri::ipc::Channel<DownloadEvent>,
 ) -> Result<(), String> {
+    {
+        let mut guard = ACTIVE_DOWNLOADS.lock().unwrap_or_else(|p| p.into_inner());
+        let set = guard.get_or_insert_with(HashSet::new);
+        if !set.insert(spec.id) {
+            return Err("该组件正在下载中，请勿重复启动".to_string());
+        }
+    }
+    let _active = DownloadGuard(spec.id);
+
     if path_of(app, spec)?.is_file() {
         let _ = on_event.send(DownloadEvent::Done);
         return Ok(());
@@ -265,15 +292,28 @@ fn fetch_resumable(
     expected: u64,
     on_event: &tauri::ipc::Channel<DownloadEvent>,
 ) -> Result<(), String> {
-    let have = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
+    let mut have = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
+    if have > expected {
+        let _ = std::fs::remove_file(part);
+        have = 0;
+    }
     if have == expected {
         return Ok(()); // complete from an earlier run; verification decides
     }
     let mut request = agent().get(url);
-    if have > 0 && have < expected {
+    if have > 0 {
         request = request.set("Range", &format!("bytes={have}-"));
     }
-    let response = request.call().map_err(|e| format!("连接失败: {e}"))?;
+    let response = match request.call() {
+        Ok(resp) => resp,
+        Err(ureq::Error::Status(416, _)) if have > 0 => {
+            // Stale/oversized `.part` range rejected by server — reset and retry full download.
+            let _ = std::fs::remove_file(part);
+            have = 0;
+            agent().get(url).call().map_err(|e| format!("连接失败: {e}"))?
+        }
+        Err(e) => return Err(format!("连接失败: {e}")),
+    };
     let resumed = response.status() == 206;
     let mut file = if resumed {
         OpenOptions::new().append(true).open(part)

@@ -69,7 +69,7 @@ pub fn set_data_dir(app: &tauri::AppHandle, dir: &str) -> Result<PathBuf, String
 /// The directory the app would pick on a fresh install (see module docs).
 pub fn default_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     if let Some(letter) = std::env::current_exe().ok().as_deref().and_then(drive_letter) {
-        if letter != 'C' {
+        if letter != 'C' && is_viable_fixed_drive(letter) {
             return Ok(PathBuf::from(format!("{letter}:\\{DIR_NAME}")));
         }
     }
@@ -112,19 +112,27 @@ pub fn free_bytes(_path: &Path) -> Option<u64> {
 }
 
 #[cfg(windows)]
-fn roomiest_fixed_drive() -> Option<char> {
+fn is_viable_fixed_drive(letter: char) -> bool {
     use windows::core::HSTRING;
     use windows::Win32::Storage::FileSystem::GetDriveTypeW;
     const DRIVE_FIXED: u32 = 3;
+    const MIN_FREE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+    let root = format!("{letter}:\\");
+    // SAFETY: valid NUL-terminated wide string.
+    let is_fixed = unsafe { GetDriveTypeW(&HSTRING::from(root.as_str())) == DRIVE_FIXED };
+    is_fixed && free_bytes(Path::new(&root)).is_some_and(|free| free > MIN_FREE_BYTES)
+}
+
+#[cfg(not(windows))]
+fn is_viable_fixed_drive(_letter: char) -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn roomiest_fixed_drive() -> Option<char> {
     ('D'..='Z')
-        .filter(|letter| {
-            let root = format!("{letter}:\\");
-            // SAFETY: valid NUL-terminated wide string.
-            unsafe { GetDriveTypeW(&HSTRING::from(root.as_str())) == DRIVE_FIXED }
-        })
+        .filter(|&letter| is_viable_fixed_drive(letter))
         .filter_map(|letter| free_bytes(Path::new(&format!("{letter}:\\"))).map(|f| (letter, f)))
-        // Below 8 GB the drive cannot hold the models anyway.
-        .filter(|(_, free)| *free > 8 * 1024 * 1024 * 1024)
         .max_by_key(|(_, free)| *free)
         .map(|(letter, _)| letter)
 }

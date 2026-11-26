@@ -1,5 +1,6 @@
 import type { CommentEntity } from '@danmaku-anywhere/danmaku-converter'
 import { useMemo } from 'react'
+import { getSortedCommentTimes } from './commentTimestamps'
 
 /**
  * Infer OP-end and ED-start timestamps from danmaku density. Heuristic:
@@ -16,12 +17,12 @@ export const useOpEdMarks = (
     if (durationKey < 120 || comments.length < 40) {
       return { opEnd: null, edStart: null }
     }
+    const times = getSortedCommentTimes(comments)
     const BIN = 10
     const count = Math.ceil(durationKey / BIN)
     const bins = new Array<number>(count).fill(0)
-    for (const c of comments) {
-      const t = Number.parseFloat(c.p)
-      if (!Number.isFinite(t) || t < 0 || t >= durationKey) continue
+    for (const t of times) {
+      if (t >= durationKey) break
       bins[Math.floor(t / BIN)] += 1
     }
     const avg = comments.length / count

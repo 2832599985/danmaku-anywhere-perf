@@ -298,7 +298,7 @@ const prepareSubLine = (
   }
 }
 
-const drawPreparedSubLine = (
+export const drawPreparedSubLine = (
   ctx: CanvasRenderingContext2D,
   line: PreparedSubLine,
   x: number,
@@ -318,15 +318,18 @@ const drawPreparedSubLine = (
       ctx.strokeStyle = '#0a0a0c'
       ctx.lineWidth = Math.max(2, line.fontPx * 0.14)
       ctx.strokeText(text, x, y)
+      ctx.shadowColor = 'transparent'
+      ctx.shadowBlur = 0
     } else {
       ctx.shadowColor = 'rgba(10, 10, 12, 0.9)'
       ctx.shadowBlur = Math.max(3, line.fontPx * 0.12)
       ctx.shadowOffsetX = 0
       ctx.shadowOffsetY = 0
     }
-    ctx.shadowColor = 'transparent'
     ctx.fillStyle = line.secondary ? 'rgba(244, 241, 232, 0.84)' : '#f4f1e8'
     ctx.fillText(text, x, y)
+    ctx.shadowColor = 'transparent'
+    ctx.shadowBlur = 0
     y += line.lineHeightPx
   }
   return y
@@ -360,7 +363,6 @@ const compositeSubtitles = (
   const scale = outWidth / videoBox.width
   const padX = outWidth * 0.04
   const maxWidth = outWidth - padX * 2
-  const gapPx = Math.max(2, settings.fontSize * scale * 0.16)
   let drewAny = false
 
   ctx.save()
@@ -380,9 +382,13 @@ const compositeSubtitles = (
     }
     if (prepared.length === 0) return
 
+    const rowGapPx = Math.max(
+      2,
+      (prepared[0]?.fontPx ?? settings.fontSize * scale) * 0.16
+    )
     const totalHeight =
       prepared.reduce((sum, p) => sum + p.wrapped.length * p.lineHeightPx, 0) +
-      gapPx * Math.max(0, prepared.length - 1)
+      rowGapPx * Math.max(0, prepared.length - 1)
 
     let y =
       anchor === 'top'
@@ -398,7 +404,7 @@ const compositeSubtitles = (
           : line.align === 'right'
             ? outWidth - padX
             : outWidth / 2
-      y = drawPreparedSubLine(ctx, line, x, y, settings.outline) + gapPx
+      y = drawPreparedSubLine(ctx, line, x, y, settings.outline) + rowGapPx
       drewAny = true
     }
   }

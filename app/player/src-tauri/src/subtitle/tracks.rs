@@ -373,12 +373,30 @@ fn clean_tag(value: Option<String>) -> Option<String> {
     }
 }
 
-/// Probe results, keyed by (path, 0) — the index is always 0 here, it exists
-/// only so both caches can share one helper.
-static TRACKS_FOUND: Mutex<Vec<((String, u32), Vec<SubtitleTrack>)>> = Mutex::new(Vec::new());
-/// Whole converted tracks, keyed by (path, stream index). Spans are never
-/// cached: they are superseded by the full track a moment later.
-static EXTRACTED: Mutex<Vec<((String, u32), ExtractedTrack)>> = Mutex::new(Vec::new());
+type TrackCacheKey = (String, u64, u64, u32);
+
+/// Build a cache key incorporating file size + mtime so re-muxing or replacing
+/// a file at the same path never serves stale embedded subtitle tracks.
+fn track_cache_key(path: &str, index: u32) -> TrackCacheKey {
+    let meta = std::fs::metadata(path).ok();
+    let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+    let mtime = meta
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let normalized = if cfg!(windows) {
+        path.to_lowercase()
+    } else {
+        path.to_string()
+    };
+    (normalized, size, mtime, index)
+}
+
+/// Probe results, keyed by (normalized_path, size, mtime, 0).
+static TRACKS_FOUND: Mutex<Vec<(TrackCacheKey, Vec<SubtitleTrack>)>> = Mutex::new(Vec::new());
+/// Whole converted tracks, keyed by (normalized_path, size, mtime, stream index).
+static EXTRACTED: Mutex<Vec<(TrackCacheKey, ExtractedTrack)>> = Mutex::new(Vec::new());
 
 /// Newest-first lookup that also refreshes recency.
 fn cached<K: PartialEq, V: Clone>(cache: &Mutex<Vec<(K, V)>>, key: &K) -> Option<V> {
@@ -404,7 +422,7 @@ pub fn list_tracks(path: &str) -> Result<Vec<SubtitleTrack>, String> {
     if path.is_empty() {
         return Err("缺少视频路径".to_string());
     }
-    let key = (path.to_string(), 0u32);
+    let key = track_cache_key(path, 0);
     if let Some(tracks) = cached(&TRACKS_FOUND, &key) {
         return Ok(tracks);
     }
@@ -468,7 +486,14 @@ fn out_of_focus(path: &str) -> bool {
 
 /// `focus` names a file and it is not `path` (no focus cancels nothing).
 fn is_other_file(focus: &str, path: &str) -> bool {
-    !focus.is_empty() && focus != path
+    if focus.is_empty() {
+        return false;
+    }
+    if cfg!(windows) {
+        !focus.to_lowercase().eq(&path.to_lowercase())
+    } else {
+        focus != path
+    }
 }
 
 /// ffmpeg arguments that read `span` of one stream to stdout.
@@ -563,7 +588,7 @@ fn extract_span(
 /// Read every text track of the file in one pass and cache each of them;
 /// return the one asked for.
 fn extract_all(path: &str, index: u32, tracks: &[SubtitleTrack]) -> Result<ExtractedTrack, String> {
-    let key = (path.to_string(), index);
+    let key = track_cache_key(path, index);
     // Serialize whole-file reads; whoever waited finds the cache filled.
     let _turn = FULL_EXTRACTION.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(done) = cached(&EXTRACTED, &key) {
@@ -622,7 +647,7 @@ fn extract_all(path: &str, index: u32, tracks: &[SubtitleTrack]) -> Result<Extra
                 wanted = Some(extracted.clone());
             }
             if !extracted.text.trim().is_empty() {
-                remember(&EXTRACTED, (path.to_string(), *stream), extracted, EXTRACT_CACHE);
+                remember(&EXTRACTED, track_cache_key(path, *stream), extracted, EXTRACT_CACHE);
             }
         }
         match wanted {
@@ -647,7 +672,7 @@ pub fn extract_track(
         return Err("缺少视频路径".to_string());
     }
     // A whole track already read beats any span of it.
-    if let Some(done) = cached(&EXTRACTED, &(path.to_string(), index)) {
+    if let Some(done) = cached(&EXTRACTED, &track_cache_key(path, index)) {
         return Ok(done);
     }
     // Refuse bitmap tracks up front: letting ffmpeg fail would surface its

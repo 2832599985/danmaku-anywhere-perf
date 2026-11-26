@@ -384,10 +384,9 @@ export class UpscaleController {
       const targetDimensions = clampToDisplayBounds(
         computeTargetDimensions(this.video, settings.targetResolution)
       )
-      if (this.canvas) {
-        this.canvas.width = targetDimensions.width
-        this.canvas.height = targetDimensions.height
-      }
+      // Let Renderer.buildPipelines update canvas.width/height to the device-
+      // clamped dimensions right when the new pipeline is ready, avoiding both
+      // unclamped resize errors and premature swapchain clearing.
       await this.renderer.updateConfiguration({
         effects: buildEffects(settings),
         targetDimensions,

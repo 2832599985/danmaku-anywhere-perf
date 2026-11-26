@@ -247,23 +247,30 @@ impl Engines {
     /// Borrow a running engine, (re)starting it in the wanted mode. `gpu`
     /// is a request: the lease says what is actually serving.
     pub fn ensure(&self, app: &tauri::AppHandle, engine: Engine, gpu: bool) -> Result<Lease, String> {
-        // Fixed lock order (asr, then mt) — the GPU rule touches both slots.
-        let mut asr = lock(&self.asr);
-        let mut mt = lock(&self.mt);
-        let (slot, other) = match engine {
-            Engine::Asr => (&mut *asr, &mut *mt),
-            Engine::Mt => (&mut *mt, &mut *asr),
+        let (own_mutex, other_mutex) = match engine {
+            Engine::Asr => (&self.asr, &self.mt),
+            Engine::Mt => (&self.mt, &self.asr),
         };
+        // Only hold the opposite engine's mutex momentarily when evicting its
+        // GPU instance so CPU ASR and CPU MT can cold-start concurrently without
+        // blocking each other for up to 180 s during model load.
+        if gpu {
+            let mut other = lock(other_mutex);
+            if other.as_ref().is_some_and(|o| o.gpu) {
+                logging::write(&format!(
+                    "sidecar: stopping GPU {} to make room",
+                    engine_other(engine).name()
+                ));
+                *other = None;
+            }
+        }
+        let mut slot = lock(own_mutex);
         if let Some(running) = slot.as_mut() {
             if running.gpu == gpu && running.sidecar.alive() {
                 return Ok(Lease { base: running.sidecar.base.clone(), gpu });
             }
         }
         *slot = None; // kill the wrong-mode / dead one first
-        if gpu && other.as_ref().is_some_and(|o| o.gpu) {
-            logging::write(&format!("sidecar: stopping GPU {} to make room", engine_other(engine).name()));
-            *other = None;
-        }
         let data = storage::data_dir(app)?;
         let log = |mode: &str| data.join("logs").join(format!("{}-{mode}.log", engine.name()));
         if gpu {
