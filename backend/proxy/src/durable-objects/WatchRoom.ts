@@ -30,7 +30,7 @@ export class WatchRoom extends DurableObject {
     return this.state
   }
 
-  async fetch(request: Request): Promise<Response> {
+  override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
 
     if (url.pathname === '/ws') {
@@ -73,7 +73,10 @@ export class WatchRoom extends DurableObject {
     return new Response('Not found', { status: 404 })
   }
 
-  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+  override async webSocketMessage(
+    ws: WebSocket,
+    message: string | ArrayBuffer
+  ) {
     if (typeof message !== 'string') return
     try {
       const msg: WsMessage = JSON.parse(message)
@@ -83,7 +86,7 @@ export class WatchRoom extends DurableObject {
     }
   }
 
-  async webSocketClose(ws: WebSocket) {
+  override async webSocketClose(ws: WebSocket) {
     const attachment = ws.deserializeAttachment() as UserAttachment | null
     this.broadcast(
       {
@@ -95,7 +98,7 @@ export class WatchRoom extends DurableObject {
     )
   }
 
-  async webSocketError(ws: WebSocket) {
+  override async webSocketError(ws: WebSocket) {
     await this.webSocketClose(ws)
   }
 
