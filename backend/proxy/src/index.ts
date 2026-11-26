@@ -30,7 +30,7 @@ app.use(
       }
       return allowedOrigins[0]
     },
-    allowMethods: ['POST', 'GET', 'OPTIONS'],
+    allowMethods: ['POST', 'GET', 'DELETE', 'OPTIONS'],
   }),
   poweredBy({
     serverName: 'DanmakuAnywhere',

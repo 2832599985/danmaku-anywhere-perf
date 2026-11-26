@@ -16,6 +16,7 @@ interface WsMessage {
   data?: unknown
   userId?: string
   userName?: string
+  memberCount?: number
 }
 
 const ROOM_STATE_KEY = 'room_state'
@@ -43,7 +44,16 @@ export class WatchRoom extends DurableObject {
       this.ctx.acceptWebSocket(server)
       server.serializeAttachment({ userId, userName } satisfies UserAttachment)
 
-      this.broadcast({ type: 'join', userId, userName }, server)
+      const memberCount = this.ctx.getWebSockets().length
+      const state = await this.getRoomState()
+      server.send(
+        JSON.stringify({
+          type: 'sync',
+          memberCount,
+          data: { state },
+        } satisfies WsMessage)
+      )
+      this.broadcast({ type: 'join', userId, userName, memberCount }, server)
 
       return new Response(null, { status: 101, webSocket: client })
     }
@@ -88,11 +98,15 @@ export class WatchRoom extends DurableObject {
 
   override async webSocketClose(ws: WebSocket) {
     const attachment = ws.deserializeAttachment() as UserAttachment | null
+    const remaining = this.ctx
+      .getWebSockets()
+      .filter((s) => s !== ws && s.readyState === WebSocket.OPEN).length
     this.broadcast(
       {
         type: 'leave',
         userId: attachment?.userId,
         userName: attachment?.userName,
+        memberCount: remaining,
       },
       ws
     )

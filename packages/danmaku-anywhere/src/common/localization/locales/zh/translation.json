@@ -112,6 +112,7 @@
     "name": "名称",
     "next": "下一步",
     "pip": "画中画",
+    "refresh": "刷新",
     "regexShort": "正则",
     "reset": "重置",
     "restore": "恢复",
@@ -129,7 +130,15 @@
     "viewDocs": "查看文档"
   },
   "community": {
+    "authRequired": "请先在扩展设置中登录账号",
+    "deleted": "已删除弹幕",
+    "deleteFailed": "删除失败",
+    "empty": "暂无社区弹幕，来发第一条吧！",
     "inputPlaceholder": "发个弹幕吧~",
+    "loadFailed": "加载社区弹幕失败",
+    "noEpisode": "请先匹配或挂载当前剧集弹幕",
+    "sendFailed": "发送弹幕失败",
+    "sent": "弹幕已发送",
     "title": "社区弹幕"
   },
   "configPage": {
@@ -915,7 +924,9 @@
     "unsupported": "当前浏览器不支持 WebGPU"
   },
   "watchParty": {
+    "authRequired": "请先在扩展设置中登录账号",
     "connected": "已连接",
+    "connectFailed": "连接放映室失败",
     "copied": "已复制",
     "create": "创建房间",
     "invite": "复制邀请链接",
@@ -923,6 +934,8 @@
     "leave": "离开房间",
     "members_other": "{{count}}人在线",
     "roomId": "房间号",
+    "synced": "已向房间同步当前播放进度",
+    "syncProgress": "同步我的播放进度",
     "title": "一起看"
   }
 }

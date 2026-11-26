@@ -16,6 +16,7 @@ import { IntegrationPolicyService } from '../options/integrationPolicyStore/serv
 import { NamingRuleService } from '../options/localMatchingRule/service'
 import { MountConfigService } from '../options/mountConfig/service'
 import { ProviderConfigService } from '../options/providerConfig/service'
+import { UserAuthStore } from '../options/userAuth/service'
 
 const uiContainer = new Container({ autobind: true, defaultScope: 'Singleton' })
 
@@ -38,6 +39,7 @@ function initializeStandalone() {
   uiContainer.bind(StoreServiceSymbol).toService(ProviderConfigService)
   uiContainer.bind(StoreServiceSymbol).toService(AiProviderConfigService)
   uiContainer.bind(StoreServiceSymbol).toService(NamingRuleService)
+  uiContainer.bind(StoreServiceSymbol).toService(UserAuthStore)
 }
 
 initializeStandalone()

@@ -429,6 +429,33 @@ export class PlayerCommandHandler {
         'relay:command:seek': async ({ data: time }) => {
           this.manager.seek(time)
         },
+        'relay:command:getPlaybackState': async () => {
+          const video = this.manager.video
+          if (!video) return null
+          return {
+            currentTime: video.currentTime,
+            paused: video.paused,
+          }
+        },
+        'relay:command:setPlaybackState': async ({ data }) => {
+          const video = this.manager.video
+          if (!video) return
+          if (
+            typeof data.currentTime === 'number' &&
+            Number.isFinite(data.currentTime) &&
+            Math.abs(video.currentTime - data.currentTime) > 0.8
+          ) {
+            video.currentTime = data.currentTime
+          }
+          if (data.playing === true && video.paused) {
+            void video.play().catch(() => undefined)
+          } else if (data.playing === false && !video.paused) {
+            video.pause()
+          }
+        },
+        'relay:command:emitComment': async ({ data }) => {
+          this.manager.emitComment(data.text, data.color, data.mode)
+        },
         'relay:command:show': async ({ data: show }) => {
           if (show) {
             this.manager.show()
