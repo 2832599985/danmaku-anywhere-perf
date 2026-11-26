@@ -213,6 +213,25 @@ export type PlayerRelayCommands = {
   'relay:command:unmount': RPCDef<InputWithFrameId<void>, boolean, FrameContext>
   'relay:command:start': RPCDef<InputWithFrameId<string>, void, FrameContext>
   'relay:command:seek': RPCDef<InputWithFrameId<number>, void, FrameContext>
+  'relay:command:getPlaybackState': RPCDef<
+    InputWithFrameId<void>,
+    { currentTime: number; paused: boolean } | null,
+    FrameContext
+  >
+  'relay:command:setPlaybackState': RPCDef<
+    InputWithFrameId<{ playing?: boolean; currentTime?: number }>,
+    void,
+    FrameContext
+  >
+  'relay:command:emitComment': RPCDef<
+    InputWithFrameId<{
+      text: string
+      color?: string
+      mode?: 'rtl' | 'top' | 'bottom'
+    }>,
+    void,
+    FrameContext
+  >
   'relay:command:enterPip': RPCDef<InputWithFrameId<void>, void, FrameContext>
   'relay:command:show': RPCDef<InputWithFrameId<boolean>, void, FrameContext>
   'relay:command:skipOp': RPCDef<InputWithFrameId<void>, void, FrameContext>

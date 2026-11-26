@@ -112,6 +112,7 @@
     "name": "Name",
     "next": "Next",
     "pip": "Picture-in-Picture",
+    "refresh": "Refresh",
     "regexShort": "Regex",
     "reset": "Reset",
     "restore": "Restore",
@@ -129,7 +130,15 @@
     "viewDocs": "View Docs"
   },
   "community": {
+    "authRequired": "Please sign in via Extension Settings first",
+    "deleted": "Comment deleted",
+    "deleteFailed": "Failed to delete comment",
+    "empty": "No community comments yet — send the first one!",
     "inputPlaceholder": "Type a danmaku...",
+    "loadFailed": "Failed to load community comments",
+    "noEpisode": "Mount or match an episode first",
+    "sendFailed": "Failed to send comment",
+    "sent": "Comment sent",
     "title": "Community"
   },
   "configPage": {
@@ -920,7 +929,9 @@
     "unsupported": "WebGPU is not supported by this browser"
   },
   "watchParty": {
+    "authRequired": "Please sign in via Extension Settings first",
     "connected": "Connected",
+    "connectFailed": "Failed to connect to room",
     "copied": "Copied",
     "create": "Create Room",
     "invite": "Copy Invite Link",
@@ -929,6 +940,8 @@
     "members_one": "{{count}} online",
     "members_other": "{{count}} online",
     "roomId": "Room ID",
+    "synced": "Playback synced to room",
+    "syncProgress": "Sync My Playback",
     "title": "Watch Party"
   }
 }

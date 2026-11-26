@@ -492,6 +492,15 @@ export class RpcManager {
         'relay:command:seek': passThrough(
           relayFrameClient['relay:command:seek']
         ),
+        'relay:command:getPlaybackState': passThrough(
+          relayFrameClient['relay:command:getPlaybackState']
+        ),
+        'relay:command:setPlaybackState': passThrough(
+          relayFrameClient['relay:command:setPlaybackState']
+        ),
+        'relay:command:emitComment': passThrough(
+          relayFrameClient['relay:command:emitComment']
+        ),
         'relay:command:show': passThrough(
           relayFrameClient['relay:command:show']
         ),

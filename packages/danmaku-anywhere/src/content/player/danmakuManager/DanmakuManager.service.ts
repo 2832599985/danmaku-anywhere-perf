@@ -338,6 +338,37 @@ export class DanmakuManagerService {
     }
   }
 
+  emitComment(
+    text: string,
+    color = '#ffffff',
+    mode: 'rtl' | 'top' | 'bottom' = 'rtl'
+  ) {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    const now = this.video?.currentTime ?? 0
+    if (!this.isMounted && this.video) {
+      const modeNum = mode === 'top' ? 5 : mode === 'bottom' ? 4 : 1
+      this.mount([
+        {
+          cid: Date.now(),
+          p: `${now.toFixed(2)},${modeNum},16777215`,
+          m: trimmed,
+        },
+      ])
+      return
+    }
+    this.renderer.manager?.unshift(
+      {
+        text: trimmed,
+        mode: 'rtl',
+        time: now,
+        style: {},
+        color,
+      },
+      { progress: 0 }
+    )
+  }
+
   private removeContainer() {
     this.nodes.container.remove()
   }

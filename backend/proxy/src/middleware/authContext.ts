@@ -25,8 +25,22 @@ export const authContext = () =>
     try {
       setWaitUntil(context.executionCtx.waitUntil)
       const auth = await getOrCreateAuth(context.env)
+      let reqHeaders = context.req.raw.headers
+      if (
+        !reqHeaders.get('Authorization') &&
+        reqHeaders.get('Upgrade')?.toLowerCase() === 'websocket'
+      ) {
+        const queryToken = new URL(context.req.url).searchParams
+          .get('token')
+          ?.trim()
+        if (queryToken) {
+          reqHeaders = new Headers(reqHeaders)
+          reqHeaders.set('Authorization', `Bearer ${queryToken}`)
+        }
+      }
+
       const { user, session } = await resolveAuthSession(
-        context.req.raw.headers,
+        reqHeaders,
         (headers) => auth.api.getSession({ headers })
       )
 
