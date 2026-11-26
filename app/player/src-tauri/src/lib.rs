@@ -83,8 +83,8 @@ pub fn run() {
             }
         })
         // Async variant so large-file range reads happen off the UI thread.
-        .register_asynchronous_uri_scheme_protocol("stream", |_ctx, request, responder| {
-            stream::handle(request, responder);
+        .register_asynchronous_uri_scheme_protocol("stream", |ctx, request, responder| {
+            stream::handle(ctx.webview_label(), request, responder);
         })
         .run(tauri::generate_context!())
         .expect("error while running the Danmaku Player application");

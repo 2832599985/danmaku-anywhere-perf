@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { getPlatform } from '@/platform'
 import { usePlayerCommands } from '@/player/commands'
+import { getSortedCommentTimes } from '@/player/commentTimestamps'
 import { useOpEdMarks } from '@/player/useOpEdMarks'
 import { usePlayerStore } from '@/store/playerStore'
 import type { TargetResolution } from '@/store/settings'
@@ -118,7 +119,12 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
   const holdControls = usePlayerStore((s) => s.holdControls)
 
   const [rateAnchor, setRateAnchor] = useState<HTMLElement | null>(null)
-  const [densityHover, setDensityHover] = useState<number | null>(null)
+  const [hoveredBucket, setHoveredBucket] = useState(-1)
+  const handleHoverRatio = useCallback((ratio: number | null) => {
+    const next =
+      ratio === null ? -1 : Math.min(47, Math.max(0, Math.floor(ratio * 48)))
+    setHoveredBucket((prev) => (prev === next ? prev : next))
+  }, [])
   const barRef = useRef<HTMLDivElement | null>(null)
   const [barHeight, setBarHeight] = useState(0)
 
@@ -177,9 +183,8 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
     if (durationKey <= 0 || comments.length === 0) return null
     const BUCKETS = 48
     const bins = new Array<number>(BUCKETS).fill(0)
-    for (const c of comments) {
-      const t = Number.parseFloat(c.p)
-      if (!Number.isFinite(t) || t < 0) continue
+    const times = getSortedCommentTimes(comments)
+    for (const t of times) {
       const idx = Math.min(BUCKETS - 1, Math.floor((t / durationKey) * BUCKETS))
       bins[idx] += 1
     }
@@ -201,27 +206,11 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
   const playbackSettings = usePlayerStore((s) => s.playbackSettings)
   const currentTime = usePlayerStore((s) => s.playback.currentTime)
 
-  // OP/ED marks for the skip-OP button.
+  // OP/ED marks for the skip-OP button (auto-skip itself runs in PlayerHost so
+  // it has no render-phase side effects and stays active in Mini Player).
   const { opEnd } = useOpEdMarks(comments, duration)
   const showSkipOp =
     playbackSettings.skipOpEd !== 'off' && opEnd !== null && currentTime < opEnd
-  const autoSkippedRef = useRef(false)
-
-  // Auto-skip OP when mode is 'auto' and we're in the OP zone.
-  if (
-    playbackSettings.skipOpEd === 'auto' &&
-    opEnd !== null &&
-    currentTime > 1 &&
-    currentTime < opEnd &&
-    !autoSkippedRef.current
-  ) {
-    autoSkippedRef.current = true
-    commands.seekTo(opEnd)
-  }
-  // Reset auto-skip flag when media changes or OP ends.
-  if (currentTime >= (opEnd ?? Number.POSITIVE_INFINITY) || currentTime < 1) {
-    autoSkippedRef.current = false
-  }
 
   const peakClock = (sec: number) => {
     const s = Math.max(0, Math.floor(sec))
@@ -235,10 +224,6 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
   }
 
   const playedRatio = duration > 0 ? currentTime / duration : 0
-  const hoveredBucket =
-    densityHover === null
-      ? -1
-      : Math.min(47, Math.max(0, Math.floor(densityHover * 48)))
 
   return (
     <>
@@ -527,7 +512,7 @@ export const Controls = ({ visible, onHeightChange }: ControlsProps) => {
             </>
           )}
 
-          <ProgressBar onHoverRatio={setDensityHover} />
+          <ProgressBar onHoverRatio={handleHoverRatio} />
         </Box>
 
         {/* control row */}

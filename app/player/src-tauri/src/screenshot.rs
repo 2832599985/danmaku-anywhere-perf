@@ -44,10 +44,7 @@ fn rgba_to_dib(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> 
     for y in (0..height as usize).rev() {
         let row = &rgba[y * row_bytes..(y + 1) * row_bytes];
         for px in row.chunks_exact(4) {
-            out.push(px[2]); // B
-            out.push(px[1]); // G
-            out.push(px[0]); // R
-            out.push(px[3]); // A
+            out.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
         }
     }
     Ok(out)
@@ -255,5 +252,25 @@ mod tests {
         assert!(p1.file_name().unwrap().to_str().unwrap() == "番剧_01__.png");
         assert!(p2.file_name().unwrap().to_str().unwrap() == "番剧_01___1.png");
         let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rgba_to_dib_writes_bottom_up_bgra_rows() {
+        // 2x2 RGBA: top row [Red, Green], bottom row [Blue, White]
+        let rgba = [
+            255, 0, 0, 255, 0, 255, 0, 255, // y=0
+            0, 0, 255, 128, 255, 255, 255, 255, // y=1
+        ];
+        let dib = rgba_to_dib(2, 2, &rgba).expect("valid 2x2 dib");
+        assert_eq!(dib.len(), 40 + 16);
+        // Bottom row (y=1) comes first in BGRA order: Blue=[255,0,0,128], White=[255,255,255,255]
+        assert_eq!(&dib[40..48], &[255, 0, 0, 128, 255, 255, 255, 255]);
+        // Top row (y=0) comes second in BGRA order: Red=[0,0,255,255], Green=[0,255,0,255]
+        assert_eq!(&dib[48..56], &[0, 0, 255, 255, 0, 255, 0, 255]);
     }
 }

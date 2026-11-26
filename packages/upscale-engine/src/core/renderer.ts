@@ -384,8 +384,10 @@ export class Renderer {
       // 监听设备丢失事件并尝试自动恢复
       this.watchDeviceLoss()
 
-      // 检查是否需要使用 ImageBitmap 回退方案
-      const supportsVideoTexture = await Renderer.detectWebGPUFeatures()
+      // 检查是否需要使用 ImageBitmap 回退方案（直接复用已创建的 device，避免冷启动重复请求 GPUDevice）
+      const supportsVideoTexture = await Renderer.detectWebGPUFeatures(
+        this.device
+      )
       this.useImageBitmapFallback = !supportsVideoTexture
       if (this.useImageBitmapFallback) {
         console.log(
@@ -930,7 +932,9 @@ export class Renderer {
   /**
    * 检测当前环境的 WebGPU 实现是否支持直接从 VideoFrame 复制纹理。
    */
-  public static async detectWebGPUFeatures(): Promise<boolean> {
+  public static async detectWebGPUFeatures(
+    existingDevice?: GPUDevice
+  ): Promise<boolean> {
     // 如果已经检测过，直接返回结果
     if (Renderer.hasCheckedWebGPUFeatures) {
       return Renderer.webgpuFeatureCheckPromise ?? false
@@ -943,11 +947,15 @@ export class Renderer {
 
     // 开始检测
     Renderer.webgpuFeatureCheckPromise = (async () => {
+      let temporaryDevice: GPUDevice | undefined
       try {
-        // 在 initialize() 中已经检测了基本的 WebGPU 支持，这里只需要检测 VideoFrame 支持
-
-        const adapter = await navigator.gpu.requestAdapter()
-        const device = await adapter?.requestDevice()
+        // 优先复用调用方已创建的 GPUDevice，避免冷启动额外创建并销毁第二套 Adapter/Device
+        let device = existingDevice
+        if (!device) {
+          const adapter = await navigator.gpu.requestAdapter()
+          temporaryDevice = await adapter?.requestDevice()
+          device = temporaryDevice
+        }
         if (!device) {
           throw new Error('Failed to get GPU device.')
         }
@@ -959,7 +967,6 @@ export class Renderer {
         if (!context) {
           throw new Error('Failed to get 2d context from OffscreenCanvas')
         }
-        // context.fillStyle = 'black';
         context.fillRect(0, 0, 1, 1)
         // 创建一个最小化的 VideoFrame 和 GPUTexture 用于测试
         const frame = new VideoFrame(offscreenCanvas, { timestamp: 0 })
@@ -970,16 +977,16 @@ export class Renderer {
         })
 
         // 核心测试：此操作如果不支持会抛出异常
-        device.queue.copyExternalImageToTexture(
-          { source: frame },
-          { texture },
-          [1, 1]
-        )
-
-        // 清理资源
-        frame.close()
-        texture.destroy()
-        device.destroy()
+        try {
+          device.queue.copyExternalImageToTexture(
+            { source: frame },
+            { texture },
+            [1, 1]
+          )
+        } finally {
+          frame.close()
+          texture.destroy()
+        }
 
         // 如果成功，则说明支持
         console.log(
@@ -995,6 +1002,8 @@ export class Renderer {
         )
         Renderer.hasCheckedWebGPUFeatures = true
         return false
+      } finally {
+        temporaryDevice?.destroy()
       }
     })()
 
@@ -1776,9 +1785,35 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
         if (this.resourceRebuildEpoch !== epoch) return
         this.resourceRebuildPromise = null
         this.syncPresentationLoop()
+        // When paused, requestVideoFrameCallback stays dormant; re-render the
+        // current frame immediately so mode/tier/resolution switches update on
+        // screen instead of freezing on stale pixels or a cleared black canvas.
+        if (this.video.paused && !this.hasProcessedFrame) {
+          void this.refreshPausedFrame()
+        }
       })
 
     return operationPromise
+  }
+
+  private async refreshPausedFrame(): Promise<void> {
+    if (
+      this.destroyed ||
+      this.isRecovering ||
+      this.resourceRebuildPromise ||
+      !this.video.paused ||
+      this.hasProcessedFrame ||
+      this.video.readyState < this.video.HAVE_CURRENT_DATA
+    ) {
+      return
+    }
+    if (await this.processFrame(performance.now())) {
+      if (this.shouldRunPresentationLoop()) {
+        this.startPresentationLoop()
+      } else {
+        this.notifyFirstFrameRendered()
+      }
+    }
   }
 
   /**

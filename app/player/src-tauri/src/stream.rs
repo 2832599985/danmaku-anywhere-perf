@@ -30,8 +30,21 @@ const MAX_CHUNK: u64 = 8 * 1024 * 1024; // 8 MiB
 ///
 /// Runs the (blocking) file I/O on a dedicated thread and resolves the async
 /// responder when done, keeping the UI thread responsive.
-pub fn handle(request: Request<Vec<u8>>, responder: UriSchemeResponder) {
-    std::thread::spawn(move || {
+pub fn handle(webview_label: &str, request: Request<Vec<u8>>, responder: UriSchemeResponder) {
+    // Security boundary: external login/bridge webviews (`bilibili-login`,
+    // `tencent-login`, etc.) share the custom URI scheme handler and must
+    // never be allowed to read local files on disk via `http://stream.localhost/`.
+    if webview_label != "main" {
+        let forbidden = Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+            .body(b"forbidden".to_vec())
+            .unwrap_or_else(|_| Response::new(Vec::new()));
+        responder.respond(forbidden);
+        return;
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
         let response = build_response(&request);
         responder.respond(response);
     });

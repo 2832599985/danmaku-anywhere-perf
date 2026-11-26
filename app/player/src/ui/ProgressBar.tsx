@@ -2,6 +2,10 @@ import { alpha, Box, Typography } from '@mui/material'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { preparedUrlForPath } from '@/platform/prepared'
 import { usePlayerCommands } from '@/player/commands'
+import {
+  countCommentsInRange,
+  getSortedCommentTimes,
+} from '@/player/commentTimestamps'
 import { useOpEdMarks } from '@/player/useOpEdMarks'
 import { usePlayerStore } from '@/store/playerStore'
 import {
@@ -177,15 +181,11 @@ export const ProgressBar = ({ onHoverRatio }: ProgressBarProps) => {
   // Only this throttled timestamp drives the hidden video seek.
   const frameTime = frameRatio !== null ? frameRatio * duration : null
 
+  const sortedTimes = useMemo(() => getSortedCommentTimes(comments), [comments])
   const commentsNearTip = useMemo(() => {
-    if (!showTip || comments.length === 0) return 0
-    let n = 0
-    for (const c of comments) {
-      const t = Number.parseFloat(c.p)
-      if (Number.isFinite(t) && Math.abs(t - tipTime) <= 5) n += 1
-    }
-    return n
-  }, [showTip, tipTime, comments])
+    if (!showTip || sortedTimes.length === 0) return 0
+    return countCommentsInRange(sortedTimes, tipTime - 5, tipTime + 5)
+  }, [showTip, tipTime, sortedTimes])
 
   const marks = useOpEdMarks(comments, duration)
 

@@ -61,7 +61,11 @@ import { Osd } from '@/ui/Osd'
 import { PlaylistDrawer } from '@/ui/PlaylistDrawer'
 import { SettingsDrawer } from '@/ui/SettingsDrawer'
 import { TopBar } from '@/ui/TopBar'
-import { type PlayerCommands, PlayerCommandsContext } from './commands'
+import {
+  type PlayerCommands,
+  PlayerCommandsContext,
+  usePlayerCommands,
+} from './commands'
 import { DanmakuController } from './danmaku/DanmakuController'
 import { detectHdrTransfer } from './detectHdr'
 import { FullscreenPortalContext } from './fullscreenPortal'
@@ -81,6 +85,7 @@ import { SubtitleController } from './subtitle/SubtitleController'
 import { SubtitleRenderer } from './subtitle/SubtitleRenderer'
 import { UpscaleController } from './upscale/UpscaleController'
 import { useKeyboardControls } from './useKeyboardControls'
+import { useOpEdMarks } from './useOpEdMarks'
 import { useVideoElement } from './useVideoElement'
 
 const DANMAKU_EXTENSIONS = new Set(['xml', 'json', 'txt'])
@@ -92,6 +97,45 @@ const THUMB_PERIOD_MS = 15_000
 const SINGLE_CLICK_DELAY_MS = 250
 
 const basename = (p: string): string => p.split(/[\\/]/).pop() || p
+
+/**
+ * Headless OP auto-skipper mounted at stage level so it works in Mini Player
+ * too, runs inside `useEffect` (never during render), and only auto-skips once
+ * per loaded media key so manually seeking back into the OP never loops.
+ */
+const AutoSkipOp = () => {
+  const commands = usePlayerCommands()
+  const skipOpEd = usePlayerStore((s) => s.playbackSettings.skipOpEd)
+  const mediaKey = usePlayerStore((s) =>
+    s.media ? (s.media.path ?? s.media.url) : null
+  )
+  const comments = usePlayerStore((s) => s.comments)
+  const duration = usePlayerStore((s) => s.playback.duration)
+  const currentTime = usePlayerStore((s) =>
+    s.playbackSettings.skipOpEd === 'auto' ? s.playback.currentTime : 0
+  )
+  const { opEnd } = useOpEdMarks(comments, duration)
+  const skippedMediaRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (mediaKey === null) {
+      skippedMediaRef.current = null
+      return
+    }
+    if (
+      skipOpEd === 'auto' &&
+      opEnd !== null &&
+      currentTime > 1 &&
+      currentTime < opEnd &&
+      skippedMediaRef.current !== mediaKey
+    ) {
+      skippedMediaRef.current = mediaKey
+      commands.seekTo(opEnd)
+    }
+  }, [skipOpEd, mediaKey, opEnd, currentTime, commands])
+
+  return null
+}
 
 /**
  * Pause until the browser is idle (or `delayMs` has passed). Used after the
@@ -1747,6 +1791,7 @@ export const PlayerHost = ({ platform }: PlayerHostProps) => {
               </Alert>
             )}
 
+            <AutoSkipOp />
             <Osd />
             <AiSubtitleOverlay />
             {miniPlayer ? (

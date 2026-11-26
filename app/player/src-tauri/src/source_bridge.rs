@@ -81,30 +81,34 @@ struct PagePayload {
     error: Option<String>,
 }
 
-/// Shared bridge state. `ready` flips when the hidden page has finished
-/// loading; no page script is involved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowState {
+    Loading,
+    Ready,
+    Failed,
+}
+
+/// Shared bridge state. `window_lock` serializes cold-start hidden WebView2
+/// creation so parallel auto-match searches never collide on duplicate labels.
 pub struct SourceBridge {
-    ready: Mutex<HashMap<&'static str, bool>>,
+    window_lock: Mutex<()>,
+    state: Mutex<HashMap<&'static str, WindowState>>,
 }
 
 impl SourceBridge {
     pub fn new() -> Self {
         Self {
-            ready: Mutex::new(HashMap::new()),
+            window_lock: Mutex::new(()),
+            state: Mutex::new(HashMap::new()),
         }
     }
 
-    fn is_ready(&self, source: Source) -> bool {
-        *self
-            .ready
-            .lock()
-            .unwrap()
-            .get(source.key())
-            .unwrap_or(&false)
+    fn state_of(&self, source: Source) -> Option<WindowState> {
+        self.state.lock().unwrap().get(source.key()).copied()
     }
 
-    fn set_ready(&self, source: Source, value: bool) {
-        self.ready.lock().unwrap().insert(source.key(), value);
+    fn set_state(&self, source: Source, value: WindowState) {
+        self.state.lock().unwrap().insert(source.key(), value);
     }
 }
 
@@ -284,11 +288,16 @@ mod imp {
     async fn wait_ready(bridge: &Arc<SourceBridge>, source: Source) -> Result<(), String> {
         let started = std::time::Instant::now();
         while started.elapsed() < READY_TIMEOUT {
-            if bridge.is_ready(source) {
-                return Ok(());
+            match bridge.state_of(source) {
+                Some(WindowState::Ready) => return Ok(()),
+                Some(WindowState::Failed) => {
+                    return Err("source page failed to load".into());
+                }
+                _ => {}
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+        bridge.set_state(source, WindowState::Failed);
         Err("source page did not load".into())
     }
 
@@ -339,14 +348,21 @@ mod imp {
             r#"(async () => {{
   try {{
     if (location.hostname === 'www.bilibili.com' && !window.__DA_BILI_READY) {{
-      try {{
-        const spi = await fetch('https://api.bilibili.com/x/frontend/finger/spi', {{ credentials: 'include' }}).then(r => r.json());
-        if (spi && spi.data && spi.data.b_3) {{
-          document.cookie = 'buvid3=' + spi.data.b_3 + '; domain=.bilibili.com; path=/; secure; samesite=none';
-          document.cookie = 'buvid4=' + spi.data.b_4 + '; domain=.bilibili.com; path=/; secure; samesite=none';
-        }}
-      }} catch (_) {{}}
-      window.__DA_BILI_READY = true;
+      if (!window.__DA_BILI_SPI_PROMISE) {{
+        window.__DA_BILI_SPI_PROMISE = (async () => {{
+          try {{
+            const spi = await fetch('https://api.bilibili.com/x/frontend/finger/spi', {{ credentials: 'include' }}).then(r => r.json());
+            if (spi && spi.data && spi.data.b_3) {{
+              document.cookie = 'buvid3=' + spi.data.b_3 + '; domain=.bilibili.com; path=/; secure; samesite=none';
+              document.cookie = 'buvid4=' + spi.data.b_4 + '; domain=.bilibili.com; path=/; secure; samesite=none';
+              window.__DA_BILI_READY = true;
+            }}
+          }} catch (_) {{}} finally {{
+            window.__DA_BILI_SPI_PROMISE = null;
+          }}
+        }})();
+      }}
+      await window.__DA_BILI_SPI_PROMISE;
     }}
     const res = await fetch({url_json}, {init_json});
     if (res.status === 412) window.__DA_BILI_READY = false;
@@ -364,13 +380,21 @@ mod imp {
         bridge: &Arc<SourceBridge>,
         source: Source,
     ) -> tauri::Result<WebviewWindow> {
+        let _guard = bridge.window_lock.lock().unwrap_or_else(|p| p.into_inner());
+        let url = url::Url::parse(source.origin_page()).map_err(tauri::Error::InvalidUrl)?;
         if let Some(window) = app.get_webview_window(source.window_label()) {
+            // Recover from a previous offline/error-page load instead of
+            // leaving the hidden window permanently unusable for the session.
+            if bridge.state_of(source) == Some(WindowState::Failed) {
+                bridge.set_state(source, WindowState::Loading);
+                let _ = window.navigate(url);
+            }
             return Ok(window);
         }
-        bridge.set_ready(source, false);
+        bridge.set_state(source, WindowState::Loading);
 
-        let url = url::Url::parse(source.origin_page()).map_err(tauri::Error::InvalidUrl)?;
-        let host = source.host().to_string();
+        let host_nav = source.host().to_string();
+        let host_load = source.host().to_string();
         let bridge_for_page = bridge.clone();
         let window =
             WebviewWindowBuilder::new(app, source.window_label(), WebviewUrl::External(url))
@@ -379,10 +403,18 @@ mod imp {
                 .skip_taskbar(true)
                 .decorations(false)
                 .focused(false)
-                .on_navigation(move |url| url.host_str() == Some(host.as_str()))
+                .on_navigation(move |url| url.host_str() == Some(host_nav.as_str()))
                 .on_page_load(move |_window, payload| {
                     if payload.event() == PageLoadEvent::Finished {
-                        bridge_for_page.set_ready(source, true);
+                        let ok = payload.url().host_str() == Some(host_load.as_str());
+                        bridge_for_page.set_state(
+                            source,
+                            if ok {
+                                WindowState::Ready
+                            } else {
+                                WindowState::Failed
+                            },
+                        );
                     }
                 })
                 .build()?;

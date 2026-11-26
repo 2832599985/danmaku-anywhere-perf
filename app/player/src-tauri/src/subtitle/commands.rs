@@ -173,9 +173,13 @@ pub fn subtitle_transcribe(
 /// Stop the running recognition task. The recognition server is killed too:
 /// an in-flight request ends at once, and a GPU instance frees its VRAM.
 #[tauri::command]
-pub fn subtitle_cancel(app: AppHandle) -> Result<(), String> {
+pub async fn subtitle_cancel(app: AppHandle) -> Result<(), String> {
     if app.state::<TaskRegistry>().request_cancel() {
-        app.state::<Engines>().stop(Engine::Asr);
+        tauri::async_runtime::spawn_blocking(move || {
+            app.state::<Engines>().stop(Engine::Asr);
+        })
+        .await
+        .map_err(|e| format!("取消任务线程异常: {e}"))?;
     }
     Ok(())
 }
@@ -214,9 +218,13 @@ pub async fn subtitle_translate(
 
 /// Give engines back: `gpu_only` frees VRAM and keeps CPU engines warm.
 #[tauri::command]
-pub fn subtitle_release(app: AppHandle, gpu_only: bool) -> Result<(), String> {
-    app.state::<Engines>().release(gpu_only);
-    logging::write(&format!("release engines gpu_only={gpu_only}"));
+pub async fn subtitle_release(app: AppHandle, gpu_only: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<Engines>().release(gpu_only);
+        logging::write(&format!("release engines gpu_only={gpu_only}"));
+    })
+    .await
+    .map_err(|e| format!("释放引擎线程异常: {e}"))?;
     Ok(())
 }
 
