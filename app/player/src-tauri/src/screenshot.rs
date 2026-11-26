@@ -253,11 +253,6 @@ mod tests {
         assert!(p2.file_name().unwrap().to_str().unwrap() == "番剧_01___1.png");
         let _ = fs::remove_dir_all(&dir);
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn rgba_to_dib_writes_bottom_up_bgra_rows() {

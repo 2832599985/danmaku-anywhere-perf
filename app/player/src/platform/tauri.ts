@@ -69,6 +69,29 @@ const listFiles = async (
  * Tauri adapter. Plugin modules are imported lazily so the browser bundle never
  * evaluates them.
  */
+/**
+ * Convert a raw binary `tauri::ipc::Response` (`ArrayBuffer` / `Uint8Array`)
+ * from `thumb_load` into a JPEG `Blob` without copying when backed by a plain
+ * `ArrayBuffer`, returning `null` when no thumbnail exists (`byteLength === 0`).
+ */
+export const jpegBlobFromIpcPayload = (
+  raw: ArrayBuffer | Uint8Array | number[] | null | undefined
+): Blob | null => {
+  if (!raw) return null
+  if (raw instanceof ArrayBuffer) {
+    return raw.byteLength > 0 ? new Blob([raw], { type: 'image/jpeg' }) : null
+  }
+  if (raw instanceof Uint8Array) {
+    if (raw.byteLength === 0) return null
+    const copy = new Uint8Array(raw.byteLength)
+    copy.set(raw)
+    return new Blob([copy], { type: 'image/jpeg' })
+  }
+  return raw.length > 0
+    ? new Blob([new Uint8Array(raw)], { type: 'image/jpeg' })
+    : null
+}
+
 export const tauriPlatform: Platform = {
   isTauri: true,
 
@@ -289,15 +312,20 @@ export const tauriPlatform: Platform = {
 
   async saveResumeThumb(path: string, jpeg: Uint8Array): Promise<void> {
     const { invoke } = await import('@tauri-apps/api/core')
-    await invoke('thumb_save', { key: path, data: Array.from(jpeg) })
+    await invoke('thumb_save', jpeg, {
+      headers: {
+        'x-key': encodeURIComponent(path),
+      },
+    })
   },
 
   async loadResumeThumb(path: string): Promise<Blob | null> {
     const { invoke } = await import('@tauri-apps/api/core')
-    const bytes = await invoke<number[] | null>('thumb_load', { key: path })
-    return bytes?.length
-      ? new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' })
-      : null
+    const raw = await invoke<ArrayBuffer | Uint8Array | number[] | null>(
+      'thumb_load',
+      { key: path }
+    )
+    return jpegBlobFromIpcPayload(raw)
   },
 
   async deleteResumeThumb(path: string): Promise<void> {
