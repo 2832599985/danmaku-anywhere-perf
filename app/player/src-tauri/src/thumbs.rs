@@ -6,6 +6,11 @@
 //! that moment never reached disk (WebView2 commits DOM storage lazily, and the
 //! process is gone first). Here the frontend awaits the write before letting
 //! the window close.
+//!
+//! Both `thumb_save` and `thumb_load` use Tauri v2's raw binary IPC
+//! (`InvokeBody::Raw` and `tauri::ipc::Response`) so JPEG payloads cross the
+//! WebView boundary as raw bytes (`ArrayBuffer` / `Uint8Array`) instead of
+//! 4x-inflated JSON decimal number arrays.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -31,6 +36,22 @@ fn thumbs_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .app_cache_dir()
         .map_err(|e| format!("无法定位缓存目录: {e}"))?
         .join("thumbs"))
+}
+
+fn decode_key_header(raw: &str) -> Option<String> {
+    let decoded = urlencoding::decode(raw).ok()?;
+    if decoded.is_empty() {
+        None
+    } else {
+        Some(decoded.into_owned())
+    }
+}
+
+fn raw_body(request: tauri::ipc::Request<'_>) -> Result<Vec<u8>, String> {
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => Ok(bytes.clone()),
+        tauri::ipc::InvokeBody::Json(_) => Err("缩略图数据格式错误".to_string()),
+    }
 }
 
 /// Delete the oldest `.jpg` files past `max`.
@@ -68,7 +89,17 @@ fn save(dir: &Path, key: &str, data: &[u8]) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn thumb_save(app: tauri::AppHandle, key: String, data: Vec<u8>) -> Result<(), String> {
+pub async fn thumb_save(
+    app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<(), String> {
+    let key = request
+        .headers()
+        .get("x-key")
+        .and_then(|v| v.to_str().ok())
+        .and_then(decode_key_header)
+        .ok_or_else(|| "缺少缩略图路径标识".to_string())?;
+    let data = raw_body(request)?;
     let dir = thumbs_dir(&app)?;
     tauri::async_runtime::spawn_blocking(move || save(&dir, &key, &data))
         .await
@@ -76,16 +107,25 @@ pub async fn thumb_save(app: tauri::AppHandle, key: String, data: Vec<u8>) -> Re
 }
 
 #[tauri::command]
-pub async fn thumb_load(app: tauri::AppHandle, key: String) -> Result<Option<Vec<u8>>, String> {
+pub async fn thumb_load(
+    app: tauri::AppHandle,
+    key: String,
+) -> Result<tauri::ipc::Response, String> {
     let path = thumbs_dir(&app)?.join(file_name(&key));
-    Ok(fs::read(path).ok())
+    let bytes = tauri::async_runtime::spawn_blocking(move || fs::read(path).unwrap_or_default())
+        .await
+        .map_err(|e| format!("缩略图读取任务失败: {e}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 #[tauri::command]
 pub async fn thumb_delete(app: tauri::AppHandle, key: String) -> Result<(), String> {
     let path = thumbs_dir(&app)?.join(file_name(&key));
-    let _ = fs::remove_file(path);
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || {
+        let _ = fs::remove_file(path);
+    })
+    .await
+    .map_err(|e| format!("缩略图删除任务失败: {e}"))
 }
 
 #[cfg(test)]
@@ -93,7 +133,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("danmaku-thumbs-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("danmaku-thumbs-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         dir
     }
@@ -103,6 +144,16 @@ mod tests {
         assert_eq!(file_name("C:\\a.mkv"), file_name("C:\\a.mkv"));
         assert_ne!(file_name("C:\\a.mkv"), file_name("C:\\b.mkv"));
         assert!(file_name("x").ends_with(".jpg"));
+    }
+
+    #[test]
+    fn decode_key_header_preserves_windows_cjk_paths() {
+        let encoded = urlencoding::encode(r"D:\番剧\葬送的芙莉莲 [01].mkv");
+        assert_eq!(
+            decode_key_header(&encoded).as_deref(),
+            Some(r"D:\番剧\葬送的芙莉莲 [01].mkv")
+        );
+        assert_eq!(decode_key_header(""), None);
     }
 
     #[test]
